@@ -74,3 +74,34 @@ Every handoff includes:
 - assumptions
 - constraints
 - expected output
+## Scoped specialist task access
+
+PM may grant scoped, temporary task access to additional specialist roles, including QA, Reviewer, Verifier, Backend, and Frontend, when the task is low-risk, non-production-impacting, and does not involve secrets, customer media, hardware claims, protected branches, or release authority.
+
+The PM grant must explicitly state:
+
+- the role being granted access
+- the task scope
+- allowed actions
+- prohibited actions
+- expected evidence/output
+- whether file modification is allowed
+- expiration condition
+
+This access does not grant commit, push, merge, release, deployment, or protected-branch authority unless separately and explicitly approved.
+
+For high-risk tasks, hardware-dependent work, security-sensitive work, customer-media handling, production configuration, main/develop merge activity, or release decisions, the normal workflow gates remain mandatory and may not be bypassed.
+
+Required grant format:
+
+```text
+PM grants @<role> temporary task access for:
+
+Scope:
+Allowed actions:
+Prohibited actions:
+Expected output:
+File modification:
+Git authority:
+Expires:
+```

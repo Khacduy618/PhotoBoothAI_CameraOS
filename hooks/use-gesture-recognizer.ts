@@ -181,6 +181,20 @@ export function useGestureRecognizer(
     );
 
     useEffect(() => {
+        if (!enabled) {
+            const disabledTimeoutId = window.setTimeout(
+                () => {
+                    setIsLoading(false);
+                    setError(null);
+                },
+                0,
+            );
+
+            return () => {
+                window.clearTimeout(disabledTimeoutId);
+            };
+        }
+
         let cancelled = false;
 
         const initializeTimeoutId =
@@ -207,7 +221,7 @@ export function useGestureRecognizer(
             recognizerRef.current = null;
             isDetectingRef.current = false;
         };
-    }, [initialize]);
+    }, [enabled, initialize]);
 
     useEffect(() => {
         if (!enabled) {

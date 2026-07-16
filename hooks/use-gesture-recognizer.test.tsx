@@ -44,6 +44,28 @@ describe("useGestureRecognizer", () => {
         vi.restoreAllMocks();
     });
 
+    it("does not initialize MediaPipe while gesture recognition is disabled", async () => {
+        const { result } = renderHook(() =>
+            useGestureRecognizer(
+                createVideoRef(),
+                false,
+            ),
+        );
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(0);
+        });
+
+        expect(
+            mediapipeMocks.forVisionTasks,
+        ).not.toHaveBeenCalled();
+        expect(
+            mediapipeMocks.createFromOptions,
+        ).not.toHaveBeenCalled();
+        expect(result.current.isLoading).toBe(false);
+        expect(result.current.error).toBeNull();
+    });
+
     it("initializes MediaPipe after the scheduled startup", async () => {
         const recognizer = {
             close: vi.fn(),

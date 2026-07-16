@@ -183,7 +183,7 @@ export function CameraPreview() {
     const gesture =
         useGestureRecognizer(
             videoRef,
-            Boolean(stream),
+            Boolean(stream) && boothConfig.gesture.enabled,
         );
 
     const booth = useBoothMachine({

@@ -1,5 +1,9 @@
 export const boothConfig = {
     gesture: {
+        // Gesture inference is disabled in this POC import until
+        // browser performance evidence proves it cannot block preview.
+        enabled: false,
+
         numberOfHands: 1,
 
         openPalmConfidence: 0.55,

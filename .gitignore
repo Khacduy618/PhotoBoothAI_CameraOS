@@ -10,6 +10,9 @@
 !.yarn/releases
 !.yarn/versions
 
+.opencode/node_modules/
+.opencode/package-lock.json
+
 # testing
 /coverage
 

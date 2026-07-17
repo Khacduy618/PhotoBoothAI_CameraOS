@@ -33,6 +33,28 @@ interface PerformRetakeOptions {
     reset: () => void;
 }
 
+export function assertCaptureReady(
+    stream: MediaStream | null,
+    video: HTMLVideoElement | null,
+): HTMLVideoElement {
+    if (!stream) {
+        throw new Error("Camera chưa kết nối.");
+    }
+
+    if (!video) {
+        throw new Error("Camera chưa sẵn sàng.");
+    }
+
+    if (
+        video.videoWidth === 0 ||
+        video.videoHeight === 0
+    ) {
+        throw new Error("Video stream chưa sẵn sàng.");
+    }
+
+    return video;
+}
+
 export async function performRetake({
     reconnectCamera,
     selectedDeviceId,
@@ -157,22 +179,10 @@ export function CameraPreview({
 
     const capture =
         useCallback(async () => {
-            const video = videoRef.current;
-
-            if (!video) {
-                throw new Error(
-                    "Camera chưa sẵn sàng.",
-                );
-            }
-
-            if (
-                video.videoWidth === 0 ||
-                video.videoHeight === 0
-            ) {
-                throw new Error(
-                    "Video stream chưa sẵn sàng.",
-                );
-            }
+            const video = assertCaptureReady(
+                stream,
+                videoRef.current,
+            );
 
             const blob =
                 await adapter.capture(video);
@@ -195,7 +205,7 @@ export function CameraPreview({
                 capturedPhotosRef.current,
             );
             setPhotoUrl(nextUrl);
-        }, [adapter]);
+        }, [adapter, stream]);
 
     const gesture =
         useGestureRecognizer(

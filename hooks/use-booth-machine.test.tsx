@@ -111,6 +111,91 @@ describe("useBoothMachine", () => {
         expect(result.current.countdown).toBeNull();
     });
 
+    it("requires closed fist release before another gesture capture", async () => {
+        vi.useFakeTimers();
+        const onCapture = vi.fn(async () => undefined);
+
+        const { result, rerender } = renderHook(
+            ({ gesture }) =>
+                useBoothMachine({
+                    gesture,
+                    onCapture,
+                }),
+            {
+                initialProps: {
+                    gesture: noGesture,
+                },
+            },
+        );
+
+        rerender({ gesture: closedFist });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(
+                boothConfig.countdown.seconds * 1000,
+            );
+        });
+
+        expect(onCapture).toHaveBeenCalledTimes(1);
+        expect(result.current.state).toBe("result");
+
+        act(() => {
+            result.current.reset();
+        });
+
+        rerender({ gesture: closedFist });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(0);
+        });
+
+        expect(result.current.state).toBe("idle");
+        expect(onCapture).toHaveBeenCalledTimes(1);
+
+        rerender({ gesture: noGesture });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(0);
+        });
+
+        rerender({ gesture: closedFist });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(
+                boothConfig.countdown.seconds * 1000,
+            );
+        });
+
+        expect(onCapture).toHaveBeenCalledTimes(2);
+        expect(result.current.state).toBe("result");
+    });
+
+    it("ignores duplicate manual capture while countdown is active", async () => {
+        vi.useFakeTimers();
+        const onCapture = vi.fn(async () => undefined);
+
+        const { result } = renderHook(() =>
+            useBoothMachine({
+                gesture: noGesture,
+                onCapture,
+            }),
+        );
+
+        act(() => {
+            result.current.captureManually();
+            result.current.captureManually();
+        });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(
+                boothConfig.countdown.seconds * 1000,
+            );
+        });
+
+        expect(onCapture).toHaveBeenCalledTimes(1);
+        expect(result.current.state).toBe("result");
+    });
+
     it("reset during countdown prevents capture", async () => {
         vi.useFakeTimers();
         const onCapture = vi.fn(async () => undefined);

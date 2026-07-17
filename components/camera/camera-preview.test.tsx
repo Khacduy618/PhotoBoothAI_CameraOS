@@ -1,6 +1,50 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { performRetake } from "@/components/camera/camera-preview";
+import {
+    assertCaptureReady,
+    performRetake,
+} from "@/components/camera/camera-preview";
+
+describe("assertCaptureReady", () => {
+    it("rejects capture when stream is missing", () => {
+        const video = {
+            videoWidth: 1280,
+            videoHeight: 720,
+        } as HTMLVideoElement;
+
+        expect(() => {
+            assertCaptureReady(null, video);
+        }).toThrow("Camera chưa kết nối.");
+    });
+
+    it("rejects capture when video is missing", () => {
+        expect(() => {
+            assertCaptureReady({} as MediaStream, null);
+        }).toThrow("Camera chưa sẵn sàng.");
+    });
+
+    it("rejects capture when video dimensions are unavailable", () => {
+        const video = {
+            videoWidth: 0,
+            videoHeight: 720,
+        } as HTMLVideoElement;
+
+        expect(() => {
+            assertCaptureReady({} as MediaStream, video);
+        }).toThrow("Video stream chưa sẵn sàng.");
+    });
+
+    it("returns the video when stream and dimensions are valid", () => {
+        const video = {
+            videoWidth: 1280,
+            videoHeight: 720,
+        } as HTMLVideoElement;
+
+        expect(
+            assertCaptureReady({} as MediaStream, video),
+        ).toBe(video);
+    });
+});
 
 describe("performRetake", () => {
     it("clears photo and resets without reconnecting for manual retake", async () => {

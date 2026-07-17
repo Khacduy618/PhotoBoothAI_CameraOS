@@ -27,6 +27,7 @@ export function useBoothMachine({
         useState<number | null>(null);
 
     const actionLockedRef = useRef(false);
+    const captureAwaitingReleaseRef = useRef(false);
     const countdownRunIdRef = useRef(0);
     const countdownTimeoutRef =
         useRef<number | null>(null);
@@ -186,11 +187,21 @@ export function useBoothMachine({
             boothConfig.gesture
                 .closedFistHoldMs;
 
+        if (!closedFistIsStable) {
+            captureAwaitingReleaseRef.current = false;
+            return;
+        }
+
+        if (captureAwaitingReleaseRef.current) {
+            return;
+        }
+
         if (
-            closedFistIsStable &&
-            (state === "idle" ||
-                state === "ready")
+            state === "idle" ||
+            state === "ready"
         ) {
+            captureAwaitingReleaseRef.current = true;
+
             const timeoutId = window.setTimeout(
                 () => {
                     void startCountdown();

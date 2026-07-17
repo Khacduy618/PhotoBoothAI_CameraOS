@@ -15,6 +15,7 @@ permission:
     "git status*": allow
     "git log*": allow
     "git diff*": allow
+    "git push*": allow
   task: deny
   skill:
     "*": deny

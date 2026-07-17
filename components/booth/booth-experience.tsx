@@ -26,6 +26,11 @@ export function BoothExperience() {
     }
 
     return (
-        <CameraPreview selection={selection} />
+        <CameraPreview
+            selection={selection}
+            onBackToSetup={() => {
+                setSelectionComplete(false);
+            }}
+        />
     );
 }

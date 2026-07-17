@@ -33,6 +33,17 @@ interface CreateCapturedPhotoOutputOptions {
     createId?: () => string;
 }
 
+export function canChangeSetup(
+    boothState: string,
+    capturedPhotoCount: number,
+): boolean {
+    return (
+        boothState !== "countdown" &&
+        boothState !== "capturing" &&
+        capturedPhotoCount === 0
+    );
+}
+
 export async function createCapturedPhotoOutput({
     originalBlob,
     renderOriginal,
@@ -119,10 +130,12 @@ export async function performRetake({
 
 interface CameraPreviewProps {
     selection: BoothSelection;
+    onBackToSetup?: () => void;
 }
 
 export function CameraPreview({
     selection,
+    onBackToSetup,
 }: CameraPreviewProps) {
     const selectedTheme = resolveThemeConfig(selection.themeId);
     const selectedFrame = resolveFrameConfig(selection.frameId);
@@ -494,6 +507,22 @@ export function CameraPreview({
 
 
                 <div className="flex flex-wrap gap-2">
+                    {onBackToSetup ? (
+                        <button
+                            type="button"
+                            disabled={
+                                !canChangeSetup(
+                                    boothState,
+                                    capturedPhotos.length,
+                                )
+                            }
+                            className="rounded-lg border px-4 py-2 disabled:opacity-50"
+                            onClick={onBackToSetup}
+                        >
+                            Đổi setup
+                        </button>
+                    ) : null}
+
                     <select
                         className="rounded-lg border px-3 py-2 text-black"
                         value={selectedDeviceId}

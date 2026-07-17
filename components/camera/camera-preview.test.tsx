@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
     assertCaptureReady,
+    canChangeSetup,
     createCapturedPhotoOutput,
     performRetake,
 } from "@/components/camera/camera-preview";
@@ -48,6 +49,23 @@ describe("assertCaptureReady", () => {
         expect(
             assertCaptureReady({} as MediaStream, video),
         ).toBe(video);
+    });
+});
+
+describe("canChangeSetup", () => {
+    it("allows setup changes before capture while idle or ready", () => {
+        expect(canChangeSetup("idle", 0)).toBe(true);
+        expect(canChangeSetup("ready", 0)).toBe(true);
+    });
+
+    it("blocks setup changes during countdown or capturing", () => {
+        expect(canChangeSetup("countdown", 0)).toBe(false);
+        expect(canChangeSetup("capturing", 0)).toBe(false);
+    });
+
+    it("blocks setup changes after captured media exists", () => {
+        expect(canChangeSetup("idle", 1)).toBe(false);
+        expect(canChangeSetup("result", 1)).toBe(false);
     });
 });
 

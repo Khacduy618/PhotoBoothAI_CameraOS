@@ -1,9 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
     assertCaptureReady,
+    createCapturedPhotoOutput,
     performRetake,
 } from "@/components/camera/camera-preview";
+
+afterEach(() => {
+    vi.restoreAllMocks();
+});
 
 describe("assertCaptureReady", () => {
     it("rejects capture when stream is missing", () => {
@@ -43,6 +48,65 @@ describe("assertCaptureReady", () => {
         expect(
             assertCaptureReady({} as MediaStream, video),
         ).toBe(video);
+    });
+});
+
+describe("createCapturedPhotoOutput", () => {
+    it("preserves original and uses rendered output when rendering succeeds", async () => {
+        const originalBlob = new Blob(["original"], {
+            type: "image/jpeg",
+        });
+        const renderedBlob = new Blob(["rendered"], {
+            type: "image/jpeg",
+        });
+        const createObjectUrl = vi
+            .fn()
+            .mockReturnValueOnce("blob:original")
+            .mockReturnValueOnce("blob:rendered");
+
+        const photo = await createCapturedPhotoOutput({
+            originalBlob,
+            renderOriginal: vi.fn(async () => renderedBlob),
+            createObjectUrl,
+            createId: () => "capture-1",
+        });
+
+        expect(photo).toEqual({
+            id: "capture-1",
+            originalUrl: "blob:original",
+            outputUrl: "blob:rendered",
+            usedFallback: false,
+        });
+        expect(createObjectUrl).toHaveBeenNthCalledWith(1, originalBlob);
+        expect(createObjectUrl).toHaveBeenNthCalledWith(2, renderedBlob);
+    });
+
+    it("falls back to original when rendering fails", async () => {
+        const warnSpy = vi
+            .spyOn(console, "warn")
+            .mockImplementation(() => undefined);
+        const originalBlob = new Blob(["original"], {
+            type: "image/jpeg",
+        });
+        const createObjectUrl = vi.fn(() => "blob:original");
+
+        const photo = await createCapturedPhotoOutput({
+            originalBlob,
+            renderOriginal: vi.fn(async () => {
+                throw new Error("render failed");
+            }),
+            createObjectUrl,
+            createId: () => "capture-2",
+        });
+
+        expect(photo).toEqual({
+            id: "capture-2",
+            originalUrl: "blob:original",
+            outputUrl: "blob:original",
+            usedFallback: true,
+        });
+        expect(createObjectUrl).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledTimes(1);
     });
 });
 

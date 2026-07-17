@@ -22,7 +22,8 @@ permission:
     "pnpm test*": allow
     "pnpm typecheck*": allow
     "pnpm build*": allow
-    "git push*": deny
+    "git push*": allow
+    "gh pr create*": allow
     "rm -rf *": deny
   task:
     "*": deny

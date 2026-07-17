@@ -88,6 +88,7 @@ export function CameraPreview({
         stream,
         devices,
         error: cameraError,
+        status: cameraStatus,
         isConnecting,
         connect,
     } = useCamera();
@@ -412,12 +413,18 @@ export function CameraPreview({
                 </div>
 
                 <div className="text-xs text-neutral-400">
-                    Held:{" "}
-                    {Math.round(
-                        gesture.result.heldDurationMs,
-                    )}
-                    ms / {requiredHoldMs}ms
+                    <div>
+                        Camera: {cameraStatus.toUpperCase()}
+                    </div>
+                    <div>
+                        Held: {" "}
+                        {Math.round(
+                            gesture.result.heldDurationMs,
+                        )}
+                        ms / {requiredHoldMs}ms
+                    </div>
                 </div>
+
 
                 <div className="flex flex-wrap gap-2">
                     <select

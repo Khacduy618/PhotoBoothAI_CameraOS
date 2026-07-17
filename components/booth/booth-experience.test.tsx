@@ -7,7 +7,11 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const cameraPreviewMock = vi.hoisted(() =>
-    vi.fn(() => <div>Camera preview mounted</div>),
+    vi.fn(({ onBackToSetup }: { onBackToSetup?: () => void }) => (
+        <button type="button" onClick={onBackToSetup}>
+            Camera preview mounted
+        </button>
+    )),
 );
 
 vi.mock("@/components/camera/camera-preview", () => ({
@@ -50,14 +54,41 @@ describe("BoothExperience", () => {
             screen.getByText("Camera preview mounted"),
         ).toBeTruthy();
         expect(cameraPreviewMock).toHaveBeenCalledWith(
-            {
+            expect.objectContaining({
                 selection: {
                     themeId: "party",
                     frameId: "gold",
                     styleId: "warm",
                 },
-            },
+                onBackToSetup: expect.any(Function),
+            }),
             undefined,
         );
+    });
+
+    it("can return from preview to setup without losing the current selection", () => {
+        render(<BoothExperience />);
+
+        fireEvent.click(screen.getByText("Party"));
+        fireEvent.click(screen.getByText("Viền vàng"));
+        fireEvent.click(screen.getByText("Warm"));
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "Tiếp tục vào camera",
+            }),
+        );
+
+        fireEvent.click(
+            screen.getByRole("button", {
+                name: "Camera preview mounted",
+            }),
+        );
+
+        expect(
+            screen.getByText("Chọn giao diện trước khi chụp"),
+        ).toBeTruthy();
+        expect(screen.getByDisplayValue("party")).toBeTruthy();
+        expect(screen.getByDisplayValue("gold")).toBeTruthy();
+        expect(screen.getByDisplayValue("warm")).toBeTruthy();
     });
 });

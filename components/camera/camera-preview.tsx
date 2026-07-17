@@ -8,9 +8,15 @@ import {
 } from "react";
 
 import { boothConfig } from "@/config/booth.config";
+import {
+    resolveFrameConfig,
+    resolveStyleConfig,
+    resolveThemeConfig,
+} from "@/config/theme.config";
 import { useBoothMachine } from "@/hooks/use-booth-machine";
 import { useCamera } from "@/hooks/use-camera";
 import { useGestureRecognizer } from "@/hooks/use-gesture-recognizer";
+import type { BoothSelection } from "@/types/theme";
 
 interface CapturedPhoto {
     id: string;
@@ -50,7 +56,17 @@ export async function performRetake({
     return true;
 }
 
-export function CameraPreview() {
+interface CameraPreviewProps {
+    selection: BoothSelection;
+}
+
+export function CameraPreview({
+    selection,
+}: CameraPreviewProps) {
+    const selectedTheme = resolveThemeConfig(selection.themeId);
+    const selectedFrame = resolveFrameConfig(selection.frameId);
+    const selectedStyle = resolveStyleConfig(selection.styleId);
+
     const videoRef =
         useRef<HTMLVideoElement>(null);
 
@@ -389,6 +405,9 @@ export function CameraPreview() {
                     <p className="text-sm text-neutral-500">
                         ✋ giữ để sẵn sàng, ✊ giữ
                         để bắt đầu chụp.
+                    </p>
+                    <p className="mt-1 text-xs text-neutral-400">
+                        Theme: {selectedTheme.name} · Khung: {selectedFrame.name} · Style: {selectedStyle.name}
                     </p>
                 </div>
 

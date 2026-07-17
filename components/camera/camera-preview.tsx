@@ -16,11 +16,50 @@ import {
 import { useBoothMachine } from "@/hooks/use-booth-machine";
 import { useCamera } from "@/hooks/use-camera";
 import { useGestureRecognizer } from "@/hooks/use-gesture-recognizer";
+import { renderPhotoOutput } from "@/services/render/render-photo-output";
 import type { BoothSelection } from "@/types/theme";
 
-interface CapturedPhoto {
+export interface CapturedPhoto {
     id: string;
-    url: string;
+    originalUrl: string;
+    outputUrl: string;
+    usedFallback: boolean;
+}
+
+interface CreateCapturedPhotoOutputOptions {
+    originalBlob: Blob;
+    renderOriginal: (original: Blob) => Promise<Blob>;
+    createObjectUrl?: (blob: Blob) => string;
+    createId?: () => string;
+}
+
+export async function createCapturedPhotoOutput({
+    originalBlob,
+    renderOriginal,
+    createObjectUrl = URL.createObjectURL,
+    createId = () => crypto.randomUUID(),
+}: CreateCapturedPhotoOutputOptions): Promise<CapturedPhoto> {
+    const originalUrl = createObjectUrl(originalBlob);
+    let outputUrl = originalUrl;
+    let usedFallback = false;
+
+    try {
+        const renderedBlob = await renderOriginal(originalBlob);
+        outputUrl = createObjectUrl(renderedBlob);
+    } catch (cause) {
+        usedFallback = true;
+        console.warn(
+            "Render output failed; using original capture:",
+            cause,
+        );
+    }
+
+    return {
+        id: createId(),
+        originalUrl,
+        outputUrl,
+        usedFallback,
+    };
 }
 
 interface PerformRetakeOptions {
@@ -168,7 +207,10 @@ export function CameraPreview({
         return () => {
             capturedPhotosRef.current.forEach(
                 (photo) => {
-                    URL.revokeObjectURL(photo.url);
+                    URL.revokeObjectURL(photo.originalUrl);
+                    if (photo.outputUrl !== photo.originalUrl) {
+                        URL.revokeObjectURL(photo.outputUrl);
+                    }
                 },
             );
 
@@ -184,18 +226,21 @@ export function CameraPreview({
                 videoRef.current,
             );
 
-            const blob =
+            const originalBlob =
                 await adapter.capture(video);
 
-            const nextUrl =
-                URL.createObjectURL(blob);
+            const nextPhoto = await createCapturedPhotoOutput({
+                originalBlob,
+                renderOriginal: (original) =>
+                    renderPhotoOutput({
+                        original,
+                        theme: selectedTheme,
+                        frame: selectedFrame,
+                        style: selectedStyle,
+                    }),
+            });
 
-            const nextPhoto = {
-                id: crypto.randomUUID(),
-                url: nextUrl,
-            };
-
-            photoUrlRef.current = nextUrl;
+            photoUrlRef.current = nextPhoto.outputUrl;
             capturedPhotosRef.current = [
                 nextPhoto,
                 ...capturedPhotosRef.current,
@@ -204,8 +249,14 @@ export function CameraPreview({
             setCapturedPhotos(
                 capturedPhotosRef.current,
             );
-            setPhotoUrl(nextUrl);
-        }, [adapter, stream]);
+            setPhotoUrl(nextPhoto.outputUrl);
+        }, [
+            adapter,
+            selectedFrame,
+            selectedStyle,
+            selectedTheme,
+            stream,
+        ]);
 
     const gesture =
         useGestureRecognizer(
@@ -361,6 +412,12 @@ export function CameraPreview({
                     {cameraError ? (
                         <p className="mt-2 text-sm text-red-500">
                             {cameraError}
+                        </p>
+                    ) : null}
+
+                    {capturedPhotos[0]?.usedFallback ? (
+                        <p className="mt-2 text-sm text-amber-400">
+                            Không thể render theme/khung/style; đang dùng ảnh gốc.
                         </p>
                     ) : null}
                 </header>
@@ -533,13 +590,13 @@ export function CameraPreview({
                         .map((photo) => (
                             <a
                                 key={photo.id}
-                                href={photo.url}
+                                href={photo.outputUrl}
                                 download="momentai-photo.jpg"
                                 className="block overflow-hidden rounded-xl border border-white/20 bg-black"
                             >
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
                                 <img
-                                    src={photo.url}
+                                    src={photo.outputUrl}
                                     alt="Ảnh đã chụp"
                                     className="aspect-video w-full object-cover"
                                 />

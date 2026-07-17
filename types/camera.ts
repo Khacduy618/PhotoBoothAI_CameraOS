@@ -1,3 +1,10 @@
+export type CameraStatus =
+    | "idle"
+    | "connecting"
+    | "ready"
+    | "disconnected"
+    | "error";
+
 export interface CameraDevice {
     deviceId: string;
     label: string;

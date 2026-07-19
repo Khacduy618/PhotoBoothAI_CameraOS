@@ -170,6 +170,52 @@ describe("useBoothMachine", () => {
         expect(result.current.state).toBe("result");
     });
 
+    it("runs countdown and capture for each selected layout shot", async () => {
+        vi.useFakeTimers();
+        const onCapture = vi.fn(async () => undefined);
+
+        const { result } = renderHook(() =>
+            useBoothMachine({
+                gesture: noGesture,
+                onCapture,
+                totalShots: 3,
+                countdownSeconds: 3,
+                betweenShotDelayMs: 2000,
+            }),
+        );
+
+        act(() => {
+            result.current.captureManually();
+        });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(3000);
+        });
+
+        expect(onCapture).toHaveBeenCalledTimes(1);
+        expect(result.current.state).toBe("between-shots");
+        expect(result.current.capturedShotCount).toBe(1);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2000);
+        });
+        expect(result.current.state).toBe("countdown");
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(3000);
+        });
+        expect(onCapture).toHaveBeenCalledTimes(2);
+        expect(result.current.capturedShotCount).toBe(2);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2000 + 3000);
+        });
+
+        expect(onCapture).toHaveBeenCalledTimes(3);
+        expect(result.current.state).toBe("result");
+        expect(result.current.capturedShotCount).toBe(3);
+    });
+
     it("ignores duplicate manual capture while countdown is active", async () => {
         vi.useFakeTimers();
         const onCapture = vi.fn(async () => undefined);
@@ -194,6 +240,44 @@ describe("useBoothMachine", () => {
 
         expect(onCapture).toHaveBeenCalledTimes(1);
         expect(result.current.state).toBe("result");
+    });
+
+    it("reset during between-shot delay prevents the next capture", async () => {
+        vi.useFakeTimers();
+        const onCapture = vi.fn(async () => undefined);
+
+        const { result } = renderHook(() =>
+            useBoothMachine({
+                gesture: noGesture,
+                onCapture,
+                totalShots: 2,
+                countdownSeconds: 3,
+                betweenShotDelayMs: 2000,
+            }),
+        );
+
+        act(() => {
+            result.current.captureManually();
+        });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(3000);
+        });
+
+        expect(onCapture).toHaveBeenCalledTimes(1);
+        expect(result.current.state).toBe("between-shots");
+
+        act(() => {
+            result.current.reset();
+        });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2000 + 3000);
+        });
+
+        expect(onCapture).toHaveBeenCalledTimes(1);
+        expect(result.current.state).toBe("idle");
+        expect(result.current.capturedShotCount).toBe(0);
     });
 
     it("reset during countdown prevents capture", async () => {
@@ -268,6 +352,63 @@ describe("useBoothMachine", () => {
         });
 
         expect(onCapture).not.toHaveBeenCalled();
+    });
+
+    it("multi-shot failure preserves completed count until full retry starts", async () => {
+        vi.useFakeTimers();
+        const onCapture = vi
+            .fn()
+            .mockResolvedValueOnce(undefined)
+            .mockRejectedValueOnce(
+                new Error("capture failed"),
+            )
+            .mockResolvedValueOnce(undefined)
+            .mockResolvedValueOnce(undefined);
+
+        const { result } = renderHook(() =>
+            useBoothMachine({
+                gesture: noGesture,
+                onCapture,
+                totalShots: 2,
+                countdownSeconds: 3,
+                betweenShotDelayMs: 2000,
+            }),
+        );
+
+        act(() => {
+            result.current.captureManually();
+        });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(3000);
+        });
+        expect(result.current.capturedShotCount).toBe(1);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2000 + 3000);
+        });
+
+        expect(result.current.state).toBe("error");
+        expect(result.current.capturedShotCount).toBe(1);
+
+        act(() => {
+            result.current.captureManually();
+        });
+
+        expect(result.current.capturedShotCount).toBe(0);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(3000);
+        });
+        expect(result.current.capturedShotCount).toBe(1);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2000 + 3000);
+        });
+
+        expect(onCapture).toHaveBeenCalledTimes(4);
+        expect(result.current.state).toBe("result");
+        expect(result.current.capturedShotCount).toBe(2);
     });
 
     it("capture failure moves to error and allows retry", async () => {

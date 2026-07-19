@@ -14,11 +14,17 @@ import type { GestureResult } from "@/types/gesture";
 interface UseBoothMachineOptions {
     gesture: GestureResult;
     onCapture: () => Promise<void>;
+    totalShots?: number;
+    countdownSeconds?: number;
+    betweenShotDelayMs?: number;
 }
 
 export function useBoothMachine({
     gesture,
     onCapture,
+    totalShots = 1,
+    countdownSeconds = boothConfig.countdown.seconds,
+    betweenShotDelayMs = 2000,
 }: UseBoothMachineOptions) {
     const [state, setState] =
         useState<BoothState>("idle");
@@ -26,7 +32,11 @@ export function useBoothMachine({
     const [countdown, setCountdown] =
         useState<number | null>(null);
 
+    const [capturedShotCount, setCapturedShotCount] =
+        useState(0);
+
     const actionLockedRef = useRef(false);
+    const capturedShotCountRef = useRef(0);
     const captureAwaitingReleaseRef = useRef(false);
     const countdownRunIdRef = useRef(0);
     const countdownTimeoutRef =
@@ -76,59 +86,95 @@ export function useBoothMachine({
                 countdownRunIdRef.current + 1;
 
             countdownRunIdRef.current = runId;
-            setState("countdown");
 
             const isCurrentRun = () =>
                 mountedRef.current &&
                 countdownRunIdRef.current === runId;
 
-            for (
-                let value =
-                    boothConfig.countdown.seconds;
-                value >= 1;
-                value -= 1
-            ) {
-                if (!isCurrentRun()) {
-                    return;
-                }
-
-                setCountdown(value);
-
-                await new Promise<void>(
-                    (resolve) => {
-                        countdownResolveRef.current =
-                            resolve;
-
-                        countdownTimeoutRef.current =
-                            window.setTimeout(
-                                () => {
-                                    countdownTimeoutRef.current =
-                                        null;
-                                    countdownResolveRef.current =
-                                        null;
-                                    resolve();
-                                },
-                                1000,
-                            );
-                    },
-                );
-            }
-
-            if (!isCurrentRun()) {
-                return;
-            }
-
-            setCountdown(null);
-            setState("capturing");
-
             try {
-                await onCapture();
+                while (
+                    capturedShotCountRef.current < totalShots
+                ) {
+                    setState("countdown");
 
-                if (!isCurrentRun()) {
-                    return;
+                    for (
+                        let value = countdownSeconds;
+                        value >= 1;
+                        value -= 1
+                    ) {
+                        if (!isCurrentRun()) {
+                            return;
+                        }
+
+                        setCountdown(value);
+
+                        await new Promise<void>(
+                            (resolve) => {
+                                countdownResolveRef.current =
+                                    resolve;
+
+                                countdownTimeoutRef.current =
+                                    window.setTimeout(
+                                        () => {
+                                            countdownTimeoutRef.current =
+                                                null;
+                                            countdownResolveRef.current =
+                                                null;
+                                            resolve();
+                                        },
+                                        1000,
+                                    );
+                            },
+                        );
+                    }
+
+                    if (!isCurrentRun()) {
+                        return;
+                    }
+
+                    setCountdown(null);
+                    setState("capturing");
+
+                    await onCapture();
+
+                    if (!isCurrentRun()) {
+                        return;
+                    }
+
+                    const nextCapturedShotCount =
+                        capturedShotCountRef.current + 1;
+
+                    capturedShotCountRef.current =
+                        nextCapturedShotCount;
+                    setCapturedShotCount(
+                        nextCapturedShotCount,
+                    );
+
+                    if (
+                        nextCapturedShotCount >= totalShots
+                    ) {
+                        setState("result");
+                        return;
+                    }
+
+                    setState("between-shots");
+
+                    await new Promise<void>((resolve) => {
+                        countdownResolveRef.current = resolve;
+                        countdownTimeoutRef.current =
+                            window.setTimeout(() => {
+                                countdownTimeoutRef.current =
+                                    null;
+                                countdownResolveRef.current =
+                                    null;
+                                resolve();
+                            }, betweenShotDelayMs);
+                    });
+
+                    if (!isCurrentRun()) {
+                        return;
+                    }
                 }
-
-                setState("result");
             } catch (cause) {
                 if (!isCurrentRun()) {
                     return;
@@ -142,12 +188,18 @@ export function useBoothMachine({
                 setState("error");
                 actionLockedRef.current = false;
             }
-        }, [onCapture]);
+        }, [
+            betweenShotDelayMs,
+            countdownSeconds,
+            onCapture,
+            totalShots,
+        ]);
 
     useEffect(() => {
         if (
             state === "countdown" ||
             state === "capturing" ||
+            state === "between-shots" ||
             state === "result"
         ) {
             return;
@@ -221,18 +273,30 @@ export function useBoothMachine({
 
     const reset = useCallback(() => {
         cancelActiveCountdown();
+        capturedShotCountRef.current = 0;
+        setCapturedShotCount(0);
         setCountdown(null);
         setState("idle");
     }, [cancelActiveCountdown]);
 
     const captureManually =
         useCallback(() => {
+            if (state === "error") {
+                capturedShotCountRef.current = 0;
+                setCapturedShotCount(0);
+            }
+
             void startCountdown();
-        }, [startCountdown]);
+        }, [
+            startCountdown,
+            state,
+        ]);
 
     return {
         state,
         countdown,
+        capturedShotCount,
+        totalShots,
         reset,
         captureManually,
     };

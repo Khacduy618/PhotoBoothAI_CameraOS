@@ -175,6 +175,18 @@ describe("BoothSelectionFlow", () => {
             screen.getByText("Live preview classic/none/none"),
         ).toBeTruthy();
 
+        fireEvent.click(screen.getByText("1x4 dọc"));
+        expect(onSelectionChange).toHaveBeenCalledWith({
+            ...defaultBoothSelection,
+            layoutId: "1x4-vertical",
+        });
+
+        fireEvent.click(screen.getByText("6s"));
+        expect(onSelectionChange).toHaveBeenCalledWith({
+            ...defaultBoothSelection,
+            countdownSeconds: 6,
+        });
+
         fireEvent.click(screen.getByText("Party"));
         expect(onSelectionChange).toHaveBeenCalledWith({
             ...defaultBoothSelection,

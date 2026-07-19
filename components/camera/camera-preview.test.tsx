@@ -4,8 +4,11 @@ import {
     assertCaptureReady,
     canChangeSetup,
     createCapturedPhotoOutput,
+    createStickerCustomizationAction,
+    createTextCustomizationAction,
     performRetake,
     revokeCapturedPhotoUrls,
+    undoCustomizationAction,
     saveFinalLayoutSharePhoto,
 } from "@/components/camera/camera-preview";
 import { getSharePhoto } from "@/services/sharing/share-photo-storage.service";
@@ -278,6 +281,66 @@ describe("saveFinalLayoutSharePhoto", () => {
         expect(
             getSharePhoto(storage, photoId)?.dataUrl,
         ).toMatch(/^data:image\/jpeg;base64,/);
+    });
+});
+
+describe("customizer actions", () => {
+    it("creates a sticker action from the clicked sticker value", () => {
+        expect(
+            createStickerCustomizationAction({
+                sticker: "💖",
+                id: "sticker-1",
+            }),
+        ).toEqual({
+            type: "sticker",
+            id: "sticker-1",
+            sticker: "💖",
+            x: 0.5,
+            y: 0.5,
+        });
+    });
+
+    it("trims and limits custom text labels", () => {
+        expect(
+            createTextCustomizationAction({
+                text: "  A very long custom attendee label for the final output  ",
+                id: "text-1",
+            }),
+        ).toEqual({
+            type: "text",
+            id: "text-1",
+            text: "A very long custom attendee labe",
+            x: 0.5,
+            y: 0.88,
+        });
+    });
+
+    it("ignores blank custom text", () => {
+        expect(
+            createTextCustomizationAction({
+                text: "   ",
+                id: "text-blank",
+            }),
+        ).toBeNull();
+    });
+
+    it("undo removes only the latest customizer action", () => {
+        const first = createStickerCustomizationAction({
+            sticker: "✨",
+            id: "sticker-1",
+        });
+        const second = createTextCustomizationAction({
+            text: "MomentAI",
+            id: "text-1",
+        });
+
+        expect(second).not.toBeNull();
+        expect(
+            undoCustomizationAction([
+                first,
+                second!,
+            ]),
+        ).toEqual([first]);
     });
 });
 

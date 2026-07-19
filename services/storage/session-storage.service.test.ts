@@ -181,6 +181,31 @@ describe("SessionStorageService", () => {
         });
     });
 
+
+
+    it("returns typed corrupt_data error for invalid stored sessions", async () => {
+        const storage = new MemoryStorage();
+        storage.setItem(
+            "photoboothai:sessions:v1",
+            JSON.stringify([
+                {
+                    id: 123,
+                    status: "active",
+                },
+            ]),
+        );
+        const service = new SessionStorageService(storage);
+
+        const result = await service.listSessions();
+
+        expect(result.ok).toBe(false);
+        expect(result.ok ? null : result.error).toMatchObject({
+            code: "corrupt_data",
+            category: "storage",
+            recoverable: false,
+        });
+    });
+
     it("returns quota errors when browser storage is full", async () => {
         const quotaError = new Error("quota full");
         quotaError.name = "QuotaExceededError";

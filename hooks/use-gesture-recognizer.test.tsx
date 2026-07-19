@@ -24,6 +24,7 @@ vi.mock("@mediapipe/tasks-vision", () => ({
     },
 }));
 
+import { boothConfig } from "@/config/booth.config";
 import { useGestureRecognizer } from "@/hooks/use-gesture-recognizer";
 
 function createVideoRef() {
@@ -33,6 +34,10 @@ function createVideoRef() {
 }
 
 describe("useGestureRecognizer", () => {
+    it("keeps gesture recognition enabled by default", () => {
+        expect(boothConfig.gesture.enabled).toBe(true);
+    });
+
     beforeEach(() => {
         vi.useFakeTimers();
         mediapipeMocks.forVisionTasks.mockReset();

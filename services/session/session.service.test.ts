@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { SessionService } from "@/services/session/session.service";
+import {
+    archiveAbandonedSessions,
+    SessionService,
+} from "@/services/session/session.service";
 import {
     SessionStorageService,
     type KeyValueStorage,
@@ -123,6 +126,36 @@ describe("SessionService", () => {
             code: "not_found",
             category: "storage",
             recoverable: true,
+        });
+    });
+
+    it("abandons and archives sessions by retention age", async () => {
+        const storage = new SessionStorageService(
+            new MemoryStorage(),
+        );
+        const service = new SessionService(storage, {
+            createId: () => "session-archive",
+            now: () => "2026-07-19T00:00:00.000Z",
+        });
+        await service.startSession();
+        await service.abandonActiveSession();
+
+        const result = await archiveAbandonedSessions(
+            storage,
+            { olderThanMs: 1000 },
+            () => "2026-07-19T00:00:02.000Z",
+        );
+
+        expect(result.ok).toBe(true);
+        const archived = result.ok
+            ? result.value.find(
+                (session) =>
+                    session.id === "session-archive",
+            )
+            : null;
+        expect(archived).toMatchObject({
+            status: "archived",
+            archivedAt: "2026-07-19T00:00:02.000Z",
         });
     });
 

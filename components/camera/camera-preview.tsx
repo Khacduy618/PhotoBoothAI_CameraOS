@@ -18,6 +18,9 @@ import type { CameraController } from "@/hooks/use-camera";
 import { useGestureRecognizer } from "@/hooks/use-gesture-recognizer";
 import { renderPhotoOutput } from "@/services/render/render-photo-output";
 import {
+    saveSharePhoto,
+} from "@/services/sharing/share-photo-storage.service";
+import {
     MemoryPhotoBlobStorage,
     PhotoStorageService,
 } from "@/services/storage/photo-storage.service";
@@ -42,6 +45,13 @@ interface CreateCapturedPhotoOutputOptions {
     createObjectUrl?: (blob: Blob) => string;
     createId?: () => string;
     now?: () => string;
+    saveSharePhotoRecord?: (input: {
+        photoId: string;
+        dataUrl: string;
+        mimeType: string;
+        savedAt: string;
+    }) => void;
+    createShareDataUrl?: (blob: Blob) => Promise<string>;
 }
 
 export function canChangeSetup(
@@ -55,6 +65,35 @@ export function canChangeSetup(
     );
 }
 
+export async function createBlobDataUrl(
+    blob: Blob,
+): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.addEventListener("load", () => {
+            if (typeof reader.result === "string") {
+                resolve(reader.result);
+                return;
+            }
+
+            reject(
+                new Error(
+                    "Không thể tạo dữ liệu chia sẻ ảnh.",
+                ),
+            );
+        });
+        reader.addEventListener("error", () => {
+            reject(
+                reader.error ??
+                    new Error(
+                        "Không thể đọc dữ liệu ảnh.",
+                    ),
+            );
+        });
+        reader.readAsDataURL(blob);
+    });
+}
+
 export async function createCapturedPhotoOutput({
     originalBlob,
     sessionId,
@@ -63,6 +102,8 @@ export async function createCapturedPhotoOutput({
     createObjectUrl = URL.createObjectURL,
     createId = () => crypto.randomUUID(),
     now = () => new Date().toISOString(),
+    saveSharePhotoRecord,
+    createShareDataUrl = createBlobDataUrl,
 }: CreateCapturedPhotoOutputOptions): Promise<CapturedPhoto> {
     const photoId = createId();
     const savedOriginal =
@@ -90,6 +131,7 @@ export async function createCapturedPhotoOutput({
 
     const originalUrl = originalUrlResult.value;
     let outputUrl = originalUrl;
+    let outputBlob = savedOriginal.value.original.blob;
     let usedFallback = false;
 
     try {
@@ -109,12 +151,24 @@ export async function createCapturedPhotoOutput({
         }
 
         outputUrl = renderedUrlResult.value;
+        outputBlob = renderedBlob;
     } catch (cause) {
         usedFallback = true;
         console.warn(
             "Render output failed; using original capture:",
             cause,
         );
+    }
+
+    if (saveSharePhotoRecord) {
+        saveSharePhotoRecord({
+            photoId,
+            dataUrl: await createShareDataUrl(outputBlob),
+            mimeType:
+                outputBlob.type ||
+                savedOriginal.value.metadata.mimeType,
+            savedAt: now(),
+        });
     }
 
     return {
@@ -338,6 +392,15 @@ export function CameraPreview({
                     originalBlob,
                     sessionId: captureSessionId,
                     photoStorage,
+                    saveSharePhotoRecord:
+                        typeof window !== "undefined"
+                            ? (record) => {
+                                saveSharePhoto(
+                                    window.localStorage,
+                                    record,
+                                );
+                            }
+                            : undefined,
                     renderOriginal: (original) =>
                         renderPhotoOutput({
                             original,

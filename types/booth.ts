@@ -5,6 +5,7 @@ export type BoothState =
     | "ready"
     | "countdown"
     | "capturing"
+    | "between-shots"
     | "result"
     | "error";
 

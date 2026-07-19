@@ -2,12 +2,17 @@
 
 import { LiveSelectionPreview } from "@/components/booth/live-selection-preview";
 import {
+    boothLayoutConfigs,
+    countdownSecondOptions,
+} from "@/config/layout.config";
+import {
     frameConfigs,
     isBoothSelectionComplete,
     styleConfigs,
     themeConfigs,
 } from "@/config/theme.config";
 import type { CameraController } from "@/hooks/use-camera";
+import type { BoothCountdownSeconds } from "@/types/customization";
 import type { BoothSelection } from "@/types/theme";
 
 interface BoothSelectionFlowProps {
@@ -46,7 +51,29 @@ export function BoothSelectionFlow({
             />
 
             <SelectionGroup
-                label="1. Theme"
+                label="1. Layout ảnh"
+                value={selection.layoutId}
+                options={boothLayoutConfigs}
+                onChange={(layoutId) => {
+                    onSelectionChange({
+                        ...selection,
+                        layoutId: layoutId as BoothSelection["layoutId"],
+                    });
+                }}
+            />
+
+            <CountdownSelectionGroup
+                value={selection.countdownSeconds}
+                onChange={(countdownSeconds) => {
+                    onSelectionChange({
+                        ...selection,
+                        countdownSeconds,
+                    });
+                }}
+            />
+
+            <SelectionGroup
+                label="3. Theme"
                 value={selection.themeId}
                 options={themeConfigs}
                 onChange={(themeId) => {
@@ -58,7 +85,7 @@ export function BoothSelectionFlow({
             />
 
             <SelectionGroup
-                label="2. Khung ảnh"
+                label="4. Khung ảnh"
                 value={selection.frameId}
                 options={frameConfigs}
                 onChange={(frameId) => {
@@ -70,7 +97,7 @@ export function BoothSelectionFlow({
             />
 
             <SelectionGroup
-                label="3. Style tuỳ chọn"
+                label="5. Style tuỳ chọn"
                 value={selection.styleId}
                 options={styleConfigs}
                 onChange={(styleId) => {
@@ -95,6 +122,57 @@ export function BoothSelectionFlow({
                 </button>
             </footer>
         </section>
+    );
+}
+
+interface CountdownSelectionGroupProps {
+    value: BoothCountdownSeconds;
+    onChange: (value: BoothCountdownSeconds) => void;
+}
+
+function CountdownSelectionGroup({
+    value,
+    onChange,
+}: CountdownSelectionGroupProps) {
+    return (
+        <fieldset className="space-y-3">
+            <legend className="text-lg font-semibold">
+                2. Thời gian đếm ngược
+            </legend>
+            <div className="grid gap-3 md:grid-cols-4">
+                {countdownSecondOptions.map((option) => {
+                    const selected = value === option;
+
+                    return (
+                        <label
+                            key={option}
+                            className={`cursor-pointer rounded-2xl border p-4 text-center transition ${
+                                selected
+                                    ? "border-emerald-300 bg-emerald-300/10"
+                                    : "border-white/10 bg-white/5 hover:border-white/30"
+                            }`}
+                        >
+                            <input
+                                type="radio"
+                                name="countdown-seconds"
+                                value={option}
+                                checked={selected}
+                                className="sr-only"
+                                onChange={() => {
+                                    onChange(option);
+                                }}
+                            />
+                            <span className="block text-2xl font-semibold">
+                                {option}s
+                            </span>
+                            <span className="mt-1 block text-sm text-neutral-300">
+                                Đếm {option} giây trước mỗi ảnh
+                            </span>
+                        </label>
+                    );
+                })}
+            </div>
+        </fieldset>
     );
 }
 

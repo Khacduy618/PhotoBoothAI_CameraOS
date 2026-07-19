@@ -8,6 +8,7 @@ import {
 } from "react";
 
 import { boothConfig } from "@/config/booth.config";
+import { resolveBoothLayoutConfig } from "@/config/layout.config";
 import {
     resolveFrameConfig,
     resolveStyleConfig,
@@ -61,6 +62,7 @@ export function canChangeSetup(
     return (
         boothState !== "countdown" &&
         boothState !== "capturing" &&
+        boothState !== "between-shots" &&
         capturedPhotoCount === 0
     );
 }
@@ -249,6 +251,7 @@ export function CameraPreview({
     const selectedTheme = resolveThemeConfig(selection.themeId);
     const selectedFrame = resolveFrameConfig(selection.frameId);
     const selectedStyle = resolveStyleConfig(selection.styleId);
+    const selectedLayout = resolveBoothLayoutConfig(selection.layoutId);
 
     const videoRef =
         useRef<HTMLVideoElement>(null);
@@ -463,10 +466,14 @@ export function CameraPreview({
     const booth = useBoothMachine({
         gesture: gesture.result,
         onCapture: capture,
+        totalShots: selectedLayout.shotCount,
+        countdownSeconds: selection.countdownSeconds,
     });
 
     const boothState = booth.state;
     const boothCountdown = booth.countdown;
+    const capturedShotCount = booth.capturedShotCount;
+    const totalShots = booth.totalShots;
     const resetBooth = booth.reset;
     const captureManually = booth.captureManually;
 
@@ -548,28 +555,6 @@ export function CameraPreview({
             selectedDeviceId,
         ],
     );
-
-    useEffect(() => {
-        if (
-            boothState !== "result" ||
-            !photoUrl
-        ) {
-            return;
-        }
-
-        const timeoutId = window.setTimeout(
-            () => {
-                setPhotoUrl(null);
-                photoUrlRef.current = null;
-                resetBooth();
-            },
-            3000,
-        );
-
-        return () => {
-            window.clearTimeout(timeoutId);
-        };
-    }, [resetBooth, boothState, photoUrl]);
 
     useEffect(() => {
         if (
@@ -687,12 +672,11 @@ export function CameraPreview({
             <section className="mx-auto flex w-full max-w-5xl flex-col gap-5">
                 <header>
                     <h1 className="text-2xl font-semibold">
-                        Ảnh đã chụp
+                        Hoàn tất {totalShots} ảnh
                     </h1>
 
                     <p className="text-sm text-neutral-500">
-                        Ảnh sẽ tự thu nhỏ xuống góc phải
-                        sau 3 giây để chụp tiếp.
+                        Đã chụp đủ layout {selectedLayout.name}. Bạn có thể tải ảnh hiện tại hoặc chụp lại toàn bộ.
                     </p>
 
                     {cameraError ? (
@@ -761,7 +745,7 @@ export function CameraPreview({
                         để bắt đầu chụp.
                     </p>
                     <p className="mt-1 text-xs text-neutral-400">
-                        Theme: {selectedTheme.name} · Khung: {selectedFrame.name} · Style: {selectedStyle.name}
+                        Layout: {selectedLayout.name} · Countdown: {selection.countdownSeconds}s · Theme: {selectedTheme.name} · Khung: {selectedFrame.name} · Style: {selectedStyle.name}
                     </p>
                 </div>
 
@@ -893,14 +877,31 @@ export function CameraPreview({
                     ) : null}
                 </div>
 
-                <div className="absolute right-5 top-5 rounded-xl bg-black/70 px-4 py-2">
-                    State:{" "}
-                    {boothState.toUpperCase()}
+                <div className="absolute right-5 top-5 space-y-2 text-right">
+                    <div className="rounded-xl bg-black/70 px-4 py-2">
+                        State: {boothState.toUpperCase()}
+                    </div>
+                    <div className="rounded-xl bg-emerald-400/90 px-4 py-2 font-semibold text-black">
+                        Ảnh {Math.min(capturedShotCount + 1, totalShots)}/{totalShots}
+                    </div>
                 </div>
 
                 {boothCountdown !== null ? (
                     <div className="absolute inset-0 grid place-items-center bg-black/40 text-[14rem] font-black">
                         {boothCountdown}
+                    </div>
+                ) : null}
+
+                {boothState === "between-shots" ? (
+                    <div className="absolute inset-0 grid place-items-center bg-black/45 text-center">
+                        <div className="rounded-3xl bg-white px-8 py-6 text-black shadow-2xl">
+                            <p className="text-xl font-medium">
+                                Giữ nguyên nụ cười nhé
+                            </p>
+                            <p className="mt-2 text-4xl font-black">
+                                Chuẩn bị ảnh {capturedShotCount + 1}/{totalShots}
+                            </p>
+                        </div>
                     </div>
                 ) : null}
             </div>
@@ -952,7 +953,8 @@ export function CameraPreview({
                         disabled={
                             !stream ||
                             boothState === "countdown" ||
-                            boothState === "capturing"
+                            boothState === "capturing" ||
+                            boothState === "between-shots"
                         }
                         className="rounded-xl border px-5 py-3 disabled:opacity-40"
                         onClick={
@@ -963,7 +965,9 @@ export function CameraPreview({
                             ? "Đang đếm ngược..."
                             : boothState === "capturing"
                                 ? "Đang chụp..."
-                                : "Chụp thủ công"}
+                                : boothState === "between-shots"
+                                    ? "Chuẩn bị ảnh tiếp theo..."
+                                    : "Chụp thủ công"}
                     </button>
 
                     {!stream ? (

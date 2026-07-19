@@ -1,21 +1,25 @@
 "use client";
 
+import { LiveSelectionPreview } from "@/components/booth/live-selection-preview";
 import {
     frameConfigs,
     isBoothSelectionComplete,
     styleConfigs,
     themeConfigs,
 } from "@/config/theme.config";
+import type { CameraController } from "@/hooks/use-camera";
 import type { BoothSelection } from "@/types/theme";
 
 interface BoothSelectionFlowProps {
     selection: BoothSelection;
+    camera: CameraController;
     onSelectionChange: (selection: BoothSelection) => void;
     onComplete: () => void;
 }
 
 export function BoothSelectionFlow({
     selection,
+    camera,
     onSelectionChange,
     onComplete,
 }: BoothSelectionFlowProps) {
@@ -35,6 +39,11 @@ export function BoothSelectionFlow({
                     Sau khi chụp, ảnh gốc sẽ được dùng để render output theo lựa chọn này.
                 </p>
             </header>
+
+            <LiveSelectionPreview
+                selection={selection}
+                camera={camera}
+            />
 
             <SelectionGroup
                 label="1. Theme"

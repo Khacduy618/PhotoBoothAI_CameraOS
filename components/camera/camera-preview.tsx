@@ -14,7 +14,7 @@ import {
     resolveThemeConfig,
 } from "@/config/theme.config";
 import { useBoothMachine } from "@/hooks/use-booth-machine";
-import { useCamera } from "@/hooks/use-camera";
+import type { CameraController } from "@/hooks/use-camera";
 import { useGestureRecognizer } from "@/hooks/use-gesture-recognizer";
 import { renderPhotoOutput } from "@/services/render/render-photo-output";
 import type { BoothSelection } from "@/types/theme";
@@ -130,11 +130,13 @@ export async function performRetake({
 
 interface CameraPreviewProps {
     selection: BoothSelection;
+    camera: CameraController;
     onBackToSetup?: () => void;
 }
 
 export function CameraPreview({
     selection,
+    camera,
     onBackToSetup,
 }: CameraPreviewProps) {
     const selectedTheme = resolveThemeConfig(selection.themeId);
@@ -165,7 +167,7 @@ export function CameraPreview({
         status: cameraStatus,
         isConnecting,
         connect,
-    } = useCamera();
+    } = camera;
 
     const [
         selectedDeviceId,
@@ -183,10 +185,15 @@ export function CameraPreview({
             return;
         }
 
+        if (stream) {
+            hasAutoConnectedRef.current = true;
+            return;
+        }
+
         hasAutoConnectedRef.current = true;
 
         void connect();
-    }, [connect]);
+    }, [connect, stream]);
 
     useEffect(() => {
         const video = videoRef.current;

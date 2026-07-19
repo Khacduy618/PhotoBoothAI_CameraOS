@@ -6,6 +6,22 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const cameraControllerMock = vi.hoisted(() => ({
+    adapter: {},
+    stream: null,
+    devices: [],
+    error: null,
+    status: "idle",
+    isConnecting: false,
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    loadDevices: vi.fn(),
+}));
+
+vi.mock("@/hooks/use-camera", () => ({
+    useCamera: vi.fn(() => cameraControllerMock),
+}));
+
 const cameraPreviewMock = vi.hoisted(() =>
     vi.fn(({ onBackToSetup }: { onBackToSetup?: () => void }) => (
         <button type="button" onClick={onBackToSetup}>
@@ -60,6 +76,7 @@ describe("BoothExperience", () => {
                     frameId: "gold",
                     styleId: "warm",
                 },
+                camera: cameraControllerMock,
                 onBackToSetup: expect.any(Function),
             }),
             undefined,

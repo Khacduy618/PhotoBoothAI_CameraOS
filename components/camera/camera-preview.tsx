@@ -1,6 +1,7 @@
 "use client";
 
 import {
+    type PointerEvent,
     useCallback,
     useEffect,
     useRef,
@@ -35,6 +36,84 @@ export interface CapturedPhoto {
     originalUrl: string;
     outputUrl: string;
     usedFallback: boolean;
+}
+
+export type CustomizerAction =
+    | {
+        type: "sticker";
+        id: string;
+        sticker: string;
+        x: number;
+        y: number;
+    }
+    | {
+        type: "text";
+        id: string;
+        text: string;
+        x: number;
+        y: number;
+    }
+    | {
+        type: "stroke";
+        id: string;
+        color: string;
+        width: number;
+        points: readonly { x: number; y: number }[];
+    };
+
+const stickerOptions = ["✨", "💖", "🎉", "😎", "🌟", "🥳"] as const;
+const penColors = ["#ffffff", "#f59e0b", "#34d399", "#60a5fa", "#f472b6"] as const;
+
+export function createStickerCustomizationAction({
+    sticker,
+    id,
+    x = 0.5,
+    y = 0.5,
+}: {
+    sticker: string;
+    id: string;
+    x?: number;
+    y?: number;
+}): CustomizerAction {
+    return {
+        type: "sticker",
+        id,
+        sticker,
+        x,
+        y,
+    };
+}
+
+export function createTextCustomizationAction({
+    text,
+    id,
+    x = 0.5,
+    y = 0.88,
+}: {
+    text: string;
+    id: string;
+    x?: number;
+    y?: number;
+}): CustomizerAction | null {
+    const trimmedText = text.trim();
+
+    if (!trimmedText) {
+        return null;
+    }
+
+    return {
+        type: "text",
+        id,
+        text: trimmedText.slice(0, 32),
+        x,
+        y,
+    };
+}
+
+export function undoCustomizationAction(
+    actions: readonly CustomizerAction[],
+): CustomizerAction[] {
+    return actions.slice(0, -1);
 }
 
 interface CreateCapturedPhotoOutputOptions {
@@ -222,6 +301,114 @@ export async function saveFinalLayoutSharePhoto({
     return photoId;
 }
 
+function loadImageFromUrl(url: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+
+        image.addEventListener("load", () => {
+            resolve(image);
+        });
+        image.addEventListener("error", () => {
+            reject(new Error("Không thể đọc ảnh layout để customize."));
+        });
+        image.src = url;
+    });
+}
+
+async function renderCustomizedLayout(
+    baseImageUrl: string,
+    actions: readonly CustomizerAction[],
+): Promise<Blob> {
+    const image = await loadImageFromUrl(baseImageUrl);
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
+
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+        throw new Error("Không thể tạo canvas customize.");
+    }
+
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    actions.forEach((action) => {
+        if (action.type === "sticker") {
+            context.save();
+            context.font = `${Math.round(canvas.width * 0.08)}px sans-serif`;
+            context.textAlign = "center";
+            context.textBaseline = "middle";
+            context.fillText(
+                action.sticker,
+                action.x * canvas.width,
+                action.y * canvas.height,
+            );
+            context.restore();
+            return;
+        }
+
+        if (action.type === "text") {
+            context.save();
+            context.font = `700 ${Math.round(canvas.width * 0.045)}px sans-serif`;
+            context.textAlign = "center";
+            context.textBaseline = "middle";
+            context.lineWidth = Math.max(4, canvas.width * 0.006);
+            context.strokeStyle = "rgba(0, 0, 0, 0.72)";
+            context.fillStyle = "#ffffff";
+            context.strokeText(
+                action.text,
+                action.x * canvas.width,
+                action.y * canvas.height,
+            );
+            context.fillText(
+                action.text,
+                action.x * canvas.width,
+                action.y * canvas.height,
+            );
+            context.restore();
+            return;
+        }
+
+        if (action.points.length < 2) {
+            return;
+        }
+
+        context.save();
+        context.strokeStyle = action.color;
+        context.lineWidth = Math.max(2, action.width * canvas.width);
+        context.lineCap = "round";
+        context.lineJoin = "round";
+        context.beginPath();
+        context.moveTo(
+            action.points[0].x * canvas.width,
+            action.points[0].y * canvas.height,
+        );
+        action.points.slice(1).forEach((point) => {
+            context.lineTo(
+                point.x * canvas.width,
+                point.y * canvas.height,
+            );
+        });
+        context.stroke();
+        context.restore();
+    });
+
+    return new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+            (blob) => {
+                if (!blob) {
+                    reject(new Error("Không thể xuất ảnh đã customize."));
+                    return;
+                }
+
+                resolve(blob);
+            },
+            "image/jpeg",
+            0.94,
+        );
+    });
+}
+
 interface PerformRetakeOptions {
     reconnectCamera: boolean;
     selectedDeviceId: string;
@@ -309,6 +496,9 @@ export function CameraPreview({
     const finalLayoutUrlRef =
         useRef<string | null>(null);
 
+    const customizedLayoutUrlRef =
+        useRef<string | null>(null);
+
     const capturedPhotosRef =
         useRef<CapturedPhoto[]>([]);
 
@@ -350,6 +540,21 @@ export function CameraPreview({
         useState<string | null>(null);
 
     const [layoutError, setLayoutError] =
+        useState<string | null>(null);
+
+    const [customizerActions, setCustomizerActions] =
+        useState<CustomizerAction[]>([]);
+    const [selectedSticker, setSelectedSticker] =
+        useState<(typeof stickerOptions)[number]>(stickerOptions[0]);
+    const [customText, setCustomText] =
+        useState("MomentAI");
+    const [penColor, setPenColor] =
+        useState<(typeof penColors)[number]>(penColors[0]);
+    const [activeStroke, setActiveStroke] =
+        useState<CustomizerAction | null>(null);
+    const [customizedLayoutUrl, setCustomizedLayoutUrl] =
+        useState<string | null>(null);
+    const [customizerError, setCustomizerError] =
         useState<string | null>(null);
 
     const [capturedPhotos, setCapturedPhotos] =
@@ -420,9 +625,14 @@ export function CameraPreview({
                 URL.revokeObjectURL(finalLayoutUrlRef.current);
             }
 
+            if (customizedLayoutUrlRef.current) {
+                URL.revokeObjectURL(customizedLayoutUrlRef.current);
+            }
+
             capturedPhotosRef.current = [];
             photoUrlRef.current = null;
             finalLayoutUrlRef.current = null;
+            customizedLayoutUrlRef.current = null;
         };
     }, []);
 
@@ -596,13 +806,22 @@ export function CameraPreview({
                         URL.revokeObjectURL(finalLayoutUrlRef.current);
                     }
 
+                    if (customizedLayoutUrlRef.current) {
+                        URL.revokeObjectURL(customizedLayoutUrlRef.current);
+                    }
+
                     capturedPhotosRef.current = [];
                     photoUrlRef.current = null;
                     finalLayoutUrlRef.current = null;
+                    customizedLayoutUrlRef.current = null;
                     setCapturedPhotos([]);
                     setPhotoUrl(null);
                     setFinalLayoutUrl(null);
+                    setCustomizedLayoutUrl(null);
+                    setCustomizerActions([]);
+                    setActiveStroke(null);
                     setLayoutError(null);
+                    setCustomizerError(null);
                 },
                 reset: resetBooth,
             });
@@ -712,6 +931,61 @@ export function CameraPreview({
     ]);
 
     useEffect(() => {
+        if (!finalLayoutUrl) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const renderCustomization = async () => {
+            try {
+                setCustomizerError(null);
+
+                if (customizedLayoutUrlRef.current) {
+                    URL.revokeObjectURL(customizedLayoutUrlRef.current);
+                    customizedLayoutUrlRef.current = null;
+                }
+
+                setCustomizedLayoutUrl(null);
+
+                const customizedBlob = await renderCustomizedLayout(
+                    finalLayoutUrl,
+                    customizerActions,
+                );
+                const customizedUrl = URL.createObjectURL(customizedBlob);
+
+                if (cancelled) {
+                    URL.revokeObjectURL(customizedUrl);
+                    return;
+                }
+
+                if (customizedLayoutUrlRef.current) {
+                    URL.revokeObjectURL(customizedLayoutUrlRef.current);
+                }
+
+                customizedLayoutUrlRef.current = customizedUrl;
+                setCustomizedLayoutUrl(customizedUrl);
+            } catch (cause) {
+                if (cancelled) {
+                    return;
+                }
+
+                setCustomizerError(
+                    cause instanceof Error
+                        ? cause.message
+                        : "Không thể áp dụng customize.",
+                );
+            }
+        };
+
+        void renderCustomization();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [customizerActions, finalLayoutUrl]);
+
+    useEffect(() => {
         if (
             boothState !== "result" ||
             !photoUrl ||
@@ -760,6 +1034,103 @@ export function CameraPreview({
         handleRetake,
         photoUrl,
     ]);
+
+    const addSticker = (
+        sticker: (typeof stickerOptions)[number],
+        x = 0.5,
+        y = 0.5,
+    ) => {
+        setCustomizerActions((currentActions) => [
+            ...currentActions,
+            createStickerCustomizationAction({
+                sticker,
+                id: crypto.randomUUID(),
+                x,
+                y,
+            }),
+        ]);
+    };
+
+    const addTextLabel = () => {
+        const textAction = createTextCustomizationAction({
+            text: customText,
+            id: crypto.randomUUID(),
+        });
+
+        if (!textAction) {
+            return;
+        }
+
+        setCustomizerActions((currentActions) => [
+            ...currentActions,
+            textAction,
+        ]);
+    };
+
+    const getCanvasPoint = (event: PointerEvent<HTMLDivElement>) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+
+        return {
+            x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+            y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
+        };
+    };
+
+    const startDrawing = (event: PointerEvent<HTMLDivElement>) => {
+        if (!finalLayoutUrl) {
+            return;
+        }
+
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const point = getCanvasPoint(event);
+        setActiveStroke({
+            type: "stroke",
+            id: crypto.randomUUID(),
+            color: penColor,
+            width: 0.009,
+            points: [point],
+        });
+    };
+
+    const continueDrawing = (event: PointerEvent<HTMLDivElement>) => {
+        if (!activeStroke || activeStroke.type !== "stroke") {
+            return;
+        }
+
+        const point = getCanvasPoint(event);
+        setActiveStroke({
+            ...activeStroke,
+            points: [...activeStroke.points, point],
+        });
+    };
+
+    const finishDrawing = () => {
+        if (
+            activeStroke &&
+            activeStroke.type === "stroke" &&
+            activeStroke.points.length > 1
+        ) {
+            setCustomizerActions((currentActions) => [
+                ...currentActions,
+                activeStroke,
+            ]);
+        }
+
+        setActiveStroke(null);
+    };
+
+    const undoCustomization = () => {
+        setCustomizerActions((currentActions) =>
+            undoCustomizationAction(currentActions),
+        );
+    };
+
+    const clearCustomization = () => {
+        setCustomizerActions([]);
+        setActiveStroke(null);
+    };
+
+    const displayedFinalUrl = customizedLayoutUrl ?? finalLayoutUrl ?? photoUrl ?? "";
 
     // PB-006: Explicit capture error UI
     if (boothState === "error") {
@@ -863,21 +1234,143 @@ export function CameraPreview({
                     tabIndex={-1}
                 />
 
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                    src={photoUrl}
-                    alt="Ảnh vừa chụp"
-                    className="aspect-video w-full rounded-3xl object-cover"
-                />
+                <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+                    <div
+                        className="relative touch-none overflow-hidden rounded-3xl bg-black"
+                        onPointerDown={startDrawing}
+                        onPointerMove={continueDrawing}
+                        onPointerUp={finishDrawing}
+                        onPointerCancel={finishDrawing}
+                    >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                            src={displayedFinalUrl || photoUrl}
+                            alt="Ảnh layout đã customize"
+                            className="aspect-video w-full object-cover"
+                            draggable={false}
+                        />
+                    </div>
+
+                    <aside className="space-y-4 rounded-3xl border border-white/10 bg-neutral-950 p-5 text-white">
+                        <div>
+                            <p className="text-xs uppercase tracking-[0.24em] text-emerald-300">
+                                Customizer
+                            </p>
+                            <h2 className="mt-1 text-2xl font-semibold">
+                                Sticker, chữ và vẽ tay
+                            </h2>
+                            <p className="mt-2 text-sm text-neutral-400">
+                                Thao tác chỉ tạo derivative cuối. Ảnh gốc và layout đã chụp vẫn được giữ nguyên.
+                            </p>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-sm font-semibold" htmlFor="custom-text">
+                                Text label
+                            </label>
+                            <input
+                                id="custom-text"
+                                value={customText}
+                                maxLength={32}
+                                className="w-full rounded-xl border border-white/15 bg-black px-3 py-3 text-white"
+                                onChange={(event) => {
+                                    setCustomText(event.target.value);
+                                }}
+                            />
+                            <button
+                                type="button"
+                                className="w-full rounded-xl bg-white px-4 py-3 font-semibold text-black"
+                                onClick={addTextLabel}
+                            >
+                                Thêm chữ
+                            </button>
+                        </div>
+
+                        <div className="space-y-2">
+                            <p className="text-sm font-semibold">Sticker</p>
+                            <div className="grid grid-cols-3 gap-2">
+                                {stickerOptions.map((sticker) => (
+                                    <button
+                                        key={sticker}
+                                        type="button"
+                                        className={`rounded-xl border py-3 text-2xl ${selectedSticker === sticker ? "border-emerald-300 bg-emerald-300/15" : "border-white/15 bg-white/5"}`}
+                                        onClick={() => {
+                                            setSelectedSticker(sticker);
+                                            addSticker(sticker);
+                                        }}
+                                    >
+                                        {sticker}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <p className="text-sm font-semibold">Màu bút vẽ</p>
+                            <div className="flex flex-wrap gap-2">
+                                {penColors.map((color) => (
+                                    <button
+                                        key={color}
+                                        type="button"
+                                        aria-label={`Chọn màu bút ${color}`}
+                                        className={`h-10 w-10 rounded-full border-2 ${penColor === color ? "border-white" : "border-white/20"}`}
+                                        style={{ backgroundColor: color }}
+                                        onClick={() => {
+                                            setPenColor(color);
+                                        }}
+                                    />
+                                ))}
+                            </div>
+                            <p className="text-xs text-neutral-400">
+                                Kéo trực tiếp trên ảnh để vẽ canvas pen.
+                            </p>
+                        </div>
+
+                        {customizerError ? (
+                            <p className="rounded-xl bg-amber-400/15 p-3 text-sm text-amber-100">
+                                {customizerError} Bạn vẫn có thể tải layout gốc.
+                            </p>
+                        ) : null}
+
+                        <div className="grid grid-cols-2 gap-2">
+                            <button
+                                type="button"
+                                disabled={customizerActions.length === 0}
+                                className="rounded-xl border border-white/20 px-4 py-3 font-semibold disabled:opacity-40"
+                                onClick={undoCustomization}
+                            >
+                                Undo
+                            </button>
+                            <button
+                                type="button"
+                                disabled={customizerActions.length === 0}
+                                className="rounded-xl border border-white/20 px-4 py-3 font-semibold disabled:opacity-40"
+                                onClick={clearCustomization}
+                            >
+                                Clear
+                            </button>
+                        </div>
+                    </aside>
+                </div>
 
                 <div className="flex flex-wrap gap-3">
                     <a
-                        href={photoUrl}
-                        download="momentai-photo.jpg"
+                        href={displayedFinalUrl}
+                        download="momentai-customized-final.jpg"
                         className="rounded-xl bg-white px-5 py-3 font-medium text-black"
                     >
-                        Tải ảnh
+                        Tải ảnh đã customize
                     </a>
+
+                    {finalLayoutUrl ? (
+                        <a
+                            href={finalLayoutUrl}
+                            download="momentai-layout-original.jpg"
+                            className="rounded-xl border px-5 py-3 font-medium"
+                        >
+                            Tải layout gốc
+                        </a>
+                    ) : null}
 
                     <button
                         type="button"

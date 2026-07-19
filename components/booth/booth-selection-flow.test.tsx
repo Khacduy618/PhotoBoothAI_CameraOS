@@ -6,6 +6,20 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { BoothSelection } from "@/types/theme";
+
+const liveSelectionPreviewMock = vi.hoisted(() =>
+    vi.fn(({ selection }: { selection: BoothSelection }) => (
+        <div>
+            Live preview {selection.themeId}/{selection.frameId}/{selection.styleId}
+        </div>
+    )),
+);
+
+vi.mock("@/components/booth/live-selection-preview", () => ({
+    LiveSelectionPreview: liveSelectionPreviewMock,
+}));
+
 import { BoothSelectionFlow } from "@/components/booth/booth-selection-flow";
 import {
     defaultBoothSelection,
@@ -17,7 +31,17 @@ import {
     styleConfigs,
     themeConfigs,
 } from "@/config/theme.config";
-import type { BoothSelection } from "@/types/theme";
+const cameraControllerMock = {
+    adapter: {},
+    stream: null,
+    devices: [],
+    error: null,
+    status: "idle" as const,
+    isConnecting: false,
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    loadDevices: vi.fn(),
+};
 
 afterEach(() => {
     cleanup();
@@ -56,10 +80,15 @@ describe("BoothSelectionFlow", () => {
         render(
             <BoothSelectionFlow
                 selection={defaultBoothSelection}
+                camera={cameraControllerMock}
                 onSelectionChange={onSelectionChange}
                 onComplete={onComplete}
             />,
         );
+
+        expect(
+            screen.getByText("Live preview classic/none/none"),
+        ).toBeTruthy();
 
         fireEvent.click(screen.getByText("Party"));
         expect(onSelectionChange).toHaveBeenCalledWith({
@@ -82,6 +111,7 @@ describe("BoothSelectionFlow", () => {
                     ...defaultBoothSelection,
                     themeId: "missing",
                 }}
+                camera={cameraControllerMock}
                 onSelectionChange={vi.fn()}
                 onComplete={onComplete}
             />,

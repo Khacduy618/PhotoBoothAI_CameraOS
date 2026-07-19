@@ -28,6 +28,8 @@ export function bindStreamEndedHandlers(
     };
 }
 
+export type CameraController = ReturnType<typeof useCamera>;
+
 export function useCamera() {
     const adapter = useMemo(() => new CaptureCardAdapter(), []);
 

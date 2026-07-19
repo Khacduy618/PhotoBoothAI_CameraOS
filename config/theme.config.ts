@@ -1,3 +1,9 @@
+import {
+    defaultBoothLayoutId,
+    defaultCountdownSeconds,
+    isBoothCountdownSeconds,
+    isBoothLayoutId,
+} from "@/config/layout.config";
 import type {
     BoothSelection,
     FrameConfig,
@@ -39,13 +45,15 @@ export const frameConfigs = [
         description: "Giữ ảnh sạch, không thêm viền.",
         borderColor: "transparent",
         borderWidth: 0,
+        kind: "none",
     },
     {
         id: "white-border",
-        name: "Viền trắng",
-        description: "Khung trắng đơn giản, dễ dùng.",
+        name: "Khung trắng",
+        description: "Khung trắng photobooth để thêm nhãn, sticker và nét vẽ custom.",
         borderColor: "#ffffff",
-        borderWidth: 24,
+        borderWidth: 32,
+        kind: "solid",
     },
     {
         id: "gold",
@@ -53,6 +61,7 @@ export const frameConfigs = [
         description: "Khung vàng cho sự kiện nổi bật.",
         borderColor: "#facc15",
         borderWidth: 28,
+        kind: "solid",
     },
 ] as const satisfies readonly FrameConfig[];
 
@@ -77,10 +86,19 @@ export const styleConfigs = [
     },
 ] as const satisfies readonly StyleConfig[];
 
+export const defaultBoothCustomization = {
+    stickerItems: [],
+    textLabels: [],
+    drawingStrokes: [],
+} as const;
+
 export const defaultBoothSelection: BoothSelection = {
     themeId: themeConfigs[0].id,
     frameId: frameConfigs[0].id,
     styleId: styleConfigs[0].id,
+    layoutId: defaultBoothLayoutId,
+    countdownSeconds: defaultCountdownSeconds,
+    customization: defaultBoothCustomization,
 };
 
 export function resolveThemeConfig(
@@ -110,12 +128,34 @@ export function resolveStyleConfig(
     );
 }
 
+export function normalizeBoothSelection(
+    selection: Partial<BoothSelection> | undefined,
+): BoothSelection {
+    return {
+        ...defaultBoothSelection,
+        ...selection,
+        customization: {
+            ...defaultBoothCustomization,
+            ...selection?.customization,
+        },
+        layoutId: selection?.layoutId && isBoothLayoutId(selection.layoutId)
+            ? selection.layoutId
+            : defaultBoothSelection.layoutId,
+        countdownSeconds: selection?.countdownSeconds &&
+            isBoothCountdownSeconds(selection.countdownSeconds)
+            ? selection.countdownSeconds
+            : defaultBoothSelection.countdownSeconds,
+    };
+}
+
 export function isBoothSelectionComplete(
     selection: BoothSelection,
 ): boolean {
     return Boolean(
         themeConfigs.some((theme) => theme.id === selection.themeId) &&
             frameConfigs.some((frame) => frame.id === selection.frameId) &&
-            styleConfigs.some((style) => style.id === selection.styleId),
+            styleConfigs.some((style) => style.id === selection.styleId) &&
+            isBoothLayoutId(selection.layoutId) &&
+            isBoothCountdownSeconds(selection.countdownSeconds),
     );
 }

@@ -22,9 +22,21 @@ vi.mock("@/components/booth/live-selection-preview", () => ({
 
 import { BoothSelectionFlow } from "@/components/booth/booth-selection-flow";
 import {
+    boothLayoutConfigs,
+    countdownSecondOptions,
+    resolveBoothLayoutConfig,
+} from "@/config/layout.config";
+import {
+    resolveStickerConfig,
+    resolveTextLabelPresetConfig,
+    stickerConfigs,
+    textLabelPresetConfigs,
+} from "@/config/sticker.config";
+import {
     defaultBoothSelection,
     frameConfigs,
     isBoothSelectionComplete,
+    normalizeBoothSelection,
     resolveFrameConfig,
     resolveStyleConfig,
     resolveThemeConfig,
@@ -63,12 +75,85 @@ describe("theme/frame/style config", () => {
 
     it("rejects incomplete or unknown selections", () => {
         const invalidSelection: BoothSelection = {
+            ...defaultBoothSelection,
             themeId: "missing",
-            frameId: defaultBoothSelection.frameId,
-            styleId: defaultBoothSelection.styleId,
         };
 
         expect(isBoothSelectionComplete(invalidSelection)).toBe(false);
+    });
+
+    it("normalizes legacy restored selections to safe defaults", () => {
+        const normalized = normalizeBoothSelection({
+            themeId: "party",
+            frameId: "gold",
+            styleId: "warm",
+        });
+
+        expect(normalized).toEqual(
+            expect.objectContaining({
+                themeId: "party",
+                frameId: "gold",
+                styleId: "warm",
+                layoutId: "2x2",
+                countdownSeconds: 3,
+                customization: {
+                    stickerItems: [],
+                    textLabels: [],
+                    drawingStrokes: [],
+                },
+            }),
+        );
+    });
+
+    it("falls back from invalid layout and countdown values", () => {
+        const normalized = normalizeBoothSelection({
+            ...defaultBoothSelection,
+            layoutId: "missing",
+            countdownSeconds: 12,
+        } as unknown as Partial<BoothSelection>);
+
+        expect(normalized.layoutId).toBe("2x2");
+        expect(normalized.countdownSeconds).toBe(3);
+    });
+});
+
+describe("layout/countdown/customization config", () => {
+    it("maps approved layouts to expected shot counts and output sizes", () => {
+        expect(resolveBoothLayoutConfig("2x2")).toEqual(
+            expect.objectContaining({
+                shotCount: 4,
+                outputWidth: 1600,
+                outputHeight: 1600,
+            }),
+        );
+        expect(resolveBoothLayoutConfig("1x4-vertical")).toEqual(
+            expect.objectContaining({
+                shotCount: 4,
+                outputWidth: 1200,
+                outputHeight: 3600,
+            }),
+        );
+        expect(resolveBoothLayoutConfig("2x3")).toEqual(
+            expect.objectContaining({
+                shotCount: 6,
+                outputWidth: 1600,
+                outputHeight: 2400,
+            }),
+        );
+    });
+
+    it("exposes only approved countdown options", () => {
+        expect(countdownSecondOptions).toEqual([3, 6, 8, 10]);
+    });
+
+    it("provides bundled sticker and text-label defaults", () => {
+        expect(boothLayoutConfigs).toHaveLength(3);
+        expect(stickerConfigs.length).toBeGreaterThanOrEqual(3);
+        expect(textLabelPresetConfigs.length).toBeGreaterThanOrEqual(3);
+        expect(resolveStickerConfig("missing")).toEqual(stickerConfigs[0]);
+        expect(resolveTextLabelPresetConfig("missing")).toEqual(
+            textLabelPresetConfigs[0],
+        );
     });
 });
 

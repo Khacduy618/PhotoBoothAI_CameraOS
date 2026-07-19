@@ -1,3 +1,9 @@
+import type {
+    BoothCountdownSeconds,
+    BoothLayoutId,
+    BoothOutputCustomization,
+} from "@/types/customization";
+
 export type SessionStatus =
     | "active"
     | "completed"
@@ -11,6 +17,9 @@ export interface BoothSessionSelection {
     themeId: string;
     frameId: string;
     styleId: string;
+    layoutId: BoothLayoutId;
+    countdownSeconds: BoothCountdownSeconds;
+    customization: BoothOutputCustomization;
 }
 
 export interface BoothSession {

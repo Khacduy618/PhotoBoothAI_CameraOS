@@ -1,10 +1,14 @@
+import type { BoothLayoutId } from "@/types/customization";
+
 export type PhotoAssetKind = "original" | "processed";
 
 export type PhotoDerivativeKind =
     | "preview"
     | "share"
     | "print"
-    | "thumbnail";
+    | "thumbnail"
+    | "layout"
+    | "customized";
 
 export interface PhotoMetadata {
     id: string;
@@ -30,7 +34,9 @@ export interface ProcessedPhotoDerivative {
     blob: Blob;
     objectUrl?: string;
     createdAt: string;
-    sourcePhotoId: string;
+    sourcePhotoId?: string;
+    sourcePhotoIds?: readonly string[];
+    layoutId?: BoothLayoutId;
     processingErrorCode?: string;
 }
 

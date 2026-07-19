@@ -73,11 +73,11 @@ describe("BoothExperience", () => {
         ).toBeTruthy();
         expect(cameraPreviewMock).toHaveBeenCalledWith(
             expect.objectContaining({
-                selection: {
+                selection: expect.objectContaining({
                     themeId: "party",
                     frameId: "gold",
                     styleId: "warm",
-                },
+                }),
                 camera: cameraControllerMock,
                 onBackToSetup: expect.any(Function),
             }),
@@ -149,11 +149,11 @@ describe("BoothExperience", () => {
         ).toBeTruthy();
         expect(cameraPreviewMock).toHaveBeenCalledWith(
             expect.objectContaining({
-                selection: {
+                selection: expect.objectContaining({
                     themeId: "party",
                     frameId: "gold",
                     styleId: "warm",
-                },
+                }),
             }),
             undefined,
         );

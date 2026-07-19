@@ -342,6 +342,37 @@ export function CameraPreview({
                     ? "☝ Pointing Up"
                     : "Đưa tay vào khung hình";
 
+    const aiStatus = !boothConfig.gesture.enabled
+        ? "disabled"
+        : gesture.error
+            ? "failed"
+            : gesture.isLoading
+                ? "loading"
+                : "active";
+
+    const aiStatusLabel =
+        aiStatus === "active"
+            ? "AI gesture active"
+            : aiStatus === "loading"
+                ? "Đang tải AI gesture"
+                : aiStatus === "failed"
+                    ? "AI gesture gặp lỗi"
+                    : "AI gesture đang tắt";
+
+    const aiStatusDescription =
+        aiStatus === "active"
+            ? "Có thể dùng cử chỉ hoặc nút chụp thủ công."
+            : "Preview vẫn hoạt động. Hãy dùng nút Chụp thủ công để tiếp tục.";
+
+    const aiStatusClassName =
+        aiStatus === "active"
+            ? "border-emerald-400/30 bg-emerald-400/15 text-emerald-100"
+            : aiStatus === "loading"
+                ? "border-sky-400/30 bg-sky-400/15 text-sky-100"
+                : aiStatus === "failed"
+                    ? "border-amber-400/40 bg-amber-400/15 text-amber-100"
+                    : "border-zinc-500/40 bg-zinc-700/60 text-zinc-100";
+
     const handleRetake = useCallback(
         async (reconnectCamera = false) => {
             setCaptureError(null);
@@ -660,27 +691,51 @@ export function CameraPreview({
                     playsInline
                 />
 
-                <div className="absolute left-5 top-5 rounded-2xl bg-black/70 px-4 py-3 backdrop-blur">
-                    <div className="font-semibold">
-                        {gestureLabel}
+                <div className={`absolute left-5 top-5 max-w-sm rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur ${aiStatusClassName}`}>
+                    <div className="flex items-center justify-between gap-3">
+                        <div className="font-semibold">
+                            {aiStatusLabel}
+                        </div>
+
+                        <div className="rounded-full bg-black/30 px-2 py-1 text-xs uppercase tracking-wide">
+                            {aiStatus}
+                        </div>
                     </div>
 
-                    <div className="text-sm text-neutral-300">
-                        {Math.round(
-                            gesture.result.confidence *
-                            100,
-                        )}
-                        % confidence
-                    </div>
+                    {aiStatus === "active" ? (
+                        <div className="mt-2">
+                            <div className="font-medium">
+                                {gestureLabel}
+                            </div>
 
-                    <div className="mt-2 h-2 w-44 overflow-hidden rounded-full bg-neutral-700">
-                        <div
-                            className="h-full bg-emerald-400 transition-[width]"
-                            style={{
-                                width: `${holdProgress}%`,
-                            }}
-                        />
-                    </div>
+                            <div className="text-sm opacity-80">
+                                {Math.round(
+                                    gesture.result.confidence *
+                                    100,
+                                )}
+                                % confidence
+                            </div>
+
+                            <div className="mt-2 h-2 w-44 overflow-hidden rounded-full bg-black/30">
+                                <div
+                                    className="h-full bg-emerald-300 transition-[width]"
+                                    style={{
+                                        width: `${holdProgress}%`,
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    ) : (
+                        <p className="mt-2 text-sm leading-relaxed opacity-90">
+                            {aiStatusDescription}
+                        </p>
+                    )}
+
+                    {aiStatus === "failed" && gesture.error ? (
+                        <p className="mt-2 text-xs leading-relaxed text-amber-50/80">
+                            {gesture.error}
+                        </p>
+                    ) : null}
                 </div>
 
                 <div className="absolute right-5 top-5 rounded-xl bg-black/70 px-4 py-2">
@@ -722,18 +777,16 @@ export function CameraPreview({
             ) : null}
 
             <footer className="flex flex-wrap items-center justify-between gap-4">
-                <div className="text-sm">
-                    {gesture.isLoading ? (
-                        <span>
-                            Đang tải mô hình cử chỉ...
+                <div className="max-w-xl text-sm">
+                    {cameraError ? (
+                        <span className="text-red-500">
+                            {cameraError}
                         </span>
                     ) : null}
 
-                    {cameraError ||
-                        gesture.error ? (
-                        <span className="text-red-500">
-                            {cameraError ||
-                                gesture.error}
+                    {!cameraError && aiStatus !== "active" ? (
+                        <span className="text-amber-300">
+                            {aiStatusDescription}
                         </span>
                     ) : null}
                 </div>

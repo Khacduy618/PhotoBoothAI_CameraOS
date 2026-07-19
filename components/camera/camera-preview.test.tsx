@@ -6,6 +6,10 @@ import {
     createCapturedPhotoOutput,
     performRetake,
 } from "@/components/camera/camera-preview";
+import {
+    MemoryPhotoBlobStorage,
+    PhotoStorageService,
+} from "@/services/storage/photo-storage.service";
 
 afterEach(() => {
     vi.restoreAllMocks();
@@ -77,24 +81,63 @@ describe("createCapturedPhotoOutput", () => {
         const renderedBlob = new Blob(["rendered"], {
             type: "image/jpeg",
         });
+        const calls: string[] = [];
+        const photoStorage = new PhotoStorageService(
+            new MemoryPhotoBlobStorage(),
+        );
+        const saveOriginalPhoto = vi.spyOn(
+            photoStorage,
+            "saveOriginalPhoto",
+        );
         const createObjectUrl = vi
-            .fn()
-            .mockReturnValueOnce("blob:original")
-            .mockReturnValueOnce("blob:rendered");
+            .fn((blob: Blob) => {
+                calls.push(
+                    blob === originalBlob
+                        ? "object-url:original"
+                        : "object-url:rendered",
+                );
+                return blob === originalBlob
+                    ? "blob:original"
+                    : "blob:rendered";
+            });
+        const renderOriginal = vi.fn(async () => {
+            calls.push("render");
+            return renderedBlob;
+        });
+
+        saveOriginalPhoto.mockImplementationOnce(
+            async (input) => {
+                calls.push("save-original");
+                return PhotoStorageService.prototype.saveOriginalPhoto.call(
+                    photoStorage,
+                    input,
+                );
+            },
+        );
 
         const photo = await createCapturedPhotoOutput({
             originalBlob,
-            renderOriginal: vi.fn(async () => renderedBlob),
+            sessionId: "session-1",
+            photoStorage,
+            renderOriginal,
             createObjectUrl,
             createId: () => "capture-1",
+            now: () => "2026-07-19T00:00:00.000Z",
         });
 
         expect(photo).toEqual({
             id: "capture-1",
+            sessionId: "session-1",
             originalUrl: "blob:original",
             outputUrl: "blob:rendered",
             usedFallback: false,
         });
+        expect(calls).toEqual([
+            "save-original",
+            "object-url:original",
+            "render",
+            "object-url:rendered",
+        ]);
         expect(createObjectUrl).toHaveBeenNthCalledWith(1, originalBlob);
         expect(createObjectUrl).toHaveBeenNthCalledWith(2, renderedBlob);
     });
@@ -106,25 +149,70 @@ describe("createCapturedPhotoOutput", () => {
         const originalBlob = new Blob(["original"], {
             type: "image/jpeg",
         });
+        const photoStorage = new PhotoStorageService(
+            new MemoryPhotoBlobStorage(),
+        );
         const createObjectUrl = vi.fn(() => "blob:original");
 
         const photo = await createCapturedPhotoOutput({
             originalBlob,
+            sessionId: "session-1",
+            photoStorage,
             renderOriginal: vi.fn(async () => {
                 throw new Error("render failed");
             }),
             createObjectUrl,
             createId: () => "capture-2",
+            now: () => "2026-07-19T00:00:00.000Z",
         });
 
         expect(photo).toEqual({
             id: "capture-2",
+            sessionId: "session-1",
             originalUrl: "blob:original",
             outputUrl: "blob:original",
             usedFallback: true,
         });
         expect(createObjectUrl).toHaveBeenCalledTimes(1);
         expect(warnSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("blocks preview output when original storage fails", async () => {
+        const originalBlob = new Blob(["original"], {
+            type: "image/jpeg",
+        });
+        const photoStorage = new PhotoStorageService(
+            new MemoryPhotoBlobStorage(),
+        );
+        vi.spyOn(
+            photoStorage,
+            "saveOriginalPhoto",
+        ).mockResolvedValueOnce({
+            ok: false,
+            error: {
+                code: "quota_exceeded",
+                category: "storage",
+                recoverable: true,
+                message: "Không thể lưu ảnh gốc.",
+                suggestedAction: "Giải phóng dung lượng.",
+                occurredAt: "2026-07-19T00:00:00.000Z",
+            },
+        });
+        const renderOriginal = vi.fn(async () => originalBlob);
+        const createObjectUrl = vi.fn(() => "blob:original");
+
+        await expect(
+            createCapturedPhotoOutput({
+                originalBlob,
+                sessionId: "session-1",
+                photoStorage,
+                renderOriginal,
+                createObjectUrl,
+                createId: () => "capture-3",
+            }),
+        ).rejects.toThrow("Không thể lưu ảnh gốc.");
+        expect(renderOriginal).not.toHaveBeenCalled();
+        expect(createObjectUrl).not.toHaveBeenCalled();
     });
 });
 

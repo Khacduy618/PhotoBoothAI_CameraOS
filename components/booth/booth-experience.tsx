@@ -4,7 +4,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { BoothSelectionFlow } from "@/components/booth/booth-selection-flow";
 import { CameraPreview } from "@/components/camera/camera-preview";
-import { defaultBoothSelection } from "@/config/theme.config";
+import {
+    defaultBoothSelection,
+    normalizeBoothSelection,
+} from "@/config/theme.config";
 import { useCamera } from "@/hooks/use-camera";
 import { SessionService } from "@/services/session/session.service";
 import {
@@ -65,7 +68,11 @@ export function BoothExperience() {
             if (activeSession.ok && activeSession.value) {
                 setRestoredSession(activeSession.value);
                 if (activeSession.value.selection) {
-                    setSelection(activeSession.value.selection);
+                    setSelection(
+                        normalizeBoothSelection(
+                            activeSession.value.selection,
+                        ),
+                    );
                 }
             }
 

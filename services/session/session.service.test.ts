@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { defaultBoothSelection } from "@/config/theme.config";
 import {
     archiveAbandonedSessions,
     SessionService,
@@ -46,11 +47,7 @@ describe("SessionService", () => {
         const service = createService();
 
         const result = await service.startSession({
-            selection: {
-                themeId: "classic",
-                frameId: "none",
-                styleId: "none",
-            },
+            selection: defaultBoothSelection,
         });
 
         expect(result.ok).toBe(true);
@@ -62,11 +59,13 @@ describe("SessionService", () => {
                 createdAt: "2026-07-19T00:00:01.000Z",
                 updatedAt: "2026-07-19T00:00:01.000Z",
                 photoIds: [],
-                selection: {
+                selection: expect.objectContaining({
                     themeId: "classic",
                     frameId: "none",
                     styleId: "none",
-                },
+                    layoutId: "2x2",
+                    countdownSeconds: 3,
+                }),
             });
         }
     });

@@ -47,24 +47,35 @@ export function LiveSelectionPreview({
             return;
         }
 
+        let cancelled = false;
         video.srcObject = stream;
 
         const play = async () => {
             try {
                 await video.play();
             } catch (cause) {
-                console.warn(
-                    "Không thể phát live preview setup:",
-                    cause,
-                );
+                const wasInterrupted =
+                    cause instanceof DOMException &&
+                    cause.name === "AbortError";
+
+                if (!cancelled && !wasInterrupted) {
+                    console.warn(
+                        "Không thể phát live preview setup:",
+                        cause,
+                    );
+                }
             }
         };
 
         void play();
 
         return () => {
-            video.pause();
-            video.srcObject = null;
+            cancelled = true;
+
+            if (video.srcObject === stream) {
+                video.pause();
+                video.srcObject = null;
+            }
         };
     }, [stream]);
 

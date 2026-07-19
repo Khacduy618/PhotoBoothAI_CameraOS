@@ -328,26 +328,37 @@ export function CameraPreview({
             return;
         }
 
+        let cancelled = false;
         video.srcObject = stream;
 
         const startVideo = async () => {
             try {
                 await video.play();
             } catch (cause) {
-                console.error(
-                    "Không thể tự phát camera:",
-                    cause,
-                );
+                const wasInterrupted =
+                    cause instanceof DOMException &&
+                    cause.name === "AbortError";
+
+                if (!cancelled && !wasInterrupted) {
+                    console.warn(
+                        "Không thể tự phát camera:",
+                        cause,
+                    );
+                }
             }
         };
 
         void startVideo();
 
         return () => {
-            video.pause();
-            video.srcObject = null;
+            cancelled = true;
+
+            if (video.srcObject === stream) {
+                video.pause();
+                video.srcObject = null;
+            }
         };
-    }, [photoUrl, stream]);
+    }, [stream]);
 
     useEffect(() => {
         return () => {
@@ -935,20 +946,32 @@ export function CameraPreview({
                     ) : null}
                 </div>
 
-                <button
-                    type="button"
-                    disabled={
-                        !stream ||
-                        boothState === "countdown" ||
-                        boothState === "capturing"
-                    }
-                    className="rounded-xl border px-5 py-3 disabled:opacity-40"
-                    onClick={
-                        captureManually
-                    }
-                >
-                    Chụp thủ công
-                </button>
+                <div className="flex flex-col items-end gap-2">
+                    <button
+                        type="button"
+                        disabled={
+                            !stream ||
+                            boothState === "countdown" ||
+                            boothState === "capturing"
+                        }
+                        className="rounded-xl border px-5 py-3 disabled:opacity-40"
+                        onClick={
+                            captureManually
+                        }
+                    >
+                        {boothState === "countdown"
+                            ? "Đang đếm ngược..."
+                            : boothState === "capturing"
+                                ? "Đang chụp..."
+                                : "Chụp thủ công"}
+                    </button>
+
+                    {!stream ? (
+                        <p className="max-w-xs text-right text-xs text-neutral-400">
+                            Camera chưa sẵn sàng nên chưa thể bắt đầu countdown.
+                        </p>
+                    ) : null}
+                </div>
             </footer>
         </section>
     );

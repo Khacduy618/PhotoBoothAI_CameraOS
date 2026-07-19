@@ -17,10 +17,15 @@ import { useBoothMachine } from "@/hooks/use-booth-machine";
 import type { CameraController } from "@/hooks/use-camera";
 import { useGestureRecognizer } from "@/hooks/use-gesture-recognizer";
 import { renderPhotoOutput } from "@/services/render/render-photo-output";
+import {
+    MemoryPhotoBlobStorage,
+    PhotoStorageService,
+} from "@/services/storage/photo-storage.service";
 import type { BoothSelection } from "@/types/theme";
 
 export interface CapturedPhoto {
     id: string;
+    sessionId: string;
     originalUrl: string;
     outputUrl: string;
     usedFallback: boolean;
@@ -28,9 +33,15 @@ export interface CapturedPhoto {
 
 interface CreateCapturedPhotoOutputOptions {
     originalBlob: Blob;
+    sessionId: string;
+    photoStorage: Pick<
+        PhotoStorageService,
+        "saveOriginalPhoto" | "createObjectUrl"
+    >;
     renderOriginal: (original: Blob) => Promise<Blob>;
     createObjectUrl?: (blob: Blob) => string;
     createId?: () => string;
+    now?: () => string;
 }
 
 export function canChangeSetup(
@@ -46,17 +57,58 @@ export function canChangeSetup(
 
 export async function createCapturedPhotoOutput({
     originalBlob,
+    sessionId,
+    photoStorage,
     renderOriginal,
     createObjectUrl = URL.createObjectURL,
     createId = () => crypto.randomUUID(),
+    now = () => new Date().toISOString(),
 }: CreateCapturedPhotoOutputOptions): Promise<CapturedPhoto> {
-    const originalUrl = createObjectUrl(originalBlob);
+    const photoId = createId();
+    const savedOriginal =
+        await photoStorage.saveOriginalPhoto({
+            id: photoId,
+            sessionId,
+            originalBlob,
+            capturedAt: now(),
+            source: "webcam",
+        });
+
+    if (!savedOriginal.ok) {
+        throw new Error(savedOriginal.error.message);
+    }
+
+    const originalUrlResult =
+        photoStorage.createObjectUrl(
+            savedOriginal.value.original.blob,
+            createObjectUrl,
+        );
+
+    if (!originalUrlResult.ok) {
+        throw new Error(originalUrlResult.error.message);
+    }
+
+    const originalUrl = originalUrlResult.value;
     let outputUrl = originalUrl;
     let usedFallback = false;
 
     try {
-        const renderedBlob = await renderOriginal(originalBlob);
-        outputUrl = createObjectUrl(renderedBlob);
+        const renderedBlob = await renderOriginal(
+            savedOriginal.value.original.blob,
+        );
+        const renderedUrlResult =
+            photoStorage.createObjectUrl(
+                renderedBlob,
+                createObjectUrl,
+            );
+
+        if (!renderedUrlResult.ok) {
+            throw new Error(
+                renderedUrlResult.error.message,
+            );
+        }
+
+        outputUrl = renderedUrlResult.value;
     } catch (cause) {
         usedFallback = true;
         console.warn(
@@ -66,7 +118,8 @@ export async function createCapturedPhotoOutput({
     }
 
     return {
-        id: createId(),
+        id: photoId,
+        sessionId,
         originalUrl,
         outputUrl,
         usedFallback,
@@ -158,6 +211,22 @@ export function CameraPreview({
 
     const capturedPhotosRef =
         useRef<CapturedPhoto[]>([]);
+
+    const photoStorageRef =
+        useRef<PhotoStorageService | null>(null);
+
+    const captureSessionIdRef =
+        useRef<string | null>(null);
+
+    if (photoStorageRef.current === null) {
+        photoStorageRef.current = new PhotoStorageService(
+            new MemoryPhotoBlobStorage(),
+        );
+    }
+
+    if (captureSessionIdRef.current === null) {
+        captureSessionIdRef.current = crypto.randomUUID();
+    }
 
     const {
         adapter,
@@ -255,8 +324,20 @@ export function CameraPreview({
                 const originalBlob =
                     await adapter.capture(video);
 
+                const captureSessionId =
+                    captureSessionIdRef.current;
+                const photoStorage = photoStorageRef.current;
+
+                if (!captureSessionId || !photoStorage) {
+                    throw new Error(
+                        "Session lưu ảnh chưa sẵn sàng.",
+                    );
+                }
+
                 const nextPhoto = await createCapturedPhotoOutput({
                     originalBlob,
+                    sessionId: captureSessionId,
+                    photoStorage,
                     renderOriginal: (original) =>
                         renderPhotoOutput({
                             original,

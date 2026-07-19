@@ -566,6 +566,597 @@ As an event organizer, I want logo/text/theme configuration so that photos match
 - PB-057: Multi-language kiosk UI.
 - PB-058: Remote event analytics dashboard.
 
+## Current Phase 1 delivery track
+
+The legacy Sprint 1 backlog remains preserved for traceability. Current execution follows `docs/product/PHASE_1_DELIVERY_PLAN.md`.
+
+PR1-PR6 are the merged Phase 1 baseline. PR7+ work must map to the Phase 1 backlog below, preserve media-safety invariants and pass the evidence gates in `docs/testing/ACCEPTANCE_EVIDENCE_MATRIX.md`.
+
+### Phase 1 status summary
+
+- Code baseline through PR6: merged.
+- Next primary code task: PB-109 Realtime layout preview, PB-111 Realtime theme preview, PB-112 Realtime frame preview, PB-113 Realtime style preview, PB-114/PB-115 sticker/text setup preview, usually grouped as PR7.
+- Evidence tasks still required: PB-129 Phase 1 manual browser smoke, PB-130 offline/no-cloud verification, PB-131 hardware evidence labeling and PB-132 final Phase 1 release report.
+- Theme/frame/sticker asset libraries are investigation-only until PM and Architect approve implementation.
+
+### Phase 1 backlog mapping
+
+#### E1 — Project baseline and delivery gates
+
+##### PB-101: Stabilize lint configuration
+
+As a developer, I want lint to report only actionable app issues so delivery gates are reliable.
+
+- Priority: Critical
+- Phase: Phase 1
+- Status: Done if already merged
+- Acceptance criteria:
+  - ESLint ignores generated MediaPipe/public assets where appropriate.
+  - Application source remains linted.
+  - `pnpm lint` passes.
+  - No unrelated lint suppression hides real app issues.
+- Tests/evidence: `pnpm lint`
+
+##### PB-102: Resolve React hook lifecycle issues
+
+As a developer, I want hooks to follow React rules so camera, gesture and booth state remain predictable.
+
+- Priority: Critical
+- Phase: Phase 1
+- Status: Done if already merged
+- Acceptance criteria:
+  - No hook lint violations remain.
+  - Timers, animation frames, recognizers and media tracks are cleaned up.
+  - Duplicate async operations are guarded.
+  - Existing capture/countdown behavior is preserved.
+- Tests/evidence: `pnpm lint`, hook tests where feasible, manual smoke when camera behavior is touched
+
+##### PB-103: Restore production build
+
+As a developer, I want the app to build successfully so release gates can run.
+
+- Priority: Critical
+- Phase: Phase 1
+- Status: Done if already merged
+- Acceptance criteria:
+  - `pnpm build` completes.
+  - TypeScript build passes.
+  - No production-only runtime errors are introduced.
+- Tests/evidence: `pnpm build`
+
+##### PB-104: Establish test and type baseline
+
+As a developer, I want tests and type checks to run reliably so future changes are protected.
+
+- Priority: Critical
+- Phase: Phase 1
+- Status: Active gate for every PR
+- Acceptance criteria:
+  - `pnpm test` passes.
+  - `pnpm tsc --noEmit` passes when type/test surfaces are touched.
+  - State/service/component tests exist for touched areas.
+  - Browser API mocks are explicit and safe.
+- Tests/evidence: `pnpm test`, `pnpm tsc --noEmit`
+
+#### E2 — Entry, setup and readiness UX
+
+##### PB-105: Replace starter landing page
+
+As an attendee/operator, I want a clear PhotoBoothAI entry point so I know how to start.
+
+- Priority: High
+- Phase: Phase 1
+- Status: Done if already merged
+- Acceptance criteria:
+  - Home page no longer shows Next.js starter content.
+  - Home page explains PhotoBoothAI.
+  - Home page links to `/booth`.
+  - Metadata describes PhotoBoothAI CameraOS.
+- Tests/evidence: browser/manual check, optional route/component test
+
+##### PB-106: Add explicit capture error UI
+
+As an attendee/operator, I want clear recovery when capture fails so I can retry safely.
+
+- Priority: High
+- Phase: Phase 1
+- Status: Done if already merged
+- Acceptance criteria:
+  - Capture errors show understandable message.
+  - Retry action exists when recoverable.
+  - Back/setup/reset action exists when retry is unsafe.
+  - Error context is logged without photos, blobs, secrets or sensitive local paths.
+  - Critical capture failure is not toast-only.
+- Tests/evidence: simulated capture failure, component/integration test where feasible
+
+##### PB-107: Add AI gesture fallback UI
+
+As an attendee, I want touch/manual capture available when AI fails so the booth remains usable.
+
+- Priority: Critical
+- Phase: Phase 1
+- Status: Done; continue hardening when touched
+- Acceptance criteria:
+  - UI displays AI status: active, loading, disabled or failed.
+  - Touch/manual capture remains available when AI fails.
+  - MediaPipe failure does not stop live preview.
+  - No sustained gesture can trigger unlimited captures.
+  - Gesture confidence/cooldown behavior is visible or documented.
+- Tests/evidence: mocked MediaPipe failure, manual broken/missing model check, preview remains usable, hardware status PARTIAL unless real target tested
+
+##### PB-108: Setup/readiness screen
+
+As a booth operator, I want a setup/readiness screen so I can confirm the booth is ready before attendees start.
+
+- Priority: Critical
+- Phase: Phase 1
+- Suggested PR: PR7
+- Acceptance criteria:
+  - Setup page shows camera readiness: permission needed, initializing, ready or failed.
+  - Setup page shows AI/gesture status if enabled.
+  - Manual/touch fallback is visible.
+  - Capture/start is blocked or clearly unavailable when camera preview is unavailable.
+  - Recovery action exists for camera retry.
+  - UI copy is readable from booth distance.
+  - No print/cloud actions appear.
+- Tests/evidence: component test for readiness states, browser/manual check, simulated camera unavailable/permission denied
+
+#### E3 — Realtime setup preview UX
+
+##### PB-109: Realtime layout preview
+
+As an operator/attendee, I want layout selection to update preview immediately so I understand the output before capture.
+
+- Priority: Critical
+- Phase: Phase 1
+- Suggested PR: PR7
+- Acceptance criteria:
+  - Selecting `2x2` updates preview to a 2x2 grid.
+  - Selecting `1x4-vertical` updates preview to a vertical strip grid.
+  - Selecting `2x3` updates preview to a 2x3 grid.
+  - Preview shows shot count.
+  - Preview update does not require Apply/Refresh.
+  - Invalid layout falls back to default.
+  - Preview remains usable without camera via placeholder/static preview.
+- Tests/evidence: component test for layout selection, component test for preview output, manual browser check
+
+##### PB-110: Realtime countdown preview
+
+As an attendee, I want countdown choice to be visible before capture so I know how much time I have.
+
+- Priority: Medium
+- Phase: Phase 1
+- Suggested PR: PR7
+- Acceptance criteria:
+  - Countdown options show approved values only: `3`, `6`, `8`, `10`.
+  - Selected countdown is visually highlighted.
+  - Preview summary updates immediately.
+  - Capture flow receives selected countdown.
+  - Invalid countdown normalizes to default.
+- Tests/evidence: selection test, capture hook/machine test if countdown is touched
+
+##### PB-111: Realtime theme preview
+
+As an organizer/operator, I want theme selection to update preview colors immediately so the booth feels event-ready.
+
+- Priority: High
+- Phase: Phase 1
+- Suggested PR: PR7
+- Acceptance criteria:
+  - Selecting theme updates preview background/accent/text treatment.
+  - Selected theme is visually highlighted.
+  - Theme preview does not require camera stream.
+  - Unknown theme falls back to default.
+  - Theme config remains local/static.
+- Tests/evidence: component test for theme application, visual/manual browser check
+
+##### PB-112: Realtime frame preview
+
+As an organizer/operator, I want frame selection to update preview immediately so I know how output will be framed.
+
+- Priority: High
+- Phase: Phase 1
+- Suggested PR: PR7
+- Acceptance criteria:
+  - Selecting frame updates preview border/frame treatment.
+  - Frame name/label appears when relevant.
+  - Missing/unknown frame falls back safely.
+  - Frame preview is lightweight CSS/SVG/DOM, not a heavy live canvas loop.
+  - No external frame dependency is introduced without PM/Architect approval.
+- Tests/evidence: component test for frame selection, manual browser check
+
+##### PB-113: Realtime style/filter preview
+
+As an attendee/operator, I want style/filter selection to update preview immediately so I can see the intended look.
+
+- Priority: High
+- Phase: Phase 1
+- Suggested PR: PR7
+- Acceptance criteria:
+  - Style selection updates preview with fast CSS approximation.
+  - Supported initial styles include `none`, `grayscale` and `warm`.
+  - Style preview does not claim pixel-perfect final output.
+  - Final renderer remains authoritative.
+  - Style preview does not block live camera preview.
+- Tests/evidence: component test for style indicator/filter, manual browser check
+
+##### PB-114: Realtime sticker preset preview
+
+As an attendee, I want preset sticker choices to appear on setup preview so I can choose a playful output style.
+
+- Priority: High
+- Phase: Phase 1
+- Suggested PR: PR7 or PR8 if split
+- Acceptance criteria:
+  - Sticker preset list appears in setup.
+  - Selecting sticker shows it on preview immediately.
+  - Selecting another sticker replaces setup-generated sticker, not append unlimited stickers.
+  - `No sticker` option clears setup sticker.
+  - Sticker selection persists into capture/final output config.
+  - Stickers are local/offline.
+  - Emoji rendering variability is documented if emoji-based.
+- Tests/evidence: pure helper test for stable setup sticker replacement, component test for preview sticker, manual browser check
+
+##### PB-115: Realtime text preset/custom label preview
+
+As an attendee/operator, I want text preset/custom label preview so event text can be seen before capture.
+
+- Priority: High
+- Phase: Phase 1
+- Suggested PR: PR7 or PR8 if split
+- Acceptance criteria:
+  - Text preset list appears in setup.
+  - Selecting text preset shows text on preview immediately.
+  - Custom text input supports max length.
+  - Blank text does not create label.
+  - Repeated text changes replace setup-generated text label.
+  - Text label persists into capture/final output config.
+  - Text contrast remains readable.
+- Tests/evidence: helper tests for trim/max/blank/replacement, component test for preview label, manual browser check
+
+#### E4 — Capture state, multi-shot and media safety
+
+##### PB-116: Define session/photo domain types
+
+As a developer, I want stable domain contracts so services and UI share one model.
+
+- Priority: Critical
+- Phase: Phase 1
+- Status: Done if already merged
+- Acceptance criteria:
+  - `BoothSession`, `BoothPhoto`, `PhotoMetadata` and `SessionStatus` are typed.
+  - Types separate original media from derivatives.
+  - Types do not depend on React components.
+  - Selection/config is attached to session/capture where needed.
+- Tests/evidence: TypeScript compile, `pnpm build`
+
+##### PB-117: Implement local session storage service
+
+As an operator, I want sessions persisted locally so recovery is possible.
+
+- Priority: Critical
+- Phase: Phase 1
+- Status: Done or verify current implementation
+- Acceptance criteria:
+  - Create/read/update/delete session operations exist.
+  - Active session restore is possible where supported.
+  - Storage errors return typed failures.
+  - No sensitive local paths exposed.
+  - Session stores selected setup config.
+- Tests/evidence: session storage unit tests, failure path tests
+
+##### PB-118: Implement photo storage service
+
+As an attendee, I want captured photos saved immediately so media is not lost.
+
+- Priority: Critical
+- Phase: Phase 1
+- Status: Done or verify current implementation
+- Acceptance criteria:
+  - Original photo blob is saved before preview/output actions.
+  - Retrieval by session/photo ID works.
+  - Derivatives are stored separately from originals.
+  - Object URLs are created/revoked safely.
+  - Quota/write errors are explicit.
+- Tests/evidence: photo storage tests, quota/failure mock tests
+
+##### PB-119: Create unique booth sessions
+
+As an operator, I want every customer flow to have unique session ID so captures are organized.
+
+- Priority: Critical
+- Phase: Phase 1
+- Status: Done or verify current implementation
+- Acceptance criteria:
+  - Session ID is created when flow starts.
+  - Session metadata includes mode/layout/setup choices.
+  - Captures link to active session.
+  - Retake/reset behavior is explicit.
+- Tests/evidence: session creation tests, integration tests
+
+##### PB-120: Preserve original capture before preview/output
+
+As an attendee, I want original capture preserved before effects so processing failure cannot lose my photo.
+
+- Priority: Critical
+- Phase: Phase 1
+- Status: Done; invariant for all future PRs
+- Acceptance criteria:
+  - Capture success writes original before preview/result.
+  - Processing/customization/share/print failure never deletes original.
+  - UI blocks successful completion if original cannot be preserved.
+  - Retake does not delete preserved original unless cleanup policy applies.
+- Tests/evidence: capture-storage integration test, failure path test, manual/browser capture evidence
+
+##### PB-121: Implement multi-shot countdown flow
+
+As an attendee, I want a countdown before each photo so each pose is intentional.
+
+- Priority: High
+- Phase: Phase 1 current chain
+- Status: Done if PR3 merged; verify evidence
+- Acceptance criteria:
+  - Each shot has independent countdown.
+  - UI shows progress such as `1/4`, `2/4`.
+  - Partial captures are preserved if failure occurs.
+  - Capture is single-flight.
+  - Sustained gesture does not trigger unlimited captures.
+  - Retake-all is available.
+- Tests/evidence: state/hook tests, browser/manual flow, media preservation evidence
+
+##### PB-122: Implement layout compositor
+
+As an attendee, I want captured photos composed into a strip/collage so the output feels complete.
+
+- Priority: High
+- Phase: Phase 1 current chain
+- Status: Done if PR4 merged; verify evidence
+- Acceptance criteria:
+  - Supports approved layouts: `2x2`, `1x4-vertical`, `2x3`.
+  - Output dimensions are defined per layout.
+  - Composition uses preserved originals.
+  - Composition creates derivative and does not overwrite originals.
+  - Composition failure is recoverable.
+  - Original captures remain available.
+- Tests/evidence: layout dimension tests, compositor tests, failure path tests
+
+##### PB-123: Preview composed layout result
+
+As an attendee, I want to preview the composed output so I can decide whether to keep or retake.
+
+- Priority: High
+- Phase: Phase 1 current chain
+- Status: Done if PR5 merged; verify browser evidence
+- Acceptance criteria:
+  - Result preview shows composed layout, not just one individual photo.
+  - Retake-all is available.
+  - Layout composition failure shows safe fallback.
+  - Original media remains preserved.
+  - UI clearly distinguishes layout output from original capture.
+- Tests/evidence: component/integration tests, browser/manual preview check
+
+#### E5 — Final customization
+
+##### PB-124: Add output customizer sticker picker
+
+As an attendee, I want to add stickers to the final output so it feels personalized.
+
+- Priority: High
+- Phase: Phase 1
+- Status: Done if PR6 merged; browser evidence still needed
+- Acceptance criteria:
+  - Sticker picker appears on result/customizer screen.
+  - Selected sticker is applied to derivative.
+  - Clicking a sticker applies that exact sticker.
+  - No stale selected-sticker state.
+  - Original/composed layout remains separate.
+  - No print/cloud introduced.
+- Tests/evidence: focused helper tests, component/manual evidence, verifier status PARTIAL without browser visual check
+
+##### PB-125: Add output customizer text label/custom text
+
+As an attendee, I want to add custom text to the final output.
+
+- Priority: High
+- Phase: Phase 1
+- Status: Done if PR6 merged; browser evidence still needed
+- Acceptance criteria:
+  - Text input exists.
+  - Text is trimmed.
+  - Blank text is ignored.
+  - Max length is enforced.
+  - Text appears in final derivative.
+  - Text contrast remains readable.
+- Tests/evidence: text helper tests, manual browser visual evidence
+
+##### PB-126: Add output customizer canvas pen drawing
+
+As an attendee, I want to draw on the final output.
+
+- Priority: High
+- Phase: Phase 1
+- Status: Done if PR6 merged; touch/browser evidence still needed
+- Acceptance criteria:
+  - Pointer/mouse drawing works.
+  - Touch drawing is supported where browser supports pointer events.
+  - Strokes are normalized to output coordinates.
+  - Drawing applies to derivative only.
+  - Original/composed layout remains preserved.
+- Tests/evidence: manual browser test required, touchscreen evidence if available, hardware PARTIAL unless target touchscreen tested
+
+##### PB-127: Add undo/clear customization
+
+As an attendee, I want undo/clear so I can recover from mistakes.
+
+- Priority: High
+- Phase: Phase 1
+- Status: Done if PR6 merged; browser evidence still needed
+- Acceptance criteria:
+  - Undo removes latest customization action.
+  - Clear removes all current customization actions.
+  - Undo/clear do not affect original capture.
+  - Controls are disabled when no actions exist.
+  - UI remains clear and touch-friendly.
+- Tests/evidence: helper tests, manual browser evidence
+
+##### PB-128: Download customized final output
+
+As an attendee, I want to download the customized final image.
+
+- Priority: High
+- Phase: Phase 1
+- Status: Done if PR6 merged; download/open-file evidence still needed
+- Acceptance criteria:
+  - Download link uses customized derivative when available.
+  - Original composed layout remains separately downloadable or recoverable.
+  - Download filename is safe.
+  - Downloaded output does not require cloud.
+  - Failed customization render falls back to original composed layout.
+- Tests/evidence: manual browser download/open JPEG evidence, no cloud/network evidence
+
+#### E6 — Evidence, manual validation and release readiness
+
+##### PB-129: Manual browser smoke test for Phase 1
+
+As QA/verifier, I want manual browser evidence so runtime behavior is honestly classified.
+
+- Priority: Critical
+- Phase: Phase 1
+- Status: Remaining
+- Acceptance criteria:
+  - Browser and OS are recorded.
+  - `/booth` setup opens.
+  - Setup preview updates for layout/theme/frame/style/sticker/text.
+  - Camera permission flow is recorded.
+  - Capture flow completes.
+  - Multi-shot flow completes if enabled.
+  - Composed result is shown.
+  - Customizer actions are tested.
+  - Downloaded JPEG is opened and visually checked.
+  - Retake/reset is tested.
+  - No print/cloud UI appears.
+  - Hardware status is labeled PASS/PARTIAL/FAIL.
+- Tests/evidence: manual checklist, screenshots/video optional but preferred
+
+##### PB-130: Offline/no-cloud verification
+
+As an organizer, I want Phase 1 to work locally without cloud dependency.
+
+- Priority: High
+- Phase: Phase 1
+- Status: Remaining
+- Acceptance criteria:
+  - Core flow does not require cloud upload.
+  - Setup preview assets are local.
+  - Download is local browser download.
+  - No email/SMS/social cloud action appears.
+  - No sensitive media paths or blobs are logged.
+  - If network is disabled, local UI remains usable.
+- Tests/evidence: browser/manual offline or network-disabled note, log inspection note
+
+##### PB-131: Hardware evidence labeling
+
+As PM/verifier, I want hardware claims labeled honestly.
+
+- Priority: Critical
+- Phase: Phase 1
+- Status: Remaining
+- Acceptance criteria:
+  - Camera PASS only with named real camera evidence.
+  - Kiosk/touch PASS only with named target kiosk/touchscreen evidence.
+  - Printer is Not applicable in Phase 1.
+  - Mock/browser-only evidence is PARTIAL.
+  - Reports always include hardware tested/not tested.
+- Tests/evidence: verifier report, hardware checklist if available
+
+##### PB-132: Phase 1 release report
+
+As PM, I want a final Phase 1 report so stakeholders know what is complete and what remains partial.
+
+- Priority: Critical
+- Phase: Phase 1
+- Status: Remaining
+- Acceptance criteria:
+  - Summarizes PB-101 through PB-136.
+  - Lists merged PRs.
+  - Lists commands and results.
+  - Lists QA/reviewer/verifier status.
+  - Lists browser/manual evidence.
+  - Lists hardware tested/not tested.
+  - Lists remaining risks.
+  - Clearly states no print/cloud claim.
+  - Clearly states final status: PASS/PARTIAL/FAIL.
+- Tests/evidence: report review, PM approval
+
+#### E7 — Theme/frame/sticker asset system investigation
+
+##### PB-133: Theme/frame/sticker library investigation
+
+As product/engineering, I want to evaluate sticker/frame/theme asset options before adding dependencies.
+
+- Priority: Medium
+- Phase: Investigation
+- Status: Proposed
+- Acceptance criteria:
+  - Compare asset/render libraries.
+  - Compare sticker sources.
+  - Compare frame/template approaches.
+  - Review license, offline use, bundle/runtime impact, browser/kiosk compatibility, visual quality and implementation complexity.
+  - Recommend native implementation, library adoption or deferral.
+  - No production dependency is added in this task.
+- Tests/evidence: written investigation note
+
+##### PB-134: Define local theme/frame asset format
+
+As developer/operator, I want a local asset format so future themes/frames are predictable.
+
+- Priority: Medium
+- Phase: Later Phase 1 or Phase 2 candidate
+- Status: Proposed
+- Acceptance criteria:
+  - Define theme config shape.
+  - Define frame config shape.
+  - Define sticker pack format.
+  - Define text preset format.
+  - Define supported asset types: SVG, PNG and optionally WebP.
+  - Define recommended dimensions.
+  - Define local-first storage rules.
+  - Define missing asset fallback.
+- Tests/evidence: config validation tests, docs review
+
+##### PB-135: Implement curated local sticker pack
+
+As an attendee, I want a beautiful default sticker pack.
+
+- Priority: Medium
+- Phase: Later Phase 1 or Phase 2 candidate
+- Status: Proposed, requires PM approval before implementation
+- Acceptance criteria:
+  - Uses local/offline sticker assets.
+  - Stickers have stable IDs.
+  - Stickers are visually consistent.
+  - Supports emoji fallback if image asset unavailable.
+  - No cloud asset fetch is required.
+  - License allows app usage.
+  - Pack is not too large.
+- Tests/evidence: asset/license note, UI smoke, bundle size note
+
+##### PB-136: Implement curated local frame/theme pack
+
+As an organizer, I want attractive default frames/themes.
+
+- Priority: Medium
+- Phase: Phase 2 candidate unless PM approves
+- Status: Proposed, requires PM approval before implementation
+- Acceptance criteria:
+  - At least three local frames exist: classic white, party/neon and minimal/elegant.
+  - At least three local themes exist: classic, party and minimal.
+  - Frames work in setup preview.
+  - Frames work in final renderer.
+  - Missing frame falls back to default.
+  - License/assets are documented.
+- Tests/evidence: visual browser check, config validation, final render smoke
+
 ## Sprint backlog
 
 ### Sprint 1: MVP core flow and media preservation

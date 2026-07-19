@@ -63,6 +63,29 @@ These names refer to project guidance documents or role capabilities. They are n
 | Maintain acceptance evidence during implementation | Verifier | QA, Backend, Frontend | evidence checklist updates | PASS/PARTIAL/FAIL mapping |
 | Scope review after each merged story | PM | Reviewer | story acceptance update | PM note |
 
+## Phase 1 PR7+ ownership
+
+Use this section for current post-PR1-PR6 Phase 1 execution. The Sprint 1 matrix above remains historical traceability.
+
+| Story/Task | Primary owner | Supporting roles | Expected output | QA focus | Reviewer focus | Verifier evidence |
+|---|---|---|---|---|---|---|
+| PB-108 Setup/readiness screen | Frontend | BA, QA, Reviewer, Verifier | Setup/readiness UI with camera/AI status and fallback actions | Camera unavailable, permission denied, fallback copy | Preview not blocked, no print/cloud creep, recovery clarity | Browser/manual evidence, command output, hardware status |
+| PB-109 Realtime layout preview | Frontend | Architect, QA, Reviewer | Setup preview layout grid updates from selection | Layout option changes and static fallback | Lightweight preview; no compositor/live-preview coupling | Component/manual evidence |
+| PB-110 Realtime countdown preview | Frontend | QA | Countdown summary and selected-state UI | Option selection and handoff to capture | No countdown/capture regression | Test/manual evidence |
+| PB-111 Realtime theme preview | Frontend | BA, QA | Theme color/accent preview | Selected theme visual update | Accessibility/contrast, no network assets | Component/manual evidence |
+| PB-112 Realtime frame preview | Frontend | Architect, QA | Lightweight frame preview | Frame changes and fallback | No heavy live canvas loop; no unapproved dependency | Component/manual evidence |
+| PB-113 Realtime style/filter preview | Frontend | QA, Reviewer | CSS style/filter approximation | Style option changes | Preview performance and truthful approximation copy | Component/manual evidence |
+| PB-114 Realtime sticker preset preview | Frontend | BA, QA, Reviewer | Local sticker preset preview with replacement semantics | Sticker selection and no unlimited append | License/local assets, no cloud fetch | Helper/component/manual evidence |
+| PB-115 Realtime text preset/custom label preview | Frontend | BA, QA, Reviewer | Text preset/custom label preview | Trim/max/blank/replacement behavior | Contrast/accessibility and state safety | Helper/component/manual evidence |
+| PB-129 Phase 1 manual browser smoke | QA | Verifier, PM | Manual evidence notes/screenshots/video if available | Full setup/capture/result/customizer/download path | Evidence honesty, no unsupported claims | PASS/PARTIAL/FAIL mapping |
+| PB-130 Offline/no-cloud verification | QA | Reviewer, Verifier | Offline/privacy evidence note | No cloud/print UI or upload dependency | No media/path leakage | Privacy/offline evidence |
+| PB-131 Hardware evidence labeling | Verifier | QA, PM | Hardware status mapping | Named devices and tested/not-tested list | No hardware PASS without real device | PASS/PARTIAL/FAIL status |
+| PB-132 Phase 1 release report | Verifier | PM, QA, Reviewer | Final Phase 1 report | Evidence completeness | Risks and media safety | PM acceptance package |
+| PB-133 Theme/frame/sticker library investigation | BA or Frontend research | Architect, PM, Reviewer | Investigation note only | License/offline/bundle/runtime comparison | No production dependency/scope creep | Research evidence |
+| PB-134 Local theme/frame asset format | Architect | Frontend, BA, QA | Typed config proposal and validation plan | Missing asset and config fallback | Local-first asset boundaries | Docs/tests evidence |
+| PB-135 Curated local sticker pack | Frontend | BA, PM, Reviewer | Local sticker assets only after approval | Visual and local/offline behavior | License, bundle size, no cloud fetch | Asset/license/manual evidence |
+| PB-136 Curated local frame/theme pack | Frontend | BA, Architect, PM | Local frame/theme pack only after approval | Visual preview and fallback | Final renderer consistency, asset safety | Config/manual/render evidence |
+
 ## Ownership rules
 
 - One primary owner per story.

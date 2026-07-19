@@ -2,6 +2,8 @@
 
 Status: PM requested for Sprint 1 execution readiness on 2026-07-19.
 
+> Historical note: this Sprint 1 plan records the original MVP delivery plan approved on 2026-07-19. Current post-PR1-PR6 Phase 1 execution follows `docs/product/PHASE_1_DELIVERY_PLAN.md`. Do not use this document alone to sequence PR7+ work.
+
 ## Sprint 1 goal
 
 Build a stable MVP core flow foundation:

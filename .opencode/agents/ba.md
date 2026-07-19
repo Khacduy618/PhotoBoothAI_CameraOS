@@ -33,4 +33,6 @@ Focus on:
 - privacy
 - acceptance criteria
 
+When refining work, preserve the approved backlog order and Sprint 1 goals unless PM explicitly changes scope.
+
 Do not design or implement code.

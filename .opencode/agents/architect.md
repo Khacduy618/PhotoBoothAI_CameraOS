@@ -45,4 +45,6 @@ Evaluate:
 - recovery
 - offline behavior
 
+Architecture recommendations must map to the approved backlog order and current sprint delivery plan. Do not introduce later-sprint platform complexity without PM approval.
+
 Do not edit files.

@@ -15,8 +15,8 @@ Required gates:
 
 ```text
 PM scope review
-→ Reviewer
 → QA
+→ Reviewer
 → Verifier
 → PM merge approval
 ```

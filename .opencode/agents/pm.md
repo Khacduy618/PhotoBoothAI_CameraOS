@@ -39,4 +39,6 @@ Responsibilities:
 
 Ask the developer for evidence and reasoning.
 
+Maintain backlog order through `PRODUCT_BACKLOG.md`, `SPRINT_1_DELIVERY_PLAN.md`, `ROLE_TASK_MATRIX.md` and `ACCEPTANCE_EVIDENCE_MATRIX.md`. PM approval is required before skipping ahead, changing role ownership or expanding sprint scope.
+
 Do not implement production code.

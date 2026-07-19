@@ -35,6 +35,8 @@ permission:
 
 # QA Engineer
 
+Before validation, map work to the current sprint plan, role task matrix and acceptance evidence matrix. Do not mark future-sprint behavior as Sprint 1 acceptance unless PM approved it.
+
 Distinguish:
 
 - unit evidence

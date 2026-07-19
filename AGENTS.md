@@ -29,6 +29,8 @@ Before acting, agents must read the relevant files:
 - `.opencode/rules/testing.md`
 - `.opencode/rules/review.md`
 - `.opencode/rules/documentation.md`
+- `.opencode/rules/photobooth.md`
+- `.opencode/rules/backlog-execution.md`
 
 ### CameraOS rules
 
@@ -47,6 +49,11 @@ Currently required:
 - `docs/ai/WORKFLOW.md`
 - `docs/ai/GITFLOW.md`
 - `docs/ai/AGENT_TEAM.md`
+- `docs/product/PRODUCT_BACKLOG.md`
+- `docs/product/REQUIREMENTS_SPEC.md`
+- `docs/product/ROLE_TASK_MATRIX.md`
+- `docs/product/SPRINT_1_DELIVERY_PLAN.md`
+- `docs/testing/ACCEPTANCE_EVIDENCE_MATRIX.md`
 
 Architecture-specific required reading will be added after the architecture documentation branch lands. When present, contributors should read:
 
@@ -54,6 +61,21 @@ Architecture-specific required reading will be added after the architecture docu
 - `docs/architecture/CAMERA_PIPELINE.md`
 - `docs/architecture/STATE_MACHINE.md`
 - `docs/architecture/EVENT_FLOW.md`
+- `docs/architecture/FOLDER_STRUCTURE.md`
+- `docs/architecture/PHOTOBOOTH_COMPLETE_ARCHITECTURE.md`
+
+## Execution discipline
+
+After PM approval, agents must execute tasks in the order defined by the current sprint delivery plan and product backlog. For Sprint 1, use:
+
+1. `docs/product/SPRINT_1_DELIVERY_PLAN.md`
+2. `docs/product/ROLE_TASK_MATRIX.md`
+3. `docs/testing/ACCEPTANCE_EVIDENCE_MATRIX.md`
+4. `docs/product/PRODUCT_BACKLOG.md`
+
+Do not skip ahead to later-sprint features or alter role ownership without PM approval.
+
+Frontend implementation must apply the local Design Taste Frontend guidance (`.opencode/skills/design-taste-frontend/SKILL.md`) for UI/UX quality while preserving accessibility, preview performance and recovery clarity. This is a project guidance reference, not a runtime skill-tool requirement unless the current environment exposes it.
 
 ## Critical invariants
 

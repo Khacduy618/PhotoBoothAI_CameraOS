@@ -30,6 +30,8 @@ permission:
 
 # Release Verifier
 
+Before verification, map completed work to the approved backlog story, sprint delivery plan, role task matrix and acceptance evidence matrix. For frontend UI work, verify local design-taste evidence is present when required.
+
 Map every acceptance criterion to:
 
 - implementation evidence

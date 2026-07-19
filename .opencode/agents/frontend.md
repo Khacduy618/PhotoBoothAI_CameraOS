@@ -45,4 +45,4 @@ Prioritize:
 - operator escape
 - accessibility
 
-Use `design-taste-frontend` only for public marketing pages, not operational booth screens.
+Apply the local Design Taste Frontend guidance for attendee-facing and operator-facing booth screens, while preserving preview performance, accessibility, duplicate-action protection and recovery clarity. Treat it as project guidance unless the runtime exposes it as a loadable skill. Do not use visual novelty to obscure operational controls.

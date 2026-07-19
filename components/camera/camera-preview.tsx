@@ -180,6 +180,9 @@ export function CameraPreview({
     const [capturedPhotos, setCapturedPhotos] =
         useState<CapturedPhoto[]>([]);
 
+    const [captureError, setCaptureError] =
+        useState<string | null>(null);
+
     useEffect(() => {
         if (hasAutoConnectedRef.current) {
             return;
@@ -241,35 +244,53 @@ export function CameraPreview({
 
     const capture =
         useCallback(async () => {
-            const video = assertCaptureReady(
-                stream,
-                videoRef.current,
-            );
+            try {
+                setCaptureError(null);
+                
+                const video = assertCaptureReady(
+                    stream,
+                    videoRef.current,
+                );
 
-            const originalBlob =
-                await adapter.capture(video);
+                const originalBlob =
+                    await adapter.capture(video);
 
-            const nextPhoto = await createCapturedPhotoOutput({
-                originalBlob,
-                renderOriginal: (original) =>
-                    renderPhotoOutput({
-                        original,
-                        theme: selectedTheme,
-                        frame: selectedFrame,
-                        style: selectedStyle,
-                    }),
-            });
+                const nextPhoto = await createCapturedPhotoOutput({
+                    originalBlob,
+                    renderOriginal: (original) =>
+                        renderPhotoOutput({
+                            original,
+                            theme: selectedTheme,
+                            frame: selectedFrame,
+                            style: selectedStyle,
+                        }),
+                });
 
-            photoUrlRef.current = nextPhoto.outputUrl;
-            capturedPhotosRef.current = [
-                nextPhoto,
-                ...capturedPhotosRef.current,
-            ];
+                photoUrlRef.current = nextPhoto.outputUrl;
+                capturedPhotosRef.current = [
+                    nextPhoto,
+                    ...capturedPhotosRef.current,
+                ];
 
-            setCapturedPhotos(
-                capturedPhotosRef.current,
-            );
-            setPhotoUrl(nextPhoto.outputUrl);
+                setCapturedPhotos(
+                    capturedPhotosRef.current,
+                );
+                setPhotoUrl(nextPhoto.outputUrl);
+            } catch (cause) {
+                const errorMessage =
+                    cause instanceof Error
+                        ? cause.message
+                        : "Không thể chụp ảnh.";
+                
+                setCaptureError(errorMessage);
+                
+                console.warn(
+                    "Capture failed:",
+                    errorMessage,
+                );
+                
+                throw cause;
+            }
         }, [
             adapter,
             selectedFrame,
@@ -323,6 +344,7 @@ export function CameraPreview({
 
     const handleRetake = useCallback(
         async (reconnectCamera = false) => {
+            setCaptureError(null);
             await performRetake({
                 reconnectCamera,
                 selectedDeviceId,
@@ -412,6 +434,64 @@ export function CameraPreview({
         handleRetake,
         photoUrl,
     ]);
+
+    // PB-006: Explicit capture error UI
+    if (boothState === "error") {
+        return (
+            <section className="mx-auto flex w-full max-w-5xl flex-col items-center justify-center min-h-[80vh] gap-8 px-8 text-center">
+                <div className="flex flex-col gap-6 max-w-2xl">
+                    <div className="text-7xl">⚠️</div>
+                    
+                    <h1 className="text-5xl md:text-6xl font-bold">
+                        Chụp ảnh thất bại
+                    </h1>
+
+                    <div className="text-xl md:text-2xl text-zinc-400 space-y-2">
+                        {captureError ? (
+                            <p>{captureError}</p>
+                        ) : (
+                            <p>Không thể hoàn thành chụp ảnh. Vui lòng thử lại.</p>
+                        )}
+                    </div>
+
+                    {cameraError ? (
+                        <div className="text-lg text-amber-400 bg-amber-400/10 rounded-2xl px-6 py-4">
+                            Camera: {cameraError}
+                        </div>
+                    ) : null}
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            void handleRetake(true);
+                        }}
+                        className="flex-1 px-8 py-6 text-2xl font-semibold bg-white text-black rounded-full transition-all hover:bg-zinc-200 hover:scale-105 active:scale-95"
+                    >
+                        Thử lại
+                    </button>
+
+                    {onBackToSetup ? (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setCaptureError(null);
+                                onBackToSetup();
+                            }}
+                            className="flex-1 px-8 py-6 text-2xl font-semibold bg-zinc-800 text-white rounded-full border-2 border-zinc-700 transition-all hover:bg-zinc-700 hover:scale-105 active:scale-95"
+                        >
+                            Quay lại
+                        </button>
+                    ) : null}
+                </div>
+
+                <div className="text-sm text-zinc-600 mt-4">
+                    <p>Nếu vấn đề vẫn tiếp diễn, vui lòng liên hệ nhân viên hỗ trợ.</p>
+                </div>
+            </section>
+        );
+    }
 
     if (
         boothState === "result" &&

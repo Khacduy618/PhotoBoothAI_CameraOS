@@ -50,6 +50,65 @@ Frontend/UI stories must include a short design-taste audit note in browser/manu
 | PB-022 | QR generated from saved photo/share route | QR payload tests | storage → QR service test | manual phone scan if available | Not applicable for printer/camera | unit + browser/manual PASS |
 | PB-023 | Share route previews/downloads photo and handles missing/expired | route helper tests optional | storage-backed route test | mobile/browser route check | Not applicable | browser/manual PASS |
 
+## Phase 1 PR7+ evidence matrix
+
+This section is the current evidence source for post-PR1-PR6 Phase 1 work. Mock/browser evidence must not be reported as real hardware PASS.
+
+| Story/Task | Acceptance focus | Unit evidence | Integration evidence | Browser/manual evidence | Hardware evidence | Minimum completion status |
+|---|---|---|---|---|---|---|
+| PB-108 | Setup/readiness shows camera/AI status and recovery | state/helper tests where feasible | setup component flow | permission/camera unavailable check | PARTIAL unless named camera tested | browser/manual PASS with honest hardware label |
+| PB-109 | Layout selection updates setup preview immediately | layout mapping tests | selection → preview component test | select 2x2, 1x4, 2x3 in browser | Not applicable unless camera claim made | component PASS + browser evidence |
+| PB-110 | Countdown selection updates summary and handoff | countdown option tests | capture handoff where touched | browser option check | Not applicable | test/manual PASS |
+| PB-111 | Theme selection updates colors/accent | config/helper tests | selection → preview component test | browser visual check | Not applicable | component/manual PASS |
+| PB-112 | Frame selection updates preview frame safely | config/helper tests | selection → preview component test | browser visual check | Not applicable | component/manual PASS |
+| PB-113 | Style/filter selection updates lightweight preview | style mapping tests | preview component test | browser visual check | Not applicable | component/manual PASS |
+| PB-114 | Sticker preset updates preview and replaces prior setup item | helper tests for replacement | selection → preview component test | browser visual check | Not applicable | helper/component PASS + manual evidence |
+| PB-115 | Text preset/custom label updates preview safely | trim/max/blank/replacement tests | selection → preview component test | browser visual check | Not applicable | helper/component PASS + manual evidence |
+| PB-129 | Full Phase 1 browser smoke evidence | Not required | Not required | required: setup/capture/result/customizer/download | PASS only with named real device evidence | completed checklist |
+| PB-130 | Offline/no-cloud verification | Not required | Not required | network-disabled/no-cloud UI/log check | Not applicable | privacy/offline evidence PASS |
+| PB-131 | Hardware evidence labeling | Not required | Not required | evidence report review | PASS/PARTIAL/FAIL labels | verifier PASS/PARTIAL mapping |
+| PB-132 | Phase 1 release report | Not required | Not required | report review | status summary | PM acceptance package |
+| PB-133 | Library/asset investigation | Not required | Not required | research note only | Not applicable | investigation note |
+| PB-134 | Local theme/frame asset format | validation tests when implemented | config integration when implemented | docs/manual review | Not applicable | docs/tests evidence |
+| PB-135 | Curated sticker pack | config tests when implemented | preview/customizer integration | visual/license/offline check | Not applicable | PM-approved asset evidence |
+| PB-136 | Curated frame/theme pack | config tests when implemented | preview/final renderer integration | visual/license/offline check | Not applicable | PM-approved asset evidence |
+
+### Flow F0: Phase 1 setup/capture/customize/download
+
+Required evidence:
+
+- command: `pnpm lint`
+- command: `pnpm build`
+- command: `pnpm test`
+- command: `pnpm tsc --noEmit` when type/test surfaces are touched
+- browser/manual: setup/readiness screen appears
+- browser/manual: layout/theme/frame/style/sticker/text preview changes are visible
+- browser/manual: camera permission flow observed
+- browser/manual: live preview appears when camera is available
+- browser/manual: countdown runs
+- browser/manual: required photos are captured
+- browser/manual: original-preservation path is not bypassed
+- browser/manual: composed result appears
+- browser/manual: sticker/text/drawing/undo/clear customizer works
+- browser/manual: customized JPEG downloads and opens
+- browser/manual: retake/reset works
+- browser/manual: no print action appears
+- browser/manual: no cloud upload/share action appears unless separately approved
+- failure evidence: camera permission denied or unavailable state
+- failure evidence: AI unavailable/failure state if AI UI is present
+- hardware evidence: named physical camera/kiosk only if actually tested
+
+Pass criteria:
+
+- Local flow completes without cloud.
+- No print dependency exists.
+- Camera failure is recoverable or explicitly blocked with guidance.
+- AI failure does not block manual/touch capture.
+- Capture is single-flight.
+- Captured media is not silently lost.
+- Customized final output is a derivative.
+- Hardware status is labeled honestly.
+
 ## Critical flow evidence
 
 ### Flow F1: Attract/start to QR output

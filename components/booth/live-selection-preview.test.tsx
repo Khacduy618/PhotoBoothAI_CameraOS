@@ -2,9 +2,16 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LiveSelectionPreview } from "@/components/booth/live-selection-preview";
+import { defaultBoothSelection } from "@/config/theme.config";
+import type { CameraController } from "@/hooks/use-camera";
 
 const cameraControllerMock = {
-    adapter: {},
+    adapter: {
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        getStream: vi.fn(() => null),
+        capture: vi.fn(),
+    },
     stream: null,
     devices: [],
     error: null,
@@ -13,7 +20,7 @@ const cameraControllerMock = {
     connect: vi.fn(),
     disconnect: vi.fn(),
     loadDevices: vi.fn(),
-};
+} as unknown as CameraController;
 
 beforeEach(() => {
     vi.spyOn(
@@ -31,6 +38,7 @@ describe("LiveSelectionPreview", () => {
         render(
             <LiveSelectionPreview
                 selection={{
+                    ...defaultBoothSelection,
                     themeId: "party",
                     frameId: "gold",
                     styleId: "warm",
@@ -55,6 +63,7 @@ describe("LiveSelectionPreview", () => {
         render(
             <LiveSelectionPreview
                 selection={{
+                    ...defaultBoothSelection,
                     themeId: "classic",
                     frameId: "none",
                     styleId: "none",
@@ -75,6 +84,7 @@ describe("LiveSelectionPreview", () => {
         render(
             <LiveSelectionPreview
                 selection={{
+                    ...defaultBoothSelection,
                     themeId: "classic",
                     frameId: "none",
                     styleId: "none",

@@ -6,6 +6,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { CameraController } from "@/hooks/use-camera";
 import type { BoothSelection } from "@/types/theme";
 
 const liveSelectionPreviewMock = vi.hoisted(() =>
@@ -44,7 +45,12 @@ import {
     themeConfigs,
 } from "@/config/theme.config";
 const cameraControllerMock = {
-    adapter: {},
+    adapter: {
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        getStream: vi.fn(() => null),
+        capture: vi.fn(),
+    },
     stream: null,
     devices: [],
     error: null,
@@ -53,7 +59,7 @@ const cameraControllerMock = {
     connect: vi.fn(),
     disconnect: vi.fn(),
     loadDevices: vi.fn(),
-};
+} as unknown as CameraController;
 
 afterEach(() => {
     cleanup();

@@ -19,6 +19,10 @@ export interface SessionServiceOptions {
     now?: () => string;
 }
 
+export interface ArchiveAbandonedSessionsInput {
+    olderThanMs: number;
+}
+
 function createSessionError(
     code: StorageError["code"],
     message: string,
@@ -117,6 +121,37 @@ export class SessionService {
         );
     }
 
+    async abandonActiveSession(): Promise<
+        StorageResult<BoothSession>
+    > {
+        const activeSession =
+            await this.storage.getActiveSession();
+
+        if (!activeSession.ok) {
+            return activeSession;
+        }
+
+        if (!activeSession.value) {
+            return {
+                ok: false,
+                error: createSessionError(
+                    "not_found",
+                    "Không tìm thấy session đang hoạt động.",
+                    "Tạo session mới hoặc tải lại trạng thái booth.",
+                ),
+            };
+        }
+
+        const timestamp = this.now();
+
+        return this.storage.updateSession({
+            ...activeSession.value,
+            status: "abandoned",
+            updatedAt: timestamp,
+            abandonedAt: timestamp,
+        });
+    }
+
     async completeActiveSession(): Promise<
         StorageResult<BoothSession>
     > {
@@ -147,4 +182,57 @@ export class SessionService {
             completedAt: timestamp,
         });
     }
+}
+
+
+export async function archiveAbandonedSessions(
+    storage: SessionStorageService,
+    input: ArchiveAbandonedSessionsInput,
+    now: () => string = () => new Date().toISOString(),
+): Promise<StorageResult<readonly BoothSession[]>> {
+    const sessions = await storage.listSessions();
+
+    if (!sessions.ok) {
+        return sessions;
+    }
+
+    const currentTime = new Date(now()).getTime();
+    const archivedAt = now();
+    const updatedSessions = sessions.value.map((session) => {
+        if (
+            session.status !== "abandoned" ||
+            !session.abandonedAt
+        ) {
+            return session;
+        }
+
+        const abandonedAt = new Date(
+            session.abandonedAt,
+        ).getTime();
+
+        if (
+            Number.isNaN(abandonedAt) ||
+            currentTime - abandonedAt < input.olderThanMs
+        ) {
+            return session;
+        }
+
+        return {
+            ...session,
+            status: "archived" as const,
+            updatedAt: archivedAt,
+            archivedAt,
+        };
+    });
+
+    for (const session of updatedSessions) {
+        const updateResult =
+            await storage.updateSession(session);
+
+        if (!updateResult.ok) {
+            return updateResult;
+        }
+    }
+
+    return { ok: true, value: updatedSessions };
 }

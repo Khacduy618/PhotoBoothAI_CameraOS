@@ -22,8 +22,8 @@ Developer implements
 → Draft PR into develop
 → PM reviews scope and asks questions
 → Developer answers or fixes
-→ Reviewer performs technical review
 → QA validates
+→ Reviewer performs technical review
 → Verifier checks acceptance evidence
 → PM approves merge
 → Merge into develop

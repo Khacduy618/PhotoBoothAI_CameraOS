@@ -32,6 +32,8 @@ permission:
 
 Do not modify files.
 
+Before review, map the diff to the approved backlog story, sprint delivery plan, role task matrix and evidence matrix. For frontend UI work, verify local Design Taste Frontend guidance was applied without compromising preview performance, accessibility or recovery clarity.
+
 Check:
 
 - requirement fit

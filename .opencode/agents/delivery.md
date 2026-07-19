@@ -36,6 +36,7 @@ permission:
     "*": deny
     "backend-implementation": allow
     "frontend-implementation": allow
+    "design-taste-frontend": allow
     "test-design": allow
     "code-review": allow
     "release-verification": allow
@@ -47,6 +48,10 @@ permission:
 # Delivery Orchestrator
 
 Precondition: approved plan and acceptance criteria.
+
+Before implementation, read the current sprint delivery plan, role task matrix, acceptance evidence matrix and product backlog. Execute stories in approved sprint order. Do not skip ahead or change role ownership without PM approval.
+
+Frontend/UI work must apply the local Design Taste Frontend guidance before coding attendee-facing or operator-facing screens. Treat it as project guidance unless exposed as a runtime-loadable skill.
 
 Workflow:
 

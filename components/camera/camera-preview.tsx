@@ -17,6 +17,7 @@ import {
 import { useBoothMachine } from "@/hooks/use-booth-machine";
 import type { CameraController } from "@/hooks/use-camera";
 import { useGestureRecognizer } from "@/hooks/use-gesture-recognizer";
+import { composePhotoLayout } from "@/services/render/layout-compositor.service";
 import { renderPhotoOutput } from "@/services/render/render-photo-output";
 import {
     saveSharePhoto,
@@ -30,6 +31,7 @@ import type { BoothSelection } from "@/types/theme";
 export interface CapturedPhoto {
     id: string;
     sessionId: string;
+    originalBlob: Blob;
     originalUrl: string;
     outputUrl: string;
     usedFallback: boolean;
@@ -53,6 +55,18 @@ interface CreateCapturedPhotoOutputOptions {
         savedAt: string;
     }) => void;
     createShareDataUrl?: (blob: Blob) => Promise<string>;
+}
+
+export function revokeCapturedPhotoUrls(
+    capturedPhotos: readonly Pick<CapturedPhoto, "originalUrl" | "outputUrl">[],
+    revokeObjectUrl: (url: string) => void = URL.revokeObjectURL,
+): void {
+    capturedPhotos.forEach((photo) => {
+        revokeObjectUrl(photo.originalUrl);
+        if (photo.outputUrl !== photo.originalUrl) {
+            revokeObjectUrl(photo.outputUrl);
+        }
+    });
 }
 
 export function canChangeSetup(
@@ -176,10 +190,36 @@ export async function createCapturedPhotoOutput({
     return {
         id: photoId,
         sessionId,
+        originalBlob: savedOriginal.value.original.blob,
         originalUrl,
         outputUrl,
         usedFallback,
     };
+}
+
+interface SaveFinalLayoutSharePhotoOptions {
+    storage: Storage;
+    sessionId: string;
+    blob: Blob;
+    now?: () => string;
+}
+
+export async function saveFinalLayoutSharePhoto({
+    storage,
+    sessionId,
+    blob,
+    now = () => new Date().toISOString(),
+}: SaveFinalLayoutSharePhotoOptions): Promise<string> {
+    const photoId = `${sessionId}-layout`;
+
+    saveSharePhoto(storage, {
+        photoId,
+        dataUrl: await createBlobDataUrl(blob),
+        mimeType: blob.type || "image/jpeg",
+        savedAt: now(),
+    });
+
+    return photoId;
 }
 
 interface PerformRetakeOptions {
@@ -266,6 +306,9 @@ export function CameraPreview({
     const photoUrlRef =
         useRef<string | null>(null);
 
+    const finalLayoutUrlRef =
+        useRef<string | null>(null);
+
     const capturedPhotosRef =
         useRef<CapturedPhoto[]>([]);
 
@@ -301,6 +344,12 @@ export function CameraPreview({
     ] = useState("");
 
     const [photoUrl, setPhotoUrl] =
+        useState<string | null>(null);
+
+    const [finalLayoutUrl, setFinalLayoutUrl] =
+        useState<string | null>(null);
+
+    const [layoutError, setLayoutError] =
         useState<string | null>(null);
 
     const [capturedPhotos, setCapturedPhotos] =
@@ -365,17 +414,15 @@ export function CameraPreview({
 
     useEffect(() => {
         return () => {
-            capturedPhotosRef.current.forEach(
-                (photo) => {
-                    URL.revokeObjectURL(photo.originalUrl);
-                    if (photo.outputUrl !== photo.originalUrl) {
-                        URL.revokeObjectURL(photo.outputUrl);
-                    }
-                },
-            );
+            revokeCapturedPhotoUrls(capturedPhotosRef.current);
+
+            if (finalLayoutUrlRef.current) {
+                URL.revokeObjectURL(finalLayoutUrlRef.current);
+            }
 
             capturedPhotosRef.current = [];
             photoUrlRef.current = null;
+            finalLayoutUrlRef.current = null;
         };
     }, []);
 
@@ -543,8 +590,19 @@ export function CameraPreview({
                 selectedDeviceId,
                 connect,
                 clearPhoto: () => {
+                    revokeCapturedPhotoUrls(capturedPhotosRef.current);
+
+                    if (finalLayoutUrlRef.current) {
+                        URL.revokeObjectURL(finalLayoutUrlRef.current);
+                    }
+
+                    capturedPhotosRef.current = [];
                     photoUrlRef.current = null;
+                    finalLayoutUrlRef.current = null;
+                    setCapturedPhotos([]);
                     setPhotoUrl(null);
+                    setFinalLayoutUrl(null);
+                    setLayoutError(null);
                 },
                 reset: resetBooth,
             });
@@ -555,6 +613,103 @@ export function CameraPreview({
             selectedDeviceId,
         ],
     );
+
+    useEffect(() => {
+        if (
+            boothState !== "result" ||
+            capturedPhotos.length < totalShots ||
+            finalLayoutUrl
+        ) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const composeLayout = async () => {
+            const photoStorage = photoStorageRef.current;
+
+            if (!photoStorage) {
+                return;
+            }
+
+            try {
+                setLayoutError(null);
+
+                const layoutOutput = await composePhotoLayout({
+                    layoutId: selectedLayout.id,
+                    sources: capturedPhotos
+                        .slice(0, totalShots)
+                        .reverse()
+                        .map((photo) => ({
+                            photoId: photo.id,
+                            blob: photo.originalBlob,
+                        })),
+                });
+
+                if (cancelled) {
+                    return;
+                }
+
+                const layoutUrlResult =
+                    photoStorage.createObjectUrl(
+                        layoutOutput.blob,
+                    );
+
+                if (!layoutUrlResult.ok) {
+                    throw new Error(
+                        layoutUrlResult.error.message,
+                    );
+                }
+
+                if (finalLayoutUrlRef.current) {
+                    URL.revokeObjectURL(
+                        finalLayoutUrlRef.current,
+                    );
+                }
+
+                finalLayoutUrlRef.current =
+                    layoutUrlResult.value;
+
+                if (
+                    typeof window !== "undefined" &&
+                    captureSessionIdRef.current
+                ) {
+                    await saveFinalLayoutSharePhoto({
+                        storage: window.localStorage,
+                        sessionId: captureSessionIdRef.current,
+                        blob: layoutOutput.blob,
+                    });
+                }
+
+                setFinalLayoutUrl(layoutUrlResult.value);
+                setPhotoUrl(layoutUrlResult.value);
+                photoUrlRef.current = layoutUrlResult.value;
+            } catch (cause) {
+                if (cancelled) {
+                    return;
+                }
+
+                const message =
+                    cause instanceof Error
+                        ? cause.message
+                        : "Không thể ghép layout.";
+                setLayoutError(message);
+                console.warn("Layout composition failed:", message);
+            }
+        };
+
+        void composeLayout();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        boothState,
+        capturedPhotos,
+        finalLayoutUrl,
+        selectedLayout.id,
+        totalShots,
+    ]);
 
     useEffect(() => {
         if (
@@ -682,6 +837,12 @@ export function CameraPreview({
                     {cameraError ? (
                         <p className="mt-2 text-sm text-red-500">
                             {cameraError}
+                        </p>
+                    ) : null}
+
+                    {layoutError ? (
+                        <p className="mt-2 text-sm text-amber-400">
+                            Không thể ghép layout cuối; đang giữ ảnh đã chụp an toàn.
                         </p>
                     ) : null}
 

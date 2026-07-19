@@ -1,8 +1,8 @@
 export const boothConfig = {
     gesture: {
-        // Gesture inference is disabled in this POC import until
-        // browser performance evidence proves it cannot block preview.
-        enabled: false,
+        // Gesture recognition is enabled by default for Phase 1.
+        // Touch/manual capture remains the required fallback.
+        enabled: true,
 
         numberOfHands: 1,
 

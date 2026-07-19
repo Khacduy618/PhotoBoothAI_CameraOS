@@ -5,7 +5,10 @@ import {
     canChangeSetup,
     createCapturedPhotoOutput,
     performRetake,
+    revokeCapturedPhotoUrls,
+    saveFinalLayoutSharePhoto,
 } from "@/components/camera/camera-preview";
+import { getSharePhoto } from "@/services/sharing/share-photo-storage.service";
 import {
     MemoryPhotoBlobStorage,
     PhotoStorageService,
@@ -13,6 +16,7 @@ import {
 
 afterEach(() => {
     vi.restoreAllMocks();
+    window.localStorage.clear();
 });
 
 describe("assertCaptureReady", () => {
@@ -53,6 +57,37 @@ describe("assertCaptureReady", () => {
         expect(
             assertCaptureReady({} as MediaStream, video),
         ).toBe(video);
+    });
+});
+
+describe("revokeCapturedPhotoUrls", () => {
+    it("revokes original and distinct output object URLs", () => {
+        const revokeObjectUrl = vi.fn();
+
+        revokeCapturedPhotoUrls(
+            [
+                {
+                    originalUrl: "blob:original-1",
+                    outputUrl: "blob:output-1",
+                },
+                {
+                    originalUrl: "blob:original-2",
+                    outputUrl: "blob:original-2",
+                },
+            ],
+            revokeObjectUrl,
+        );
+
+        expect(revokeObjectUrl).toHaveBeenCalledWith(
+            "blob:original-1",
+        );
+        expect(revokeObjectUrl).toHaveBeenCalledWith(
+            "blob:output-1",
+        );
+        expect(revokeObjectUrl).toHaveBeenCalledWith(
+            "blob:original-2",
+        );
+        expect(revokeObjectUrl).toHaveBeenCalledTimes(3);
     });
 });
 
@@ -128,6 +163,7 @@ describe("createCapturedPhotoOutput", () => {
         expect(photo).toEqual({
             id: "capture-1",
             sessionId: "session-1",
+            originalBlob,
             originalUrl: "blob:original",
             outputUrl: "blob:rendered",
             usedFallback: false,
@@ -169,6 +205,7 @@ describe("createCapturedPhotoOutput", () => {
         expect(photo).toEqual({
             id: "capture-2",
             sessionId: "session-1",
+            originalBlob,
             originalUrl: "blob:original",
             outputUrl: "blob:original",
             usedFallback: true,
@@ -213,6 +250,34 @@ describe("createCapturedPhotoOutput", () => {
         ).rejects.toThrow("Không thể lưu ảnh gốc.");
         expect(renderOriginal).not.toHaveBeenCalled();
         expect(createObjectUrl).not.toHaveBeenCalled();
+    });
+});
+
+describe("saveFinalLayoutSharePhoto", () => {
+    it("stores the composed layout as the local share artifact", async () => {
+        const storage = window.localStorage;
+        const blob = new Blob(["layout"], {
+            type: "image/jpeg",
+        });
+
+        const photoId = await saveFinalLayoutSharePhoto({
+            storage,
+            sessionId: "session-1",
+            blob,
+            now: () => "2026-07-19T00:00:00.000Z",
+        });
+
+        expect(photoId).toBe("session-1-layout");
+        expect(getSharePhoto(storage, photoId)).toEqual(
+            expect.objectContaining({
+                photoId: "session-1-layout",
+                mimeType: "image/jpeg",
+                savedAt: "2026-07-19T00:00:00.000Z",
+            }),
+        );
+        expect(
+            getSharePhoto(storage, photoId)?.dataUrl,
+        ).toMatch(/^data:image\/jpeg;base64,/);
     });
 });
 

@@ -129,21 +129,21 @@ describe("layout/countdown/customization config", () => {
             expect.objectContaining({
                 shotCount: 4,
                 outputWidth: 1600,
-                outputHeight: 1600,
+                outputHeight: 2275,
             }),
         );
         expect(resolveBoothLayoutConfig("1x4-vertical")).toEqual(
             expect.objectContaining({
                 shotCount: 4,
                 outputWidth: 1200,
-                outputHeight: 3600,
+                outputHeight: 3798,
             }),
         );
         expect(resolveBoothLayoutConfig("2x3")).toEqual(
             expect.objectContaining({
                 shotCount: 6,
                 outputWidth: 1600,
-                outputHeight: 2400,
+                outputHeight: 3319,
             }),
         );
     });
@@ -193,13 +193,24 @@ describe("BoothSelectionFlow", () => {
             countdownSeconds: 6,
         });
 
-        fireEvent.click(screen.getByText("Party"));
+        // Navigate to theme step before selecting Party theme
+        const themeStepButton = screen.getAllByText(/Theme/i).find(el => el.tagName === 'BUTTON');
+        if (themeStepButton) fireEvent.click(themeStepButton);
+
+        // Safely click the Party option by matching the specific label/radio
+        const partyLabel = screen.getAllByText("Party").find(el => el.closest('label'));
+        if (partyLabel) fireEvent.click(partyLabel);
         expect(onSelectionChange).toHaveBeenCalledWith({
             ...defaultBoothSelection,
             themeId: "party",
         });
 
-        fireEvent.click(screen.getByText("💖 Tim lấp lánh"));
+        // Navigate to sticker step before selecting sticker
+        const stickerStepButton = screen.getAllByText(/Sticker/i).find(el => el.tagName === 'BUTTON');
+        if (stickerStepButton) fireEvent.click(stickerStepButton);
+
+        const stickerBtn = screen.getAllByText("💖 Tim lấp lánh").find(el => el.closest('button'));
+        if (stickerBtn) fireEvent.click(stickerBtn);
         expect(onSelectionChange).toHaveBeenCalledWith({
             ...defaultBoothSelection,
             customization: {
@@ -217,6 +228,10 @@ describe("BoothSelectionFlow", () => {
             },
         });
 
+        // Navigate to text step before selecting text preset
+        const textStepButton = screen.getAllByText(/Text/i).find(el => el.tagName === 'BUTTON');
+        if (textStepButton) fireEvent.click(textStepButton);
+
         fireEvent.click(screen.getByText("Best Day Ever"));
         expect(onSelectionChange).toHaveBeenCalledWith({
             ...defaultBoothSelection,
@@ -227,7 +242,7 @@ describe("BoothSelectionFlow", () => {
                         id: "setup-text-preset",
                         text: "Best Day Ever",
                         x: 0.5,
-                        y: 0.88,
+                        y: 0.95,
                         color: "#ffffff",
                         fontSize: 42,
                         rotationDegrees: 0,
@@ -235,6 +250,10 @@ describe("BoothSelectionFlow", () => {
                 ],
             },
         });
+
+        // Navigate to review step to access the complete button
+        const reviewStepButton = screen.getAllByText(/Review/i).find(el => el.tagName === 'BUTTON');
+        if (reviewStepButton) fireEvent.click(reviewStepButton);
 
         fireEvent.click(screen.getByRole("button", {
             name: "Tiếp tục vào camera",
@@ -262,7 +281,7 @@ describe("BoothSelectionFlow", () => {
                         id: "setup-text-preset",
                         text: "Old Label",
                         x: 0.5,
-                        y: 0.88,
+                        y: 0.95,
                         color: "#ffffff",
                         fontSize: 42,
                         rotationDegrees: 0,
@@ -281,7 +300,12 @@ describe("BoothSelectionFlow", () => {
             />,
         );
 
-        fireEvent.click(screen.getByText("🎉 Tiệc vui"));
+        // Navigate to sticker step first
+        const stickerStepBtn = screen.getAllByText(/Sticker/i).find(el => el.tagName === 'BUTTON');
+        if (stickerStepBtn) fireEvent.click(stickerStepBtn);
+
+        const partyStickerBtn = screen.getAllByText("🎉 Tiệc vui").find(el => el.closest('button'));
+        if (partyStickerBtn) fireEvent.click(partyStickerBtn);
         expect(onSelectionChange).toHaveBeenCalledWith({
             ...selectionWithSetupPresets,
             customization: {
@@ -299,6 +323,10 @@ describe("BoothSelectionFlow", () => {
             },
         });
 
+        // Navigate to text step first
+        const textStepBtn = screen.getAllByText(/Text/i).find(el => el.tagName === 'BUTTON');
+        if (textStepBtn) fireEvent.click(textStepBtn);
+
         fireEvent.click(screen.getByText("Happy Birthday"));
         expect(onSelectionChange).toHaveBeenCalledWith({
             ...selectionWithSetupPresets,
@@ -309,7 +337,7 @@ describe("BoothSelectionFlow", () => {
                         id: "setup-text-preset",
                         text: "Happy Birthday",
                         x: 0.5,
-                        y: 0.88,
+                        y: 0.95,
                         color: "#ffffff",
                         fontSize: 42,
                         rotationDegrees: 0,

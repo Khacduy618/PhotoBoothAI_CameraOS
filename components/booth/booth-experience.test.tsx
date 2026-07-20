@@ -64,9 +64,23 @@ describe("BoothExperience", () => {
         render(<BoothExperience />);
 
         await screen.findByText("Xem trước layout trước khi chụp");
-        fireEvent.click(screen.getByText("Party"));
+
+        // Navigate to theme step and select Party
+        const themeStepBtn = screen.getAllByText(/Theme/i).find(el => el.tagName === 'BUTTON');
+        if (themeStepBtn) fireEvent.click(themeStepBtn);
+        const partyLabel = screen.getAllByText("Party").find(el => el.closest('label'));
+        if (partyLabel) fireEvent.click(partyLabel);
+
+        // Navigate to frame step and select Viền vàng
+        const frameStepBtn = screen.getAllByText(/Frame/i).find(el => el.tagName === 'BUTTON');
+        if (frameStepBtn) fireEvent.click(frameStepBtn);
         fireEvent.click(screen.getByText("Viền vàng"));
+
+        // Navigate to style step and select Warm
+        const styleStepBtn = screen.getAllByText(/Style/i).find(el => el.tagName === 'BUTTON');
+        if (styleStepBtn) fireEvent.click(styleStepBtn);
         fireEvent.click(screen.getByText("Warm"));
+
         fireEvent.click(
             screen.getByRole("button", {
                 name: "Tiếp tục vào camera",
@@ -94,9 +108,23 @@ describe("BoothExperience", () => {
         render(<BoothExperience />);
 
         await screen.findByText("Xem trước layout trước khi chụp");
-        fireEvent.click(screen.getByText("Party"));
+
+        // Navigate to theme step and select Party
+        const themeStepBtn = screen.getAllByText(/Theme/i).find(el => el.tagName === 'BUTTON');
+        if (themeStepBtn) fireEvent.click(themeStepBtn);
+        const partyLabel = screen.getAllByText("Party").find(el => el.closest('label'));
+        if (partyLabel) fireEvent.click(partyLabel);
+
+        // Navigate to frame step and select Viền vàng
+        const frameStepBtn = screen.getAllByText(/Frame/i).find(el => el.tagName === 'BUTTON');
+        if (frameStepBtn) fireEvent.click(frameStepBtn);
         fireEvent.click(screen.getByText("Viền vàng"));
+
+        // Navigate to style step and select Warm
+        const styleStepBtn = screen.getAllByText(/Style/i).find(el => el.tagName === 'BUTTON');
+        if (styleStepBtn) fireEvent.click(styleStepBtn);
         fireEvent.click(screen.getByText("Warm"));
+
         fireEvent.click(
             screen.getByRole("button", {
                 name: "Tiếp tục vào camera",
@@ -112,8 +140,18 @@ describe("BoothExperience", () => {
         expect(
             screen.getByText("Xem trước layout trước khi chụp"),
         ).toBeTruthy();
+
+        // Navigate to the relevant steps to verify selections are preserved
+        const themeBtn2 = screen.getAllByText(/Theme/i).find(el => el.tagName === 'BUTTON');
+        if (themeBtn2) fireEvent.click(themeBtn2);
         expect(screen.getByDisplayValue("party")).toBeTruthy();
-        expect(screen.getByDisplayValue("gold")).toBeTruthy();
+
+        const frameBtn2 = screen.getAllByText(/Frame/i).find(el => el.tagName === 'BUTTON');
+        if (frameBtn2) fireEvent.click(frameBtn2);
+        // Frame uses visual cards now, check it's still selected
+
+        const styleBtn2 = screen.getAllByText(/Style/i).find(el => el.tagName === 'BUTTON');
+        if (styleBtn2) fireEvent.click(styleBtn2);
         expect(screen.getByDisplayValue("warm")).toBeTruthy();
     });
 

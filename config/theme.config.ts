@@ -134,6 +134,7 @@ export function normalizeBoothSelection(
     return {
         ...defaultBoothSelection,
         ...selection,
+        frameColor: selection?.frameColor,
         customization: {
             ...defaultBoothCustomization,
             ...selection?.customization,

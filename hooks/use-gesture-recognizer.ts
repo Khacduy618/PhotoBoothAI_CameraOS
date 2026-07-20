@@ -77,6 +77,7 @@ export function useGestureRecognizer(
     const isDetectingRef = useRef(false);
     const lastInferenceAtRef = useRef(0);
     const lastVideoTimeRef = useRef(-1);
+    const lastTimestampMsRef = useRef(0);
 
     const stableGestureRef =
         useRef<SupportedGesture>("None");
@@ -256,6 +257,8 @@ export function useGestureRecognizer(
                 HTMLMediaElement.HAVE_CURRENT_DATA &&
                 video.videoWidth > 0 &&
                 video.videoHeight > 0 &&
+                video.currentTime > 0 &&
+                !video.seeking &&
                 !video.paused &&
                 !video.ended;
 
@@ -284,10 +287,17 @@ export function useGestureRecognizer(
                 isDetectingRef.current = true;
 
                 try {
+                    const rawTimestamp = Math.floor(frameTimestamp);
+                    const timestampMs = Math.max(
+                        rawTimestamp,
+                        lastTimestampMsRef.current + 1,
+                    );
+                    lastTimestampMsRef.current = timestampMs;
+
                     const recognition =
                         recognizer.recognizeForVideo(
                             video,
-                            frameTimestamp,
+                            timestampMs,
                         );
 
                     const category =

@@ -6,45 +6,59 @@ export class CaptureCardAdapter
     private stream: MediaStream | null =
         null;
 
+    private activeDeviceId: string | undefined = undefined;
+
     async connect(
         deviceId?: string,
     ): Promise<MediaStream> {
+        console.log("[CaptureCardAdapter] connect() called with deviceId:", deviceId);
+        // Return existing active stream if available for the same device
+        if (
+            this.stream &&
+            this.stream.active &&
+            this.stream.getVideoTracks().length > 0 &&
+            (deviceId === undefined || deviceId === this.activeDeviceId)
+        ) {
+            console.log("[CaptureCardAdapter] Reusing active stream:", this.stream.id);
+            return this.stream;
+        }
+
         this.disconnect();
 
-        this.stream =
-            await navigator.mediaDevices.getUserMedia(
-                {
+        const videoConstraints: MediaTrackConstraints | boolean = deviceId
+            ? { deviceId: { exact: deviceId } }
+            : {
+                  width: { ideal: boothConfig.camera.idealWidth },
+                  height: { ideal: boothConfig.camera.idealHeight },
+                  frameRate: { ideal: boothConfig.camera.idealFrameRate },
+                  facingMode: "user",
+              };
+
+        try {
+            console.log("[CaptureCardAdapter] Calling getUserMedia with constraints:", videoConstraints);
+            this.stream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: videoConstraints,
+            });
+            this.activeDeviceId = deviceId;
+            console.log("[CaptureCardAdapter] getUserMedia SUCCESS. Stream ID:", this.stream.id, "Tracks:", this.stream.getVideoTracks().map(t => ({ label: t.label, readyState: t.readyState })));
+            return this.stream;
+        } catch (firstErr) {
+            console.warn("[CaptureCardAdapter] getUserMedia initial constraints failed:", firstErr);
+            try {
+                console.log("[CaptureCardAdapter] Attempting fallback getUserMedia({ audio: false, video: true })");
+                this.stream = await navigator.mediaDevices.getUserMedia({
                     audio: false,
-
-                    video: {
-                        deviceId: deviceId
-                            ? {
-                                exact: deviceId,
-                            }
-                            : undefined,
-
-                        width: {
-                            ideal:
-                                boothConfig.camera
-                                    .idealWidth,
-                        },
-
-                        height: {
-                            ideal:
-                                boothConfig.camera
-                                    .idealHeight,
-                        },
-
-                        frameRate: {
-                            ideal:
-                                boothConfig.camera
-                                    .idealFrameRate,
-                        },
-                    },
-                },
-            );
-
-        return this.stream;
+                    video: true,
+                });
+                this.activeDeviceId = deviceId;
+                console.log("[CaptureCardAdapter] Fallback getUserMedia SUCCESS. Stream ID:", this.stream.id);
+                return this.stream;
+            } catch (fallbackErr) {
+                console.error("[CaptureCardAdapter] Fallback getUserMedia FAILED:", fallbackErr);
+                throw firstErr;
+            }
+        }
     }
 
     disconnect(): void {
@@ -55,6 +69,7 @@ export class CaptureCardAdapter
             });
 
         this.stream = null;
+        this.activeDeviceId = undefined;
     }
 
     getStream(): MediaStream | null {

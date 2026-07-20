@@ -6,11 +6,22 @@ import {
     useEffect,
     useRef,
     useState,
+    useContext,
 } from "react";
 
+import { BoothSessionContext, useBoothSession } from "@/components/booth/booth-session-context";
+import { LoadingLayer, PreviewCell, getStyleFilter } from "@/components/booth/preview-cell";
+import { PreviewRenderer } from "@/components/booth/preview-renderer";
+import { getLayoutGeometry } from "@/services/layout/layout-engine";
+import { getCameraStatusLabel } from "@/utils/camera-helpers";
+import { resolveStickerConfig } from "@/config/sticker.config";
 import { boothConfig } from "@/config/booth.config";
 import { resolveBoothLayoutConfig } from "@/config/layout.config";
 import {
+    defaultBoothSelection,
+    frameConfigs,
+    styleConfigs,
+    themeConfigs,
     resolveFrameConfig,
     resolveStyleConfig,
     resolveThemeConfig,
@@ -27,15 +38,17 @@ import {
     MemoryPhotoBlobStorage,
     PhotoStorageService,
 } from "@/services/storage/photo-storage.service";
-import type { BoothSelection } from "@/types/theme";
+import type { BoothSelection, CapturedPhoto, FrameConfig } from "@/types/theme";
 
-export interface CapturedPhoto {
-    id: string;
-    sessionId: string;
-    originalBlob: Blob;
-    originalUrl: string;
-    outputUrl: string;
-    usedFallback: boolean;
+function getContrastColor(hexColor: string): string {
+    if (!hexColor || !hexColor.startsWith("#")) return "#ffffff";
+    const cleanHex = hexColor.replace("#", "");
+    if (cleanHex.length !== 6) return "#ffffff";
+    const r = parseInt(cleanHex.substring(0, 2), 16);
+    const g = parseInt(cleanHex.substring(2, 4), 16);
+    const b = parseInt(cleanHex.substring(4, 6), 16);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.5 ? "#111111" : "#ffffff";
 }
 
 export type CustomizerAction =
@@ -88,7 +101,7 @@ export function createTextCustomizationAction({
     text,
     id,
     x = 0.5,
-    y = 0.88,
+    y = 0.95,
 }: {
     text: string;
     id: string;
@@ -465,18 +478,30 @@ export async function performRetake({
 }
 
 interface CameraPreviewProps {
-    selection: BoothSelection;
-    camera: CameraController;
+    selection?: BoothSelection;
+    camera?: CameraController;
     onBackToSetup?: () => void;
 }
 
 export function CameraPreview({
-    selection,
-    camera,
+    selection: propSelection,
+    camera: propCamera,
     onBackToSetup,
 }: CameraPreviewProps) {
+    const context = useContext(BoothSessionContext);
+    const selection = propSelection || context?.selection || defaultBoothSelection;
+    const setSelection = context?.setSelection || (() => {});
+    const camera = propCamera || context?.camera;
+
+    const [localCapturedPhotos, setLocalCapturedPhotos] = useState<CapturedPhoto[]>([]);
+    const capturedPhotos = context?.capturedPhotos || localCapturedPhotos;
+    const setCapturedPhotos = context?.setCapturedPhotos || setLocalCapturedPhotos;
+
     const selectedTheme = resolveThemeConfig(selection.themeId);
-    const selectedFrame = resolveFrameConfig(selection.frameId);
+    const resolvedFrame = resolveFrameConfig(selection.frameId);
+    const currentFrame = selection.frameColor && selection.frameId !== "none"
+        ? { ...resolvedFrame, borderColor: selection.frameColor }
+        : resolvedFrame;
     const selectedStyle = resolveStyleConfig(selection.styleId);
     const selectedLayout = resolveBoothLayoutConfig(selection.layoutId);
 
@@ -526,7 +551,22 @@ export function CameraPreview({
         status: cameraStatus,
         isConnecting,
         connect,
-    } = camera;
+    } = camera || {
+        adapter: {
+            connect: async () => true,
+            disconnect: () => {},
+            getStream: () => null,
+            capture: async () => new Blob(),
+        },
+        stream: null,
+        devices: [],
+        error: null,
+        status: "idle" as const,
+        isConnecting: false,
+        connect: async () => true,
+        disconnect: () => {},
+        loadDevices: async () => {},
+    };
 
     const [
         selectedDeviceId,
@@ -545,9 +585,14 @@ export function CameraPreview({
     const [customizerActions, setCustomizerActions] =
         useState<CustomizerAction[]>([]);
     const [selectedSticker, setSelectedSticker] =
-        useState<(typeof stickerOptions)[number]>(stickerOptions[0]);
+        useState<(typeof stickerOptions)[number]>(() => {
+            if (selection.stickerId && (stickerOptions as readonly string[]).includes(selection.stickerId)) {
+                return selection.stickerId as (typeof stickerOptions)[number];
+            }
+            return stickerOptions[0];
+        });
     const [customText, setCustomText] =
-        useState("MomentAI");
+        useState(selection.textLabel || "MomentAI");
     const [penColor, setPenColor] =
         useState<(typeof penColors)[number]>(penColors[0]);
     const [activeStroke, setActiveStroke] =
@@ -557,26 +602,20 @@ export function CameraPreview({
     const [customizerError, setCustomizerError] =
         useState<string | null>(null);
 
-    const [capturedPhotos, setCapturedPhotos] =
-        useState<CapturedPhoto[]>([]);
-
     const [captureError, setCaptureError] =
         useState<string | null>(null);
 
     useEffect(() => {
-        if (hasAutoConnectedRef.current) {
-            return;
-        }
-
-        if (stream) {
+        if (stream && cameraStatus === "ready") {
             hasAutoConnectedRef.current = true;
             return;
         }
 
-        hasAutoConnectedRef.current = true;
-
-        void connect();
-    }, [connect, stream]);
+        if (!stream && cameraStatus !== "connecting" && cameraStatus !== "ready") {
+            hasAutoConnectedRef.current = true;
+            void connect();
+        }
+    }, [connect, stream, cameraStatus]);
 
     useEffect(() => {
         const video = videoRef.current;
@@ -676,7 +715,7 @@ export function CameraPreview({
                         renderPhotoOutput({
                             original,
                             theme: selectedTheme,
-                            frame: selectedFrame,
+                            frame: currentFrame,
                             style: selectedStyle,
                         }),
                 });
@@ -708,7 +747,7 @@ export function CameraPreview({
             }
         }, [
             adapter,
-            selectedFrame,
+            currentFrame,
             selectedStyle,
             selectedTheme,
             stream,
@@ -764,33 +803,69 @@ export function CameraPreview({
     const aiStatus = !boothConfig.gesture.enabled
         ? "disabled"
         : gesture.error
-            ? "failed"
+            ? "unavailable"
             : gesture.isLoading
                 ? "loading"
                 : "active";
 
     const aiStatusLabel =
         aiStatus === "active"
-            ? "AI gesture active"
+            ? "Cử chỉ tay Sẵn sàng"
             : aiStatus === "loading"
-                ? "Đang tải AI gesture"
-                : aiStatus === "failed"
-                    ? "AI gesture gặp lỗi"
-                    : "AI gesture đang tắt";
+                ? "Đang tải cử chỉ tay..."
+                : aiStatus === "unavailable"
+                    ? "Cử chỉ tay không khả dụng"
+                    : "Cử chỉ tay đang tắt";
 
     const aiStatusDescription =
         aiStatus === "active"
-            ? "Có thể dùng cử chỉ hoặc nút chụp thủ công."
-            : "Preview vẫn hoạt động. Hãy dùng nút Chụp thủ công để tiếp tục.";
+            ? "Đưa tay ✋ để chuẩn bị, nắm tay ✊ để bắt đầu chụp."
+            : "Chụp ảnh bằng cử chỉ tay không hoạt động; vui lòng chạm nút chụp thủ công.";
 
     const aiStatusClassName =
         aiStatus === "active"
             ? "border-emerald-400/30 bg-emerald-400/15 text-emerald-100"
             : aiStatus === "loading"
                 ? "border-sky-400/30 bg-sky-400/15 text-sky-100"
-                : aiStatus === "failed"
+                : aiStatus === "unavailable"
                     ? "border-amber-400/40 bg-amber-400/15 text-amber-100"
                     : "border-zinc-500/40 bg-zinc-700/60 text-zinc-100";
+
+    const layoutGeometry = getLayoutGeometry(selectedLayout.id);
+    const sheetAspectRatio = layoutGeometry.sheetAspectRatio;
+
+    const bindStream = (el: HTMLVideoElement | null) => {
+        if (!el) return;
+        if (el.srcObject !== stream) {
+            el.srcObject = stream;
+            const playPromise = el.play();
+            if (playPromise && typeof playPromise.catch === "function") {
+                playPromise.catch((err) => {
+                    if (err.name !== "AbortError") {
+                        console.warn("Failed to play video in grid cell:", err);
+                    }
+                });
+            }
+        }
+    };
+
+    const getStyleFilter = (styleMode: string): string => {
+        switch (styleMode) {
+            case "grayscale":
+                return "grayscale(1)";
+            case "warm":
+                return "sepia(0.28) saturate(1.2)";
+            case "cool":
+                return "saturate(1.05) hue-rotate(8deg)";
+            case "contrast":
+                return "contrast(1.18) saturate(1.05)";
+            case "none":
+            default:
+                return "none";
+        }
+    };
+
+    const styleFilter = getStyleFilter(selectedStyle.mode);
 
     const handleRetake = useCallback(
         async (reconnectCamera = false) => {
@@ -822,6 +897,10 @@ export function CameraPreview({
                     setActiveStroke(null);
                     setLayoutError(null);
                     setCustomizerError(null);
+                    setSelection({
+                        ...selection,
+                        frameId: selection.frameId,
+                    });
                 },
                 reset: resetBooth,
             });
@@ -830,14 +909,14 @@ export function CameraPreview({
             resetBooth,
             connect,
             selectedDeviceId,
+            currentFrame,
         ],
     );
 
     useEffect(() => {
         if (
             boothState !== "result" ||
-            capturedPhotos.length < totalShots ||
-            finalLayoutUrl
+            capturedPhotos.length < totalShots
         ) {
             return;
         }
@@ -854,15 +933,33 @@ export function CameraPreview({
             try {
                 setLayoutError(null);
 
-                const layoutOutput = await composePhotoLayout({
-                    layoutId: selectedLayout.id,
-                    sources: capturedPhotos
+                // Re-render each individual photo with the current frame selection on the fly
+                const renderedSources = await Promise.all(
+                    capturedPhotos
                         .slice(0, totalShots)
                         .reverse()
-                        .map((photo) => ({
-                            photoId: photo.id,
-                            blob: photo.originalBlob,
-                        })),
+                        .map(async (photo) => {
+                            const renderedBlob = await renderPhotoOutput({
+                                original: photo.originalBlob,
+                                theme: selectedTheme,
+                                frame: currentFrame,
+                                style: selectedStyle,
+                            });
+                            return {
+                                photoId: photo.id,
+                                blob: renderedBlob,
+                            };
+                        })
+                );
+
+                if (cancelled) {
+                    return;
+                }
+
+                const layoutOutput = await composePhotoLayout({
+                    layoutId: selectedLayout.id,
+                    sources: renderedSources,
+                    borderColor: currentFrame.id !== "none" ? currentFrame.borderColor : selectedTheme.backgroundColor,
                 });
 
                 if (cancelled) {
@@ -925,8 +1022,10 @@ export function CameraPreview({
     }, [
         boothState,
         capturedPhotos,
-        finalLayoutUrl,
+        currentFrame,
         selectedLayout.id,
+        selectedTheme,
+        selectedStyle,
         totalShots,
     ]);
 
@@ -1234,9 +1333,9 @@ export function CameraPreview({
                     tabIndex={-1}
                 />
 
-                <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+                <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] items-stretch min-h-0">
                     <div
-                        className="relative touch-none overflow-hidden rounded-3xl bg-black"
+                        className="relative touch-none overflow-hidden rounded-3xl bg-neutral-900 flex items-center justify-center p-4 min-h-[50vh] max-h-[68vh]"
                         onPointerDown={startDrawing}
                         onPointerMove={continueDrawing}
                         onPointerUp={finishDrawing}
@@ -1246,7 +1345,7 @@ export function CameraPreview({
                         <img
                             src={displayedFinalUrl || photoUrl}
                             alt="Ảnh layout đã customize"
-                            className="aspect-video w-full object-cover"
+                            className="max-h-full max-w-full object-contain shadow-2xl rounded-lg"
                             draggable={false}
                         />
                     </div>
@@ -1257,11 +1356,89 @@ export function CameraPreview({
                                 Customizer
                             </p>
                             <h2 className="mt-1 text-2xl font-semibold">
-                                Sticker, chữ và vẽ tay
+                                Khung, Sticker, Vẽ tay
                             </h2>
-                            <p className="mt-2 text-sm text-neutral-400">
-                                Thao tác chỉ tạo derivative cuối. Ảnh gốc và layout đã chụp vẫn được giữ nguyên.
+                            <p className="mt-1 text-xs text-neutral-400">
+                                Khung và vẽ tay chỉ tạo derivative cuối. Ảnh gốc và layout đã chụp vẫn được giữ nguyên.
                             </p>
+                        </div>
+
+                        <div className="space-y-2 border-b border-white/5 pb-3">
+                            <p className="text-sm font-semibold text-neutral-200">Chọn khung ảnh</p>
+                            <div className="grid grid-cols-3 gap-2">
+                                {frameConfigs.map((frame) => (
+                                    <button
+                                        key={frame.id}
+                                        type="button"
+                                        className={`rounded-xl border p-2 text-center text-xs font-semibold transition ${
+                                            currentFrame.id === frame.id
+                                                ? "border-emerald-300 bg-emerald-300/15 text-emerald-300"
+                                                : "border-white/15 bg-white/5 hover:border-white/30 text-neutral-300"
+                                        }`}
+                                        onClick={() => {
+                                            setSelection({
+                                                ...selection,
+                                                frameId: frame.id,
+                                            });
+                                        }}
+                                    >
+                                        <div className="text-lg mb-0.5">
+                                            {frame.id === "none" ? "🚫" : frame.id === "white-border" ? "⬜" : "🟨"}
+                                        </div>
+                                        <span className="block truncate">{frame.name}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="space-y-2 border-b border-white/5 pb-3">
+                            <p className="text-sm font-semibold text-neutral-200">Chọn Filter / Style</p>
+                            <div className="grid grid-cols-3 gap-2">
+                                {styleConfigs.map((style) => (
+                                    <button
+                                        key={style.id}
+                                        type="button"
+                                        className={`rounded-xl border p-2 text-center text-xs font-semibold transition ${
+                                            selectedStyle.id === style.id
+                                                ? "border-emerald-300 bg-emerald-300/15 text-emerald-300"
+                                                : "border-white/15 bg-white/5 hover:border-white/30 text-neutral-300"
+                                        }`}
+                                        onClick={() => {
+                                            setSelection({
+                                                ...selection,
+                                                styleId: style.id,
+                                            });
+                                        }}
+                                    >
+                                        <span className="block truncate">{style.name}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="space-y-2 border-b border-white/5 pb-3">
+                            <p className="text-sm font-semibold text-neutral-200">Chọn Theme nền</p>
+                            <div className="grid grid-cols-3 gap-2">
+                                {themeConfigs.map((theme) => (
+                                    <button
+                                        key={theme.id}
+                                        type="button"
+                                        className={`rounded-xl border p-2 text-center text-xs font-semibold transition ${
+                                            selectedTheme.id === theme.id
+                                                ? "border-emerald-300 bg-emerald-300/15 text-emerald-300"
+                                                : "border-white/15 bg-white/5 hover:border-white/30 text-neutral-300"
+                                        }`}
+                                        onClick={() => {
+                                            setSelection({
+                                                ...selection,
+                                                themeId: theme.id,
+                                            });
+                                        }}
+                                    >
+                                        <span className="block truncate">{theme.name}</span>
+                                    </button>
+                                ))}
+                            </div>
                         </div>
 
                         <div className="space-y-2">
@@ -1274,7 +1451,12 @@ export function CameraPreview({
                                 maxLength={32}
                                 className="w-full rounded-xl border border-white/15 bg-black px-3 py-3 text-white"
                                 onChange={(event) => {
-                                    setCustomText(event.target.value);
+                                    const val = event.target.value;
+                                    setCustomText(val);
+                                    setSelection({
+                                        ...selection,
+                                        textLabel: val,
+                                    });
                                 }}
                             />
                             <button
@@ -1296,6 +1478,10 @@ export function CameraPreview({
                                         className={`rounded-xl border py-3 text-2xl ${selectedSticker === sticker ? "border-emerald-300 bg-emerald-300/15" : "border-white/15 bg-white/5"}`}
                                         onClick={() => {
                                             setSelectedSticker(sticker);
+                                            setSelection({
+                                                ...selection,
+                                                stickerId: sticker,
+                                            });
                                             addSticker(sticker);
                                         }}
                                     >
@@ -1399,7 +1585,7 @@ export function CameraPreview({
                         để bắt đầu chụp.
                     </p>
                     <p className="mt-1 text-xs text-neutral-400">
-                        Layout: {selectedLayout.name} · Countdown: {selection.countdownSeconds}s · Theme: {selectedTheme.name} · Khung: {selectedFrame.name} · Style: {selectedStyle.name}
+                        Layout: {selectedLayout.name} · Countdown: {selection.countdownSeconds}s · Theme: {selectedTheme.name} · Khung: {currentFrame.name} · Style: {selectedStyle.name}
                     </p>
                 </div>
 
@@ -1418,7 +1604,7 @@ export function CameraPreview({
 
 
                 <div className="flex flex-wrap gap-2">
-                    {onBackToSetup ? (
+                        {onBackToSetup ? (
                         <button
                             type="button"
                             disabled={
@@ -1427,15 +1613,20 @@ export function CameraPreview({
                                     capturedPhotos.length,
                                 )
                             }
-                            className="rounded-lg border px-4 py-2 disabled:opacity-50"
+                            className="rounded-lg border px-4 py-2 disabled:opacity-50 text-sm"
                             onClick={onBackToSetup}
                         >
                             Đổi setup
                         </button>
                     ) : null}
 
+                    <label htmlFor="camera-device-select" className="sr-only">
+                        Chọn thiết bị camera
+                    </label>
                     <select
-                        className="rounded-lg border px-3 py-2 text-black"
+                        id="camera-device-select"
+                        name="camera-device-select"
+                        className="rounded-lg border px-3 py-2 text-black text-sm"
                         value={selectedDeviceId}
                         onChange={(event) => {
                             setSelectedDeviceId(
@@ -1460,7 +1651,7 @@ export function CameraPreview({
                     <button
                         type="button"
                         disabled={isConnecting}
-                        className="rounded-lg bg-white px-4 py-2 text-black disabled:opacity-50"
+                        className="rounded-lg bg-white px-4 py-2 text-black text-sm disabled:opacity-50"
                         onClick={() => {
                             void connect(
                                 selectedDeviceId ||
@@ -1475,15 +1666,24 @@ export function CameraPreview({
                 </div>
             </header>
 
-            <div className="relative aspect-video overflow-hidden rounded-3xl bg-black">
+            <div className="relative flex-1 min-h-0 flex items-center justify-center overflow-hidden bg-neutral-900/40 rounded-3xl border border-white/10 h-[72vh] max-h-[72vh] w-full p-2">
+                {/* Main live camera stream view */}
                 <video
                     ref={videoRef}
-                    className="h-full w-full -scale-x-100 object-cover"
+                    className={`w-full h-full object-cover rounded-2xl -scale-x-100 transition-opacity duration-300 ${
+                        stream && cameraStatus === "ready" ? "opacity-100" : "opacity-0"
+                    }`}
+                    style={{ filter: getStyleFilter(selectedStyle.mode) }}
                     muted
                     autoPlay
                     playsInline
                 />
 
+                {(!stream || cameraStatus !== "ready") && (
+                    <LoadingLayer cameraStatus={cameraStatus} onRetry={() => void connect()} />
+                )}
+
+                {/* Overlays positioned relative to the parent workspace wrapper */}
                 <div className={`absolute left-5 top-5 max-w-sm rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur ${aiStatusClassName}`}>
                     <div className="flex items-center justify-between gap-3">
                         <div className="font-semibold">
@@ -1497,11 +1697,11 @@ export function CameraPreview({
 
                     {aiStatus === "active" ? (
                         <div className="mt-2">
-                            <div className="font-medium">
+                            <div className="font-medium text-xs">
                                 {gestureLabel}
                             </div>
 
-                            <div className="text-sm opacity-80">
+                            <div className="text-[10px] opacity-80">
                                 {Math.round(
                                     gesture.result.confidence *
                                     100,
@@ -1509,7 +1709,7 @@ export function CameraPreview({
                                 % confidence
                             </div>
 
-                            <div className="mt-2 h-2 w-44 overflow-hidden rounded-full bg-black/30">
+                            <div className="mt-1.5 h-1.5 w-32 overflow-hidden rounded-full bg-black/30">
                                 <div
                                     className="h-full bg-emerald-300 transition-[width]"
                                     style={{
@@ -1519,37 +1719,44 @@ export function CameraPreview({
                             </div>
                         </div>
                     ) : (
-                        <p className="mt-2 text-sm leading-relaxed opacity-90">
+                        <p className="mt-1 text-xs leading-relaxed opacity-90">
                             {aiStatusDescription}
                         </p>
                     )}
 
-                    {aiStatus === "failed" && gesture.error ? (
-                        <p className="mt-2 text-xs leading-relaxed text-amber-50/80">
+                    {aiStatus === "unavailable" && gesture.error ? (
+                        <p className="mt-1 text-[10px] leading-relaxed text-amber-50/80">
                             {gesture.error}
                         </p>
                     ) : null}
                 </div>
 
                 <div className="absolute right-5 top-5 space-y-2 text-right">
-                    <div className="rounded-xl bg-black/70 px-4 py-2">
-                        State: {boothState.toUpperCase()}
+                    <div className="rounded-xl bg-black/70 px-4 py-2 text-xs">
+                        Trạng thái: {boothState.toUpperCase()}
                     </div>
-                    <div className="rounded-xl bg-emerald-400/90 px-4 py-2 font-semibold text-black">
+                    <div className="rounded-xl bg-emerald-400/90 px-4 py-2 font-semibold text-black text-xs">
                         Ảnh {Math.min(capturedShotCount + 1, totalShots)}/{totalShots}
                     </div>
                 </div>
 
                 {boothCountdown !== null ? (
-                    <div className="absolute inset-0 grid place-items-center bg-black/40 text-[14rem] font-black">
-                        {boothCountdown}
+                    <div className="absolute inset-0 grid place-items-center bg-black/60 backdrop-blur-sm z-30 transition-all duration-300">
+                        <div className="flex flex-col items-center justify-center">
+                            <span className="text-[14rem] font-black leading-none text-white drop-shadow-[0_0_60px_rgba(16,185,129,0.9)] animate-bounce">
+                                {boothCountdown}
+                            </span>
+                            <span className="mt-4 text-2xl font-bold tracking-widest text-emerald-400 uppercase">
+                                📸 Chuẩn bị tạo dáng!
+                            </span>
+                        </div>
                     </div>
                 ) : null}
 
                 {boothState === "between-shots" ? (
-                    <div className="absolute inset-0 grid place-items-center bg-black/45 text-center">
+                    <div className="absolute inset-0 grid place-items-center bg-black/45 text-center z-10">
                         <div className="rounded-3xl bg-white px-8 py-6 text-black shadow-2xl">
-                            <p className="text-xl font-medium">
+                            <p className="text-xl font-medium font-bold">
                                 Giữ nguyên nụ cười nhé
                             </p>
                             <p className="mt-2 text-4xl font-black">

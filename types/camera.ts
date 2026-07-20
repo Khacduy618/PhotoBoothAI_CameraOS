@@ -1,6 +1,8 @@
 export type CameraStatus =
     | "idle"
+    | "requesting-permission"
     | "connecting"
+    | "initializing"
     | "ready"
     | "disconnected"
     | "error";

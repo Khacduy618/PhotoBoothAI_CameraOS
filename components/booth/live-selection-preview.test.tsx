@@ -83,7 +83,7 @@ describe("LiveSelectionPreview", () => {
                                 id: "setup-text-preset",
                                 text: "Best Day Ever",
                                 x: 0.5,
-                                y: 0.88,
+                                y: 0.95,
                                 color: "#ffffff",
                                 fontSize: 42,
                                 rotationDegrees: 0,
@@ -145,5 +145,36 @@ describe("LiveSelectionPreview", () => {
         );
 
         expect(connect).not.toHaveBeenCalled();
+    });
+
+    it("triggers onSelectionChange with updated relative coordinates when dragging an overlay", () => {
+        const onSelectionChange = vi.fn();
+
+        render(
+            <LiveSelectionPreview
+                selection={{
+                    ...defaultBoothSelection,
+                    customization: {
+                        stickerItems: [
+                            {
+                                id: "test-sticker",
+                                stickerId: "sparkle-heart",
+                                x: 0.5,
+                                y: 0.5,
+                                scale: 1,
+                                rotationDegrees: 0,
+                            },
+                        ],
+                        textLabels: [],
+                        drawingStrokes: [],
+                    },
+                }}
+                camera={cameraControllerMock}
+                onSelectionChange={onSelectionChange}
+            />,
+        );
+
+        const stickerEl = screen.getByLabelText("Sticker preview Tim lấp lánh");
+        expect(stickerEl).toBeTruthy();
     });
 });

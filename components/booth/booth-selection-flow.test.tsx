@@ -12,7 +12,7 @@ import type { BoothSelection } from "@/types/theme";
 const liveSelectionPreviewMock = vi.hoisted(() =>
     vi.fn(({ selection }: { selection: BoothSelection }) => (
         <div>
-            Live preview {selection.themeId}/{selection.frameId}/{selection.styleId}
+            Live preview {selection.layoutId}/{selection.themeId}/{selection.frameId}/{selection.styleId}/stickers:{selection.customization.stickerItems.length}/text:{selection.customization.textLabels.length}
         </div>
     )),
 );
@@ -178,7 +178,7 @@ describe("BoothSelectionFlow", () => {
         );
 
         expect(
-            screen.getByText("Live preview classic/none/none"),
+            screen.getByText("Live preview 2x2/classic/none/none/stickers:0/text:0"),
         ).toBeTruthy();
 
         fireEvent.click(screen.getByText("1x4 dọc"));
@@ -199,10 +199,124 @@ describe("BoothSelectionFlow", () => {
             themeId: "party",
         });
 
+        fireEvent.click(screen.getByText("💖 Tim lấp lánh"));
+        expect(onSelectionChange).toHaveBeenCalledWith({
+            ...defaultBoothSelection,
+            customization: {
+                ...defaultBoothSelection.customization,
+                stickerItems: [
+                    {
+                        id: "setup-sticker-preset",
+                        stickerId: "sparkle-heart",
+                        x: 0.78,
+                        y: 0.2,
+                        scale: 1,
+                        rotationDegrees: -8,
+                    },
+                ],
+            },
+        });
+
+        fireEvent.click(screen.getByText("Best Day Ever"));
+        expect(onSelectionChange).toHaveBeenCalledWith({
+            ...defaultBoothSelection,
+            customization: {
+                ...defaultBoothSelection.customization,
+                textLabels: [
+                    {
+                        id: "setup-text-preset",
+                        text: "Best Day Ever",
+                        x: 0.5,
+                        y: 0.88,
+                        color: "#ffffff",
+                        fontSize: 42,
+                        rotationDegrees: 0,
+                    },
+                ],
+            },
+        });
+
         fireEvent.click(screen.getByRole("button", {
             name: "Tiếp tục vào camera",
         }));
         expect(onComplete).toHaveBeenCalledTimes(1);
+    });
+
+    it("replaces setup sticker and text presets instead of appending unlimited items", () => {
+        const onSelectionChange = vi.fn();
+        const selectionWithSetupPresets: BoothSelection = {
+            ...defaultBoothSelection,
+            customization: {
+                stickerItems: [
+                    {
+                        id: "setup-sticker-preset",
+                        stickerId: "cute-star",
+                        x: 0.78,
+                        y: 0.2,
+                        scale: 1,
+                        rotationDegrees: -8,
+                    },
+                ],
+                textLabels: [
+                    {
+                        id: "setup-text-preset",
+                        text: "Old Label",
+                        x: 0.5,
+                        y: 0.88,
+                        color: "#ffffff",
+                        fontSize: 42,
+                        rotationDegrees: 0,
+                    },
+                ],
+                drawingStrokes: [],
+            },
+        };
+
+        render(
+            <BoothSelectionFlow
+                selection={selectionWithSetupPresets}
+                camera={cameraControllerMock}
+                onSelectionChange={onSelectionChange}
+                onComplete={vi.fn()}
+            />,
+        );
+
+        fireEvent.click(screen.getByText("🎉 Tiệc vui"));
+        expect(onSelectionChange).toHaveBeenCalledWith({
+            ...selectionWithSetupPresets,
+            customization: {
+                ...selectionWithSetupPresets.customization,
+                stickerItems: [
+                    {
+                        id: "setup-sticker-preset",
+                        stickerId: "party-popper",
+                        x: 0.78,
+                        y: 0.2,
+                        scale: 1,
+                        rotationDegrees: -8,
+                    },
+                ],
+            },
+        });
+
+        fireEvent.click(screen.getByText("Happy Birthday"));
+        expect(onSelectionChange).toHaveBeenCalledWith({
+            ...selectionWithSetupPresets,
+            customization: {
+                ...selectionWithSetupPresets.customization,
+                textLabels: [
+                    {
+                        id: "setup-text-preset",
+                        text: "Happy Birthday",
+                        x: 0.5,
+                        y: 0.88,
+                        color: "#ffffff",
+                        fontSize: 42,
+                        rotationDegrees: 0,
+                    },
+                ],
+            },
+        });
     });
 
     it("blocks continuing when required selection is invalid", () => {

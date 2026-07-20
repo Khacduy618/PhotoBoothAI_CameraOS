@@ -7,7 +7,12 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const cameraControllerMock = vi.hoisted(() => ({
-    adapter: {},
+    adapter: {
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        getStream: vi.fn(() => null),
+        capture: vi.fn(),
+    },
     stream: null,
     devices: [],
     error: null,
@@ -47,7 +52,7 @@ describe("BoothExperience", () => {
         render(<BoothExperience />);
 
         expect(
-            await screen.findByText("Chọn giao diện trước khi chụp"),
+            await screen.findByText("Xem trước layout trước khi chụp"),
         ).toBeTruthy();
         expect(
             screen.queryByText("Camera preview mounted"),
@@ -58,7 +63,7 @@ describe("BoothExperience", () => {
     it("mounts camera preview with the selected values after setup is complete", async () => {
         render(<BoothExperience />);
 
-        await screen.findByText("Chọn giao diện trước khi chụp");
+        await screen.findByText("Xem trước layout trước khi chụp");
         fireEvent.click(screen.getByText("Party"));
         fireEvent.click(screen.getByText("Viền vàng"));
         fireEvent.click(screen.getByText("Warm"));
@@ -88,7 +93,7 @@ describe("BoothExperience", () => {
     it("can return from preview to setup without losing the current selection", async () => {
         render(<BoothExperience />);
 
-        await screen.findByText("Chọn giao diện trước khi chụp");
+        await screen.findByText("Xem trước layout trước khi chụp");
         fireEvent.click(screen.getByText("Party"));
         fireEvent.click(screen.getByText("Viền vàng"));
         fireEvent.click(screen.getByText("Warm"));
@@ -105,7 +110,7 @@ describe("BoothExperience", () => {
         );
 
         expect(
-            screen.getByText("Chọn giao diện trước khi chụp"),
+            screen.getByText("Xem trước layout trước khi chụp"),
         ).toBeTruthy();
         expect(screen.getByDisplayValue("party")).toBeTruthy();
         expect(screen.getByDisplayValue("gold")).toBeTruthy();

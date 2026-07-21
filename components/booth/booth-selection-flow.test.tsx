@@ -102,10 +102,12 @@ describe("theme/frame/style config", () => {
                 styleId: "warm",
                 layoutId: "2x2",
                 countdownSeconds: 3,
+                frameColor: undefined,
                 customization: {
                     stickerItems: [],
                     textLabels: [],
                     drawingStrokes: [],
+                    overlays: [],
                 },
             }),
         );

@@ -47,19 +47,7 @@ describe("LiveSelectionPreview", () => {
             />,
         );
 
-        expect(screen.getByText("Realtime setup preview")).toBeTruthy();
-        expect(
-            screen.getByText(
-                "Layout: 2x2 · 4 ảnh · Countdown: 3s",
-            ),
-        ).toBeTruthy();
-        expect(
-            screen.getByText(
-                "Theme: Party · Khung: Viền vàng · Style: Warm",
-            ),
-        ).toBeTruthy();
         expect(screen.getByText("Style preview: Warm")).toBeTruthy();
-        expect(screen.getByText("Camera: IDLE")).toBeTruthy();
     });
 
     it("renders selected sticker and text presets on the realtime preview", () => {

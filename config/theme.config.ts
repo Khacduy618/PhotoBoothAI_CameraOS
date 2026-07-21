@@ -56,11 +56,29 @@ export const frameConfigs = [
         kind: "solid",
     },
     {
+        id: "pink-heart",
+        name: "Khung Tim Dễ Thương",
+        description: "Khung họa tiết Trái tim hồng Pastel đáng yêu.",
+        borderColor: "#fce7f3",
+        borderWidth: 36,
+        kind: "template",
+        patternUrl: "/frames/pink-heart-pattern.jpg",
+    },
+    {
+        id: "lavender-star",
+        name: "Khung Mây Sao Tím",
+        description: "Khung họa tiết Ngôi sao lấp lánh tím pastel.",
+        borderColor: "#f3e8ff",
+        borderWidth: 36,
+        kind: "template",
+        patternUrl: "/frames/lavender-star-pattern.jpg",
+    },
+    {
         id: "gold",
         name: "Viền vàng",
-        description: "Khung vàng cho sự kiện nổi bật.",
+        description: "Khung viền vàng nổi bật cho khoảnh khắc kỷ niệm.",
         borderColor: "#facc15",
-        borderWidth: 28,
+        borderWidth: 32,
         kind: "solid",
     },
 ] as const satisfies readonly FrameConfig[];
@@ -90,6 +108,7 @@ export const defaultBoothCustomization = {
     stickerItems: [],
     textLabels: [],
     drawingStrokes: [],
+    overlays: [],
 } as const;
 
 export const defaultBoothSelection: BoothSelection = {

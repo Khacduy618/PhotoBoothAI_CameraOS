@@ -3,7 +3,7 @@
 import { useContext, useEffect } from "react";
 import { defaultBoothSelection } from "@/config/theme.config";
 import { BoothSessionContext } from "@/components/booth/booth-session-context";
-import { PreviewRenderer } from "@/components/booth/preview-renderer";
+import { EditablePreview } from "@/components/customize/editable-preview";
 import type { CameraController } from "@/hooks/use-camera";
 import type { BoothSelection } from "@/types/theme";
 
@@ -21,7 +21,6 @@ export function LiveSelectionPreview({
     const context = useContext(BoothSessionContext);
     const selection = propSelection || context?.selection || defaultBoothSelection;
     const camera = propCamera || context?.camera;
-    const onSelectionChange = propOnSelectionChange || context?.setSelection;
 
     const { stream, status, connect } = camera || {
         stream: null,
@@ -38,12 +37,11 @@ export function LiveSelectionPreview({
     }, [connect, stream]);
 
     return (
-        <PreviewRenderer
+        <EditablePreview
             selection={selection}
             stream={stream}
             cameraStatus={status}
-            onSelectionChange={onSelectionChange}
-            onRetry={() => void connect()}
+            className="w-full h-full"
         />
     );
 }

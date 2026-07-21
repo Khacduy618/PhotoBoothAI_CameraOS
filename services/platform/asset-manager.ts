@@ -1,5 +1,5 @@
-import type { FrameConfig, ThemeConfig, StickerConfig, TextLabelPresetConfig } from "@/types/theme";
-import { themeConfigs, frameConfigs } from "@/config/theme.config";
+import type { FrameConfig, ThemeConfig, StyleConfig, StickerConfig, TextLabelPresetConfig } from "@/types/theme";
+import { themeConfigs, frameConfigs, styleConfigs } from "@/config/theme.config";
 import { stickerConfigs, textLabelPresetConfigs } from "@/config/sticker.config";
 
 export interface FramePackage {
@@ -9,10 +9,10 @@ export interface FramePackage {
         category: string;
         description: string;
     };
-    thumbnailUrl: string; // Dynamic background styling, svg or gradient representation
+    thumbnailUrl: string;
     config: {
         borderColor: string;
-        borderWidthRatio: number; // Ratio relative to canvas size, e.g. 0.025
+        borderWidthRatio: number;
         kind: "none" | "solid" | "template";
     };
 }
@@ -35,7 +35,7 @@ const framePackages: FramePackage[] = [
             category: "Classic",
             description: "Khung trắng photobooth tối giản.",
         },
-        thumbnailUrl: "bg-white border border-neutral-300",
+        thumbnailUrl: "bg-[#ffffff] border border-neutral-300",
         config: { borderColor: "#ffffff", borderWidthRatio: 0.025, kind: "solid" },
     },
     {
@@ -47,6 +47,26 @@ const framePackages: FramePackage[] = [
         },
         thumbnailUrl: "bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500",
         config: { borderColor: "#facc15", borderWidthRatio: 0.022, kind: "solid" },
+    },
+    {
+        id: "pink-heart",
+        metadata: {
+            name: "Khung Tim Dễ Thương",
+            category: "Pastel",
+            description: "Khung họa tiết Trái tim hồng Pastel đáng yêu.",
+        },
+        thumbnailUrl: "bg-pink-100 bg-[url('/frames/pink-heart-pattern.jpg')] bg-cover border border-pink-300",
+        config: { borderColor: "#fce7f3", borderWidthRatio: 0.028, kind: "template" },
+    },
+    {
+        id: "lavender-star",
+        metadata: {
+            name: "Khung Mây Sao Tím",
+            category: "Pastel",
+            description: "Khung họa tiết Ngôi sao lấp lánh tím pastel.",
+        },
+        thumbnailUrl: "bg-purple-100 bg-[url('/frames/lavender-star-pattern.jpg')] bg-cover border border-purple-300",
+        config: { borderColor: "#f3e8ff", borderWidthRatio: 0.028, kind: "template" },
     },
     {
         id: "girly",
@@ -101,27 +121,38 @@ const framePackages: FramePackage[] = [
 ];
 
 export class AssetManager {
+    static getThemes(): ThemeConfig[] {
+        return [...themeConfigs];
+    }
+
     static getFramePackages(): FramePackage[] {
         return framePackages;
     }
 
     static getFramePackageById(id: string): FramePackage | undefined {
-        return framePackages.find(p => p.id === id);
+        return framePackages.find((p) => p.id === id);
     }
 
-    static getStickers(): StickerConfig[] {
+    static getStyleConfigs(): StyleConfig[] {
+        return [...styleConfigs];
+    }
+
+    static getStickerConfigs(): StickerConfig[] {
         return [...stickerConfigs];
     }
 
-    static getTextPresets(): TextLabelPresetConfig[] {
+    static getTextLabelPresets(): TextLabelPresetConfig[] {
         return [...textLabelPresetConfigs];
     }
 
-    static getThemes(): ThemeConfig[] {
-        return [...themeConfigs];
+    static getFonts(): { family: string; label: string }[] {
+        return [
+            { family: "system-ui, sans-serif", label: "Hiện đại (System)" },
+            { family: "Georgia, serif", label: "Cổ điển (Georgia)" },
+            { family: "Courier New, monospace", label: "Máy đánh chữ (Courier)" },
+        ];
     }
 
-    // Helper compatibility adapters for existing frame logic
     static resolveFrameConfig(frameId: string): FrameConfig {
         const pkg = this.getFramePackageById(frameId);
         if (pkg) {
@@ -134,8 +165,7 @@ export class AssetManager {
                 kind: pkg.config.kind,
             };
         }
-        // Fallback to theme configs if not found
-        const config = frameConfigs.find(f => f.id === frameId);
+        const config = frameConfigs.find((f) => f.id === frameId);
         return config ?? frameConfigs[0];
     }
 }

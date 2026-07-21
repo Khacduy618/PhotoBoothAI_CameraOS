@@ -4,6 +4,7 @@ import {
     type PointerEvent,
     useCallback,
     useEffect,
+    useMemo,
     useRef,
     useState,
     useContext,
@@ -12,7 +13,14 @@ import {
 import { BoothSessionContext, useBoothSession } from "@/components/booth/booth-session-context";
 import { LoadingLayer, PreviewCell, getStyleFilter } from "@/components/booth/preview-cell";
 import { PreviewRenderer } from "@/components/booth/preview-renderer";
-import { getLayoutGeometry } from "@/services/layout/layout-engine";
+import { CustomizeFlow } from "@/components/customize/customize-flow";
+import { FinalResultView } from "@/components/result/final-result-view";
+import { ThemeSelector } from "@/components/selectors/theme-selector";
+import { FrameSelector } from "@/components/selectors/frame-selector";
+import { StyleSelector } from "@/components/selectors/style-selector";
+import { StickerSelector } from "@/components/selectors/sticker-selector";
+import { TextSelector } from "@/components/selectors/text-selector";
+import { getLayoutGeometry, getPhotoCellRects } from "@/services/layout/layout-engine";
 import { getCameraStatusLabel } from "@/utils/camera-helpers";
 import { resolveStickerConfig } from "@/config/sticker.config";
 import { boothConfig } from "@/config/booth.config";
@@ -33,6 +41,8 @@ import { composePhotoLayout } from "@/services/render/layout-compositor.service"
 import { renderPhotoOutput } from "@/services/render/render-photo-output";
 import {
     saveSharePhoto,
+    cleanupExpiredSharePhotos,
+    scheduleSharePhotoCleanup,
 } from "@/services/sharing/share-photo-storage.service";
 import {
     MemoryPhotoBlobStorage,
@@ -328,9 +338,14 @@ function loadImageFromUrl(url: string): Promise<HTMLImageElement> {
     });
 }
 
-async function renderCustomizedLayout(
+export async function renderCustomizedLayout(
     baseImageUrl: string,
     actions: readonly CustomizerAction[],
+    options?: {
+        layoutId?: string;
+        textColor?: string;
+        themeId?: string;
+    },
 ): Promise<Blob> {
     const image = await loadImageFromUrl(baseImageUrl);
     const canvas = document.createElement("canvas");
@@ -344,6 +359,9 @@ async function renderCustomizedLayout(
     }
 
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    const layoutId = options?.layoutId || "2x2";
+    const cellRects = getPhotoCellRects(layoutId, canvas.width, canvas.height);
 
     actions.forEach((action) => {
         if (action.type === "sticker") {
@@ -362,19 +380,15 @@ async function renderCustomizedLayout(
 
         if (action.type === "text") {
             context.save();
-            context.font = `700 ${Math.round(canvas.width * 0.045)}px sans-serif`;
+            const fontFamily = options?.themeId === "party" ? "Georgia, serif" : "system-ui, sans-serif";
+            const fontSize = Math.round(canvas.height * 0.032);
+            context.font = `900 ${fontSize}px ${fontFamily}`;
             context.textAlign = "center";
             context.textBaseline = "middle";
-            context.lineWidth = Math.max(4, canvas.width * 0.006);
-            context.strokeStyle = "rgba(0, 0, 0, 0.72)";
-            context.fillStyle = "#ffffff";
-            context.strokeText(
-                action.text,
-                action.x * canvas.width,
-                action.y * canvas.height,
-            );
+            context.fillStyle = options?.textColor || "#111827";
+            const displayText = action.text.toUpperCase();
             context.fillText(
-                action.text,
+                displayText,
                 action.x * canvas.width,
                 action.y * canvas.height,
             );
@@ -387,8 +401,16 @@ async function renderCustomizedLayout(
         }
 
         context.save();
+        // Clip canvas so strokes ONLY draw on frame border / margin and NEVER inside photo cells
+        context.beginPath();
+        context.rect(0, 0, canvas.width, canvas.height);
+        cellRects.forEach((r) => {
+            context.rect(r.x, r.y, r.width, r.height);
+        });
+        context.clip("evenodd");
+
         context.strokeStyle = action.color;
-        context.lineWidth = Math.max(2, action.width * canvas.width);
+        context.lineWidth = Math.max(4, action.width * canvas.width);
         context.lineCap = "round";
         context.lineJoin = "round";
         context.beginPath();
@@ -496,12 +518,37 @@ export function CameraPreview({
     const [localCapturedPhotos, setLocalCapturedPhotos] = useState<CapturedPhoto[]>([]);
     const capturedPhotos = context?.capturedPhotos || localCapturedPhotos;
     const setCapturedPhotos = context?.setCapturedPhotos || setLocalCapturedPhotos;
+    const phase = context?.phase || "capture";
+    const setPhase = context?.setPhase || (() => {});
+
+    if (phase === "customize") {
+        return (
+            <CustomizeFlow
+                onCompleteCustomize={() => setPhase("result")}
+                onBackToCapture={() => setPhase("capture")}
+            />
+        );
+    }
+
+    if (phase === "result") {
+        return (
+            <FinalResultView
+                onBackToCustomize={() => setPhase("customize")}
+                onStartNewSession={() => {
+                    setPhase("setup");
+                    if (onBackToSetup) onBackToSetup();
+                }}
+            />
+        );
+    }
 
     const selectedTheme = resolveThemeConfig(selection.themeId);
     const resolvedFrame = resolveFrameConfig(selection.frameId);
-    const currentFrame = selection.frameColor && selection.frameId !== "none"
-        ? { ...resolvedFrame, borderColor: selection.frameColor }
-        : resolvedFrame;
+    const currentFrame = useMemo(() => {
+        return selection.frameColor && selection.frameId !== "none"
+            ? { ...resolvedFrame, borderColor: selection.frameColor }
+            : resolvedFrame;
+    }, [resolvedFrame, selection.frameColor, selection.frameId]);
     const selectedStyle = resolveStyleConfig(selection.styleId);
     const selectedLayout = resolveBoothLayoutConfig(selection.layoutId);
 
@@ -583,7 +630,67 @@ export function CameraPreview({
         useState<string | null>(null);
 
     const [customizerActions, setCustomizerActions] =
-        useState<CustomizerAction[]>([]);
+        useState<CustomizerAction[]>(() => {
+            const initialActions: CustomizerAction[] = [];
+            if (selection.customization?.stickerItems) {
+                selection.customization.stickerItems.forEach((st, idx) => {
+                    const stickerObj = resolveStickerConfig(st.stickerId);
+                    const emoji = stickerObj ? stickerObj.emoji : st.stickerId;
+                    initialActions.push({
+                        type: "sticker",
+                        id: st.id || `setup-sticker-${idx}`,
+                        sticker: emoji,
+                        x: st.x ?? 0.5,
+                        y: st.y ?? 0.5,
+                    });
+                });
+            }
+            if (selection.customization?.textLabels) {
+                selection.customization.textLabels.forEach((tl, idx) => {
+                    if (tl.text) {
+                        initialActions.push({
+                            type: "text",
+                            id: tl.id || `setup-text-${idx}`,
+                            text: tl.text,
+                            x: tl.x ?? 0.5,
+                            y: tl.y ?? 0.9,
+                        });
+                    }
+                });
+            }
+            return initialActions;
+        });
+
+    useEffect(() => {
+        const syncedActions: CustomizerAction[] = [];
+        if (selection.customization?.stickerItems) {
+            selection.customization.stickerItems.forEach((st, idx) => {
+                const stickerObj = resolveStickerConfig(st.stickerId);
+                const emoji = stickerObj ? stickerObj.emoji : st.stickerId;
+                syncedActions.push({
+                    type: "sticker",
+                    id: st.id || `setup-sticker-${idx}`,
+                    sticker: emoji,
+                    x: st.x ?? 0.5,
+                    y: st.y ?? 0.5,
+                });
+            });
+        }
+        if (selection.customization?.textLabels) {
+            selection.customization.textLabels.forEach((tl, idx) => {
+                if (tl.text) {
+                    syncedActions.push({
+                        type: "text",
+                        id: tl.id || `setup-text-${idx}`,
+                        text: tl.text,
+                        x: tl.x ?? 0.5,
+                        y: tl.y ?? 0.9,
+                    });
+                }
+            });
+        }
+        setCustomizerActions(syncedActions);
+    }, [selection.customization]);
     const [selectedSticker, setSelectedSticker] =
         useState<(typeof stickerOptions)[number]>(() => {
             if (selection.stickerId && (stickerOptions as readonly string[]).includes(selection.stickerId)) {
@@ -594,7 +701,7 @@ export function CameraPreview({
     const [customText, setCustomText] =
         useState(selection.textLabel || "MomentAI");
     const [penColor, setPenColor] =
-        useState<(typeof penColors)[number]>(penColors[0]);
+        useState<string | null>(null);
     const [activeStroke, setActiveStroke] =
         useState<CustomizerAction | null>(null);
     const [customizedLayoutUrl, setCustomizedLayoutUrl] =
@@ -657,6 +764,14 @@ export function CameraPreview({
     }, [stream]);
 
     useEffect(() => {
+        if (typeof window !== "undefined") {
+            try {
+                cleanupExpiredSharePhotos(window.localStorage, 120_000);
+            } catch {
+                // Ignore storage access errors
+            }
+        }
+
         return () => {
             revokeCapturedPhotoUrls(capturedPhotosRef.current);
 
@@ -772,6 +887,15 @@ export function CameraPreview({
     const totalShots = booth.totalShots;
     const resetBooth = booth.reset;
     const captureManually = booth.captureManually;
+
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video || !stream) return;
+        if (video.srcObject !== stream) {
+            video.srcObject = stream;
+        }
+        void video.play().catch(() => {});
+    }, [stream, boothState, photoUrl]);
 
     const requiredHoldMs =
         gesture.result.name === "Closed_Fist"
@@ -897,10 +1021,7 @@ export function CameraPreview({
                     setActiveStroke(null);
                     setLayoutError(null);
                     setCustomizerError(null);
-                    setSelection({
-                        ...selection,
-                        frameId: selection.frameId,
-                    });
+                    setSelection(defaultBoothSelection);
                 },
                 reset: resetBooth,
             });
@@ -960,6 +1081,8 @@ export function CameraPreview({
                     layoutId: selectedLayout.id,
                     sources: renderedSources,
                     borderColor: currentFrame.id !== "none" ? currentFrame.borderColor : selectedTheme.backgroundColor,
+                    patternUrl: currentFrame.patternUrl,
+                    textColor: currentFrame.id === "white-border" ? "#111827" : selectedTheme.textColor,
                 });
 
                 if (cancelled) {
@@ -986,15 +1109,21 @@ export function CameraPreview({
                 finalLayoutUrlRef.current =
                     layoutUrlResult.value;
 
-                if (
-                    typeof window !== "undefined" &&
-                    captureSessionIdRef.current
-                ) {
-                    await saveFinalLayoutSharePhoto({
-                        storage: window.localStorage,
-                        sessionId: captureSessionIdRef.current,
-                        blob: layoutOutput.blob,
-                    });
+                try {
+                    if (
+                        typeof window !== "undefined" &&
+                        captureSessionIdRef.current
+                    ) {
+                        const sessionId = captureSessionIdRef.current;
+                        await saveFinalLayoutSharePhoto({
+                            storage: window.localStorage,
+                            sessionId,
+                            blob: layoutOutput.blob,
+                        });
+                        scheduleSharePhotoCleanup(window.localStorage, sessionId, 120_000);
+                    }
+                } catch (shareErr) {
+                    console.warn("[CameraPreview] Share photo storage skipped (QuotaExceededError):", shareErr);
                 }
 
                 setFinalLayoutUrl(layoutUrlResult.value);
@@ -1047,9 +1176,16 @@ export function CameraPreview({
 
                 setCustomizedLayoutUrl(null);
 
+                const textColor = selection.frameColor && selection.frameId !== "none" ? "#111827" : selectedTheme.textColor;
+
                 const customizedBlob = await renderCustomizedLayout(
                     finalLayoutUrl,
                     customizerActions,
+                    {
+                        layoutId: selectedLayout.id,
+                        textColor,
+                        themeId: selectedTheme.id,
+                    },
                 );
                 const customizedUrl = URL.createObjectURL(customizedBlob);
 
@@ -1176,7 +1312,7 @@ export function CameraPreview({
     };
 
     const startDrawing = (event: PointerEvent<HTMLDivElement>) => {
-        if (!finalLayoutUrl) {
+        if (!finalLayoutUrl || !penColor) {
             return;
         }
 
@@ -1312,7 +1448,7 @@ export function CameraPreview({
 
                     {layoutError ? (
                         <p className="mt-2 text-sm text-amber-400">
-                            Không thể ghép layout cuối; đang giữ ảnh đã chụp an toàn.
+                            Không thể ghép layout cuối: {layoutError}
                         </p>
                     ) : null}
 
@@ -1335,7 +1471,7 @@ export function CameraPreview({
 
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] items-stretch min-h-0">
                     <div
-                        className="relative touch-none overflow-hidden rounded-3xl bg-neutral-900 flex items-center justify-center p-4 min-h-[50vh] max-h-[68vh]"
+                        className="relative touch-none overflow-hidden rounded-3xl bg-white/40 backdrop-blur-xl border border-white/70 flex items-center justify-center p-4 min-h-[50vh] max-h-[68vh] shadow-xl"
                         onPointerDown={startDrawing}
                         onPointerMove={continueDrawing}
                         onPointerUp={finishDrawing}
@@ -1350,165 +1486,152 @@ export function CameraPreview({
                         />
                     </div>
 
-                    <aside className="space-y-4 rounded-3xl border border-white/10 bg-neutral-950 p-5 text-white">
+                    <aside className="space-y-4 rounded-3xl border border-white/80 bg-white/60 p-5 text-neutral-900 shadow-2xl backdrop-blur-xl overflow-y-auto max-h-[85vh]">
                         <div>
-                            <p className="text-xs uppercase tracking-[0.24em] text-emerald-300">
-                                Customizer
+                            <p className="text-[11px] font-extrabold uppercase tracking-[0.25em] text-pink-600 flex items-center gap-1.5">
+                                ✨ Studio Customizer 💖
                             </p>
-                            <h2 className="mt-1 text-2xl font-semibold">
-                                Khung, Sticker, Vẽ tay
+                            <h2 className="mt-1 text-2xl font-black text-pink-950">
+                                Tùy chỉnh Khung, Sticker, Text
                             </h2>
-                            <p className="mt-1 text-xs text-neutral-400">
-                                Khung và vẽ tay chỉ tạo derivative cuối. Ảnh gốc và layout đã chụp vẫn được giữ nguyên.
+                            <p className="mt-1 text-xs text-pink-900/70 font-medium">
+                                Thay đổi theme, màu khung, bộ lọc hoặc sticker trên tấm ảnh vừa chụp!
                             </p>
                         </div>
 
-                        <div className="space-y-2 border-b border-white/5 pb-3">
-                            <p className="text-sm font-semibold text-neutral-200">Chọn khung ảnh</p>
-                            <div className="grid grid-cols-3 gap-2">
-                                {frameConfigs.map((frame) => (
-                                    <button
-                                        key={frame.id}
-                                        type="button"
-                                        className={`rounded-xl border p-2 text-center text-xs font-semibold transition ${
-                                            currentFrame.id === frame.id
-                                                ? "border-emerald-300 bg-emerald-300/15 text-emerald-300"
-                                                : "border-white/15 bg-white/5 hover:border-white/30 text-neutral-300"
-                                        }`}
-                                        onClick={() => {
-                                            setSelection({
-                                                ...selection,
-                                                frameId: frame.id,
-                                            });
-                                        }}
-                                    >
-                                        <div className="text-lg mb-0.5">
-                                            {frame.id === "none" ? "🚫" : frame.id === "white-border" ? "⬜" : "🟨"}
-                                        </div>
-                                        <span className="block truncate">{frame.name}</span>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
+                        {/* Reusable Selectors Accordion / Sections */}
+                        <div className="space-y-6">
+                            <ThemeSelector
+                                value={selection.themeId}
+                                onChange={(themeId) => setSelection({ ...selection, themeId })}
+                            />
 
-                        <div className="space-y-2 border-b border-white/5 pb-3">
-                            <p className="text-sm font-semibold text-neutral-200">Chọn Filter / Style</p>
-                            <div className="grid grid-cols-3 gap-2">
-                                {styleConfigs.map((style) => (
-                                    <button
-                                        key={style.id}
-                                        type="button"
-                                        className={`rounded-xl border p-2 text-center text-xs font-semibold transition ${
-                                            selectedStyle.id === style.id
-                                                ? "border-emerald-300 bg-emerald-300/15 text-emerald-300"
-                                                : "border-white/15 bg-white/5 hover:border-white/30 text-neutral-300"
-                                        }`}
-                                        onClick={() => {
-                                            setSelection({
-                                                ...selection,
-                                                styleId: style.id,
-                                            });
-                                        }}
-                                    >
-                                        <span className="block truncate">{style.name}</span>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
+                            <FrameSelector
+                                frameId={selection.frameId}
+                                frameColor={selection.frameColor}
+                                onChangeFrame={(frameId, defaultColor) =>
+                                    setSelection({ ...selection, frameId, frameColor: defaultColor })
+                                }
+                                onChangeFrameColor={(frameColor) =>
+                                    setSelection({ ...selection, frameColor })
+                                }
+                            />
 
-                        <div className="space-y-2 border-b border-white/5 pb-3">
-                            <p className="text-sm font-semibold text-neutral-200">Chọn Theme nền</p>
-                            <div className="grid grid-cols-3 gap-2">
-                                {themeConfigs.map((theme) => (
-                                    <button
-                                        key={theme.id}
-                                        type="button"
-                                        className={`rounded-xl border p-2 text-center text-xs font-semibold transition ${
-                                            selectedTheme.id === theme.id
-                                                ? "border-emerald-300 bg-emerald-300/15 text-emerald-300"
-                                                : "border-white/15 bg-white/5 hover:border-white/30 text-neutral-300"
-                                        }`}
-                                        onClick={() => {
-                                            setSelection({
-                                                ...selection,
-                                                themeId: theme.id,
-                                            });
-                                        }}
-                                    >
-                                        <span className="block truncate">{theme.name}</span>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
+                            <StyleSelector
+                                value={selection.styleId}
+                                onChange={(styleId) => setSelection({ ...selection, styleId })}
+                            />
 
-                        <div className="space-y-2">
-                            <label className="text-sm font-semibold" htmlFor="custom-text">
-                                Text label
-                            </label>
-                            <input
-                                id="custom-text"
-                                value={customText}
-                                maxLength={32}
-                                className="w-full rounded-xl border border-white/15 bg-black px-3 py-3 text-white"
-                                onChange={(event) => {
-                                    const val = event.target.value;
-                                    setCustomText(val);
+                            <StickerSelector
+                                stickerItems={selection.customization.stickerItems}
+                                onAddSticker={(stickerId) => {
+                                    const newSticker = {
+                                        id: `sticker-${Date.now()}-${Math.random()}`,
+                                        stickerId,
+                                        x: 0.5,
+                                        y: 0.5,
+                                        scale: 1,
+                                        rotationDegrees: 0,
+                                    };
                                     setSelection({
                                         ...selection,
-                                        textLabel: val,
+                                        customization: {
+                                            ...selection.customization,
+                                            stickerItems: [...selection.customization.stickerItems, newSticker],
+                                        },
+                                    });
+                                }}
+                                onRemoveSticker={(id) => {
+                                    setSelection({
+                                        ...selection,
+                                        customization: {
+                                            ...selection.customization,
+                                            stickerItems: selection.customization.stickerItems.filter(
+                                                (s) => s.id !== id,
+                                            ),
+                                        },
                                     });
                                 }}
                             />
-                            <button
-                                type="button"
-                                className="w-full rounded-xl bg-white px-4 py-3 font-semibold text-black"
-                                onClick={addTextLabel}
-                            >
-                                Thêm chữ
-                            </button>
+
+                            <TextSelector
+                                textLabels={selection.customization.textLabels}
+                                onAddText={(text) => {
+                                    const newText = {
+                                        id: `text-${Date.now()}-${Math.random()}`,
+                                        text,
+                                        x: 0.5,
+                                        y: 0.9,
+                                        color: "#ffffff",
+                                        fontSize: 48,
+                                        rotationDegrees: 0,
+                                    };
+                                    setSelection({
+                                        ...selection,
+                                        customization: {
+                                            ...selection.customization,
+                                            textLabels: [...selection.customization.textLabels, newText],
+                                        },
+                                    });
+                                }}
+                                onRemoveText={(id) => {
+                                    setSelection({
+                                        ...selection,
+                                        customization: {
+                                            ...selection.customization,
+                                            textLabels: selection.customization.textLabels.filter(
+                                                (l) => l.id !== id,
+                                            ),
+                                        },
+                                    });
+                                }}
+                            />
                         </div>
 
                         <div className="space-y-2">
-                            <p className="text-sm font-semibold">Sticker</p>
-                            <div className="grid grid-cols-3 gap-2">
-                                {stickerOptions.map((sticker) => (
-                                    <button
-                                        key={sticker}
-                                        type="button"
-                                        className={`rounded-xl border py-3 text-2xl ${selectedSticker === sticker ? "border-emerald-300 bg-emerald-300/15" : "border-white/15 bg-white/5"}`}
-                                        onClick={() => {
-                                            setSelectedSticker(sticker);
-                                            setSelection({
-                                                ...selection,
-                                                stickerId: sticker,
-                                            });
-                                            addSticker(sticker);
-                                        }}
-                                    >
-                                        {sticker}
-                                    </button>
-                                ))}
+                            <div className="flex items-center justify-between">
+                                <p className="text-sm font-semibold">Màu bút vẽ (Canvas Pen)</p>
+                                {penColor ? (
+                                    <span className="text-xs font-semibold text-emerald-400">✓ Đang bật cọ vẽ</span>
+                                ) : (
+                                    <span className="text-xs text-neutral-400">Tắt cọ (Kéo sticker/chữ)</span>
+                                )}
                             </div>
-                        </div>
-
-                        <div className="space-y-2">
-                            <p className="text-sm font-semibold">Màu bút vẽ</p>
                             <div className="flex flex-wrap gap-2">
-                                {penColors.map((color) => (
-                                    <button
-                                        key={color}
-                                        type="button"
-                                        aria-label={`Chọn màu bút ${color}`}
-                                        className={`h-10 w-10 rounded-full border-2 ${penColor === color ? "border-white" : "border-white/20"}`}
-                                        style={{ backgroundColor: color }}
-                                        onClick={() => {
-                                            setPenColor(color);
-                                        }}
-                                    />
-                                ))}
+                                {penColors.map((color) => {
+                                    const isSelected = penColor === color;
+                                    return (
+                                        <button
+                                            key={color}
+                                            type="button"
+                                            aria-label={`Chọn màu bút ${color}`}
+                                            className={`relative flex h-10 w-10 items-center justify-center rounded-full border-2 transition ${
+                                                isSelected
+                                                    ? "border-emerald-400 scale-110 shadow-lg shadow-emerald-500/20"
+                                                    : "border-white/20 hover:border-white/40"
+                                            }`}
+                                            style={{ backgroundColor: color }}
+                                            onClick={() => {
+                                                if (isSelected) {
+                                                    setPenColor(null);
+                                                } else {
+                                                    setPenColor(color);
+                                                }
+                                            }}
+                                        >
+                                            {isSelected && (
+                                                <span className="text-base font-extrabold text-black drop-shadow-[0_1px_2px_rgba(255,255,255,0.8)]">
+                                                    ✓
+                                                </span>
+                                            )}
+                                        </button>
+                                    );
+                                })}
                             </div>
                             <p className="text-xs text-neutral-400">
-                                Kéo trực tiếp trên ảnh để vẽ canvas pen.
+                                {penColor
+                                    ? "Vẽ trực tiếp lên phần viền khung ảnh (không vẽ đè lên hình ảnh)."
+                                    : "Click chọn màu để bật vẽ cọ (có dấu tích). Click lại màu đó để tắt."}
                             </p>
                         </div>
 
@@ -1543,29 +1666,29 @@ export function CameraPreview({
                     <a
                         href={displayedFinalUrl}
                         download="momentai-customized-final.jpg"
-                        className="rounded-xl bg-white px-5 py-3 font-medium text-black"
+                        className="rounded-2xl bg-gradient-to-r from-pink-500 via-rose-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 px-6 py-3.5 font-bold text-white shadow-lg shadow-pink-500/30 transition-all duration-300 hover:scale-[1.02] flex items-center gap-2"
                     >
-                        Tải ảnh đã customize
+                        <span>📥</span> Tải ảnh đã customize
                     </a>
 
                     {finalLayoutUrl ? (
                         <a
                             href={finalLayoutUrl}
                             download="momentai-layout-original.jpg"
-                            className="rounded-xl border px-5 py-3 font-medium"
+                            className="rounded-2xl border border-white/15 bg-white/10 hover:bg-white/20 px-6 py-3.5 font-semibold text-neutral-200 backdrop-blur-md transition-all flex items-center gap-2"
                         >
-                            Tải layout gốc
+                            <span>🖼️</span> Tải layout gốc
                         </a>
                     ) : null}
 
                     <button
                         type="button"
-                        className="rounded-xl border px-5 py-3"
+                        className="rounded-2xl border border-pink-300/30 bg-pink-500/10 hover:bg-pink-500/20 px-6 py-3.5 font-semibold text-pink-200 backdrop-blur-md transition-all flex items-center gap-2"
                         onClick={() => {
-                            void handleRetake(false);
+                            void handleRetake(true);
                         }}
                     >
-                        Chụp lại
+                        <span>🔄</span> Chụp lại
                     </button>
                 </div>
             </section>
@@ -1574,98 +1697,7 @@ export function CameraPreview({
 
     return (
         <section className="mx-auto flex w-full max-w-6xl flex-col gap-4">
-            <header className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                    <h1 className="text-2xl font-semibold">
-                        MomentAI Gesture POC
-                    </h1>
-
-                    <p className="text-sm text-neutral-500">
-                        ✋ giữ để sẵn sàng, ✊ giữ
-                        để bắt đầu chụp.
-                    </p>
-                    <p className="mt-1 text-xs text-neutral-400">
-                        Layout: {selectedLayout.name} · Countdown: {selection.countdownSeconds}s · Theme: {selectedTheme.name} · Khung: {currentFrame.name} · Style: {selectedStyle.name}
-                    </p>
-                </div>
-
-                <div className="text-xs text-neutral-400">
-                    <div>
-                        Camera: {cameraStatus.toUpperCase()}
-                    </div>
-                    <div>
-                        Held: {" "}
-                        {Math.round(
-                            gesture.result.heldDurationMs,
-                        )}
-                        ms / {requiredHoldMs}ms
-                    </div>
-                </div>
-
-
-                <div className="flex flex-wrap gap-2">
-                        {onBackToSetup ? (
-                        <button
-                            type="button"
-                            disabled={
-                                !canChangeSetup(
-                                    boothState,
-                                    capturedPhotos.length,
-                                )
-                            }
-                            className="rounded-lg border px-4 py-2 disabled:opacity-50 text-sm"
-                            onClick={onBackToSetup}
-                        >
-                            Đổi setup
-                        </button>
-                    ) : null}
-
-                    <label htmlFor="camera-device-select" className="sr-only">
-                        Chọn thiết bị camera
-                    </label>
-                    <select
-                        id="camera-device-select"
-                        name="camera-device-select"
-                        className="rounded-lg border px-3 py-2 text-black text-sm"
-                        value={selectedDeviceId}
-                        onChange={(event) => {
-                            setSelectedDeviceId(
-                                event.target.value,
-                            );
-                        }}
-                    >
-                        <option value="">
-                            Camera mặc định
-                        </option>
-
-                        {devices.map((device) => (
-                            <option
-                                key={device.deviceId}
-                                value={device.deviceId}
-                            >
-                                {device.label}
-                            </option>
-                        ))}
-                    </select>
-
-                    <button
-                        type="button"
-                        disabled={isConnecting}
-                        className="rounded-lg bg-white px-4 py-2 text-black text-sm disabled:opacity-50"
-                        onClick={() => {
-                            void connect(
-                                selectedDeviceId ||
-                                undefined,
-                            );
-                        }}
-                    >
-                        {isConnecting
-                            ? "Đang kết nối..."
-                            : "Kết nối lại"}
-                    </button>
-                </div>
-            </header>
-
+            
             <div className="relative flex-1 min-h-0 flex items-center justify-center overflow-hidden bg-neutral-900/40 rounded-3xl border border-white/10 h-[72vh] max-h-[72vh] w-full p-2">
                 {/* Main live camera stream view */}
                 <video
@@ -1822,13 +1854,6 @@ export function CameraPreview({
                             captureManually
                         }
                     >
-                        {boothState === "countdown"
-                            ? "Đang đếm ngược..."
-                            : boothState === "capturing"
-                                ? "Đang chụp..."
-                                : boothState === "between-shots"
-                                    ? "Chuẩn bị ảnh tiếp theo..."
-                                    : "Chụp thủ công"}
                     </button>
 
                     {!stream ? (

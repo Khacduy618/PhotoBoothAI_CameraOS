@@ -121,6 +121,7 @@ function BoothInnerExperience({
         selectionComplete,
         setSelectionComplete,
         camera,
+        setPhase,
     } = useBoothSession();
 
     const [showRecovery, setShowRecovery] = useState(Boolean(restoredSession));
@@ -129,6 +130,7 @@ function BoothInnerExperience({
         await onAbandonSession();
         setShowRecovery(false);
         setSelectionComplete(false);
+        setPhase("setup");
     };
 
     const handleContinue = () => {
@@ -137,6 +139,7 @@ function BoothInnerExperience({
             void camera.connect();
         }
         setSelectionComplete(true);
+        setPhase("capture");
     };
 
     const handleCompleteSelection = async () => {
@@ -144,6 +147,7 @@ function BoothInnerExperience({
             selection,
         });
         setSelectionComplete(true);
+        setPhase("capture");
     };
 
     if (showRecovery && restoredSession) {
@@ -197,6 +201,7 @@ function BoothInnerExperience({
             camera={camera}
             onBackToSetup={() => {
                 setSelectionComplete(false);
+                setPhase("setup");
             }}
         />
     );

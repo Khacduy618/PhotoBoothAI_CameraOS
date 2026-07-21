@@ -20,6 +20,7 @@ export interface FrameConfig {
     borderColor: string;
     borderWidth: number;
     kind?: "none" | "solid" | "template";
+    patternUrl?: string;
 }
 
 export interface StickerConfig {

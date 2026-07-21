@@ -130,6 +130,10 @@ export function LoadingLayer({ cameraStatus, onRetry }: { cameraStatus: string; 
     );
 }
 
+const SVG_SAMPLE_RAW = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="800" viewBox="0 0 600 800"><defs><linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#fda4af"/><stop offset="50%" stop-color="#f472b6"/><stop offset="100%" stop-color="#c084fc"/></linearGradient><linearGradient id="avatar" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/><stop offset="100%" stop-color="#fbcfe8" stop-opacity="0.85"/></linearGradient></defs><rect width="600" height="800" fill="url(#bg)"/><circle cx="120" cy="150" r="8" fill="#fff" opacity="0.6"/><circle cx="480" cy="220" r="12" fill="#fff" opacity="0.7"/><circle cx="500" cy="650" r="10" fill="#fff" opacity="0.5"/><circle cx="100" cy="600" r="6" fill="#fff" opacity="0.8"/><g transform="translate(300, 420)"><circle cx="0" cy="-90" r="75" fill="url(#avatar)"/><path d="M -120 120 C -120 10 -80 -10 0 -10 C 80 -10 120 10 120 120 Z" fill="url(#avatar)"/><path d="M -25 -75 Q 0 -50 25 -75" stroke="#ec4899" stroke-width="5" stroke-linecap="round" fill="none"/><circle cx="-25" cy="-100" r="7" fill="#831843"/><circle cx="25" cy="-100" r="7" fill="#831843"/><circle cx="-42" cy="-82" r="12" fill="#f43f5e" opacity="0.4"/><circle cx="42" cy="-82" r="12" fill="#f43f5e" opacity="0.4"/></g><text x="300" y="740" font-family="system-ui, sans-serif" font-size="24" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="2" opacity="0.95">PHOTOBOOTH DEMO 📸</text></svg>`;
+
+const DEFAULT_SAMPLE_PHOTO = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(SVG_SAMPLE_RAW)}`;
+
 interface PreviewCellProps {
     index: number;
     stream: MediaStream | null;
@@ -139,6 +143,7 @@ interface PreviewCellProps {
     frame: FrameConfig;
     style: StyleConfig;
     onRetry?: () => void;
+    showDemoFallback?: boolean;
 }
 
 export function PreviewCell({
@@ -150,10 +155,13 @@ export function PreviewCell({
     frame,
     style,
     onRetry,
+    showDemoFallback = true,
 }: PreviewCellProps) {
     const hasBorder = frame.id !== "none";
     const cellPaddingPercent = hasBorder ? (frame.borderWidth / 1280) * 100 : 0;
     const styleFilter = getStyleFilter(style.mode);
+
+    const displayPhoto = photoUrl || (showDemoFallback && (!stream || cameraStatus !== "ready") ? DEFAULT_SAMPLE_PHOTO : null);
 
     return (
         <div
@@ -172,12 +180,13 @@ export function PreviewCell({
                     backgroundColor: theme.backgroundColor,
                 }}
             >
-                {photoUrl ? (
+                {displayPhoto ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                        src={photoUrl}
+                        src={displayPhoto}
                         alt={`Captured cell ${index + 1}`}
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-cover transition-all duration-300"
+                        style={{ filter: photoUrl ? "none" : styleFilter }}
                         draggable={false}
                     />
                 ) : (

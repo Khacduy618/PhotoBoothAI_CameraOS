@@ -79,6 +79,36 @@ export function getLayoutGeometry(layoutId: string): LayoutGeometry {
     };
 }
 
+export interface PhotoCellRect {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+export function getPhotoCellRects(layoutId: string, outputWidth: number, outputHeight: number): PhotoCellRect[] {
+    const geometry = getLayoutGeometry(layoutId);
+    const gap = Math.round(Math.min(outputWidth, outputHeight) * 0.025);
+    const cellWidth = (outputWidth - gap * (geometry.columns + 1)) / geometry.columns;
+    const gridHeight = outputHeight * (1 - geometry.brandingZoneRatio);
+    const cellHeight = (gridHeight - gap * (geometry.rows + 1)) / geometry.rows;
+
+    const count = geometry.columns * geometry.rows;
+    const rects: PhotoCellRect[] = [];
+
+    for (let index = 0; index < count; index += 1) {
+        const column = index % geometry.columns;
+        const row = Math.floor(index / geometry.columns);
+        const x = Math.round(gap + column * (cellWidth + gap));
+        const y = Math.round(gap + row * (cellHeight + gap));
+        const width = Math.round(cellWidth);
+        const height = Math.round(cellHeight);
+        rects.push({ x, y, width, height });
+    }
+
+    return rects;
+}
+
 export interface CropParameters {
     sourceX: number;
     sourceY: number;

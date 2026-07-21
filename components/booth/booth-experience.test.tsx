@@ -44,6 +44,7 @@ import { BoothExperience } from "@/components/booth/booth-experience";
 afterEach(() => {
     cleanup();
     window.localStorage.clear();
+    window.sessionStorage.clear();
     cameraPreviewMock.mockClear();
 });
 
@@ -52,7 +53,7 @@ describe("BoothExperience", () => {
         render(<BoothExperience />);
 
         expect(
-            await screen.findByText("Xem trước layout trước khi chụp"),
+            await screen.findByText("Thiết lập trải nghiệm chụp ảnh Hàn Quốc"),
         ).toBeTruthy();
         expect(
             screen.queryByText("Camera preview mounted"),
@@ -63,22 +64,16 @@ describe("BoothExperience", () => {
     it("mounts camera preview with the selected values after setup is complete", async () => {
         render(<BoothExperience />);
 
-        await screen.findByText("Xem trước layout trước khi chụp");
+        await screen.findByText("Thiết lập trải nghiệm chụp ảnh Hàn Quốc");
 
-        // Navigate to theme step and select Party
-        const themeStepBtn = screen.getAllByText(/Theme/i).find(el => el.tagName === 'BUTTON');
-        if (themeStepBtn) fireEvent.click(themeStepBtn);
+        // Navigate to frame & style step
+        const frameTabBtn = screen.getAllByText(/Khung & Style/i).find(el => el.tagName === 'BUTTON');
+        if (frameTabBtn) fireEvent.click(frameTabBtn);
+
         const partyLabel = screen.getAllByText("Party").find(el => el.closest('label'));
         if (partyLabel) fireEvent.click(partyLabel);
 
-        // Navigate to frame step and select Viền vàng
-        const frameStepBtn = screen.getAllByText(/Frame/i).find(el => el.tagName === 'BUTTON');
-        if (frameStepBtn) fireEvent.click(frameStepBtn);
         fireEvent.click(screen.getByText("Viền vàng"));
-
-        // Navigate to style step and select Warm
-        const styleStepBtn = screen.getAllByText(/Style/i).find(el => el.tagName === 'BUTTON');
-        if (styleStepBtn) fireEvent.click(styleStepBtn);
         fireEvent.click(screen.getByText("Warm"));
 
         fireEvent.click(
@@ -107,22 +102,16 @@ describe("BoothExperience", () => {
     it("can return from preview to setup without losing the current selection", async () => {
         render(<BoothExperience />);
 
-        await screen.findByText("Xem trước layout trước khi chụp");
+        await screen.findByText("Thiết lập trải nghiệm chụp ảnh Hàn Quốc");
 
-        // Navigate to theme step and select Party
-        const themeStepBtn = screen.getAllByText(/Theme/i).find(el => el.tagName === 'BUTTON');
-        if (themeStepBtn) fireEvent.click(themeStepBtn);
+        // Navigate to frame & style step
+        const frameTabBtn = screen.getAllByText(/Khung & Style/i).find(el => el.tagName === 'BUTTON');
+        if (frameTabBtn) fireEvent.click(frameTabBtn);
+
         const partyLabel = screen.getAllByText("Party").find(el => el.closest('label'));
         if (partyLabel) fireEvent.click(partyLabel);
 
-        // Navigate to frame step and select Viền vàng
-        const frameStepBtn = screen.getAllByText(/Frame/i).find(el => el.tagName === 'BUTTON');
-        if (frameStepBtn) fireEvent.click(frameStepBtn);
         fireEvent.click(screen.getByText("Viền vàng"));
-
-        // Navigate to style step and select Warm
-        const styleStepBtn = screen.getAllByText(/Style/i).find(el => el.tagName === 'BUTTON');
-        if (styleStepBtn) fireEvent.click(styleStepBtn);
         fireEvent.click(screen.getByText("Warm"));
 
         fireEvent.click(
@@ -138,20 +127,13 @@ describe("BoothExperience", () => {
         );
 
         expect(
-            screen.getByText("Xem trước layout trước khi chụp"),
+            screen.getByText("Thiết lập trải nghiệm chụp ảnh Hàn Quốc"),
         ).toBeTruthy();
 
         // Navigate to the relevant steps to verify selections are preserved
-        const themeBtn2 = screen.getAllByText(/Theme/i).find(el => el.tagName === 'BUTTON');
-        if (themeBtn2) fireEvent.click(themeBtn2);
+        const frameTabBtn2 = screen.getAllByText(/Khung & Style/i).find(el => el.tagName === 'BUTTON');
+        if (frameTabBtn2) fireEvent.click(frameTabBtn2);
         expect(screen.getByDisplayValue("party")).toBeTruthy();
-
-        const frameBtn2 = screen.getAllByText(/Frame/i).find(el => el.tagName === 'BUTTON');
-        if (frameBtn2) fireEvent.click(frameBtn2);
-        // Frame uses visual cards now, check it's still selected
-
-        const styleBtn2 = screen.getAllByText(/Style/i).find(el => el.tagName === 'BUTTON');
-        if (styleBtn2) fireEvent.click(styleBtn2);
         expect(screen.getByDisplayValue("warm")).toBeTruthy();
     });
 

@@ -1,0 +1,198 @@
+"use client";
+
+import React, { useState, useEffect } from "react";
+import type { ThemeConfig, FrameConfig, StyleConfig } from "@/types/theme";
+
+// Helper function to resolve filter style matching the compositor
+export function getStyleFilter(styleMode: string): string {
+    switch (styleMode) {
+        case "grayscale":
+            return "grayscale(1)";
+        case "warm":
+            return "sepia(0.28) saturate(1.2)";
+        case "cool":
+            return "saturate(1.05) hue-rotate(8deg)";
+        case "contrast":
+            return "contrast(1.18) saturate(1.05)";
+        case "none":
+        default:
+            return "none";
+    }
+}
+
+export function ThemeLayer({ theme, children }: { theme: ThemeConfig; children: React.ReactNode }) {
+    return (
+        <div className="w-full h-full" style={{ backgroundColor: theme.backgroundColor }}>
+            {children}
+        </div>
+    );
+}
+
+export function LiveVideoLayer({
+    stream,
+    styleFilter,
+    cameraStatus,
+}: {
+    stream: MediaStream | null;
+    styleFilter: string;
+    cameraStatus: string;
+}) {
+    const videoRef = React.useRef<HTMLVideoElement | null>(null);
+
+    React.useEffect(() => {
+        const video = videoRef.current;
+        console.log("[LiveVideoLayer] rendering. stream:", stream?.id, "cameraStatus:", cameraStatus);
+        if (!video || !stream) {
+            console.log("[LiveVideoLayer] Skipping video attach - video or stream missing. video:", !!video, "stream:", !!stream);
+            return;
+        }
+
+        let cancelled = false;
+        if (video.srcObject !== stream) {
+            console.log("[LiveVideoLayer] Attaching stream to video.srcObject:", stream.id);
+            video.srcObject = stream;
+        }
+
+        const startVideo = async () => {
+            try {
+                await video.play();
+                console.log("[LiveVideoLayer] video.play() SUCCESS! videoWidth:", video.videoWidth, "videoHeight:", video.videoHeight);
+            } catch (err) {
+                const isAbort = err instanceof DOMException && err.name === "AbortError";
+                if (!cancelled && !isAbort) {
+                    console.warn("[LiveVideoLayer] Failed to play video in cell:", err);
+                }
+            }
+        };
+
+        void startVideo();
+
+        return () => {
+            cancelled = true;
+            if (video && video.srcObject === stream) {
+                video.pause();
+                video.srcObject = null;
+            }
+        };
+    }, [stream]);
+
+    return (
+        <video
+            ref={videoRef}
+            className={`w-full h-full -scale-x-100 object-cover transition-opacity duration-500 ${
+                stream && cameraStatus === "ready" ? "opacity-100" : "opacity-0"
+            }`}
+            style={{ filter: styleFilter }}
+            muted
+            autoPlay
+            playsInline
+        />
+    );
+}
+
+export function LoadingLayer({ cameraStatus, onRetry }: { cameraStatus: string; onRetry?: () => void }) {
+    const [showTip, setShowTip] = useState(false);
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setShowTip(true);
+        }, 3000);
+        return () => clearTimeout(timer);
+    }, [cameraStatus]);
+
+    return (
+        <div className="absolute inset-0 bg-neutral-900 flex flex-col items-center justify-center text-center p-4 z-10">
+            <div className="w-5 h-5 border-2 border-neutral-700 border-t-emerald-400 rounded-full animate-spin mb-2" />
+            <span className="text-xs uppercase tracking-wider text-neutral-300 font-semibold select-none">
+                {cameraStatus === "requesting-permission" ? "Vui lòng bấm 'Cho phép' Camera..." :
+                 cameraStatus === "connecting" ? "Đang kết nối Camera..." :
+                 cameraStatus === "initializing" ? "Đang khởi tạo Stream..." :
+                 cameraStatus === "error" ? "Lỗi kết nối Camera" : "Đang tải..."}
+            </span>
+            
+            {showTip && (
+                <div className="mt-3 space-y-2 max-w-[220px]">
+                    <p className="text-[11px] text-neutral-400 leading-relaxed select-none">
+                        Nhớ nhấn <strong>"Cho phép" (Allow)</strong> trên trình duyệt và kiểm tra xem có ứng dụng khác (Zoom, FaceTime) đang dùng camera không.
+                    </p>
+                    {onRetry && (
+                        <button
+                            type="button"
+                            onClick={onRetry}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-medium hover:bg-emerald-500/30 transition-all active:scale-95"
+                        >
+                            🔄 Thử kết nối lại
+                        </button>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+interface PreviewCellProps {
+    index: number;
+    stream: MediaStream | null;
+    cameraStatus: string;
+    photoUrl?: string | null;
+    theme: ThemeConfig;
+    frame: FrameConfig;
+    style: StyleConfig;
+    onRetry?: () => void;
+}
+
+export function PreviewCell({
+    index,
+    stream,
+    cameraStatus,
+    photoUrl,
+    theme,
+    frame,
+    style,
+    onRetry,
+}: PreviewCellProps) {
+    const hasBorder = frame.id !== "none";
+    const cellPaddingPercent = hasBorder ? (frame.borderWidth / 1280) * 100 : 0;
+    const styleFilter = getStyleFilter(style.mode);
+
+    return (
+        <div
+            className="relative overflow-hidden w-full h-full flex flex-col rounded-none transition-all duration-300"
+            style={{
+                backgroundColor: hasBorder ? frame.borderColor : theme.backgroundColor,
+                padding: `${cellPaddingPercent}%`,
+                boxSizing: "border-box",
+            }}
+            aria-label={`Grid cell ${index + 1}`}
+        >
+            {/* Main content slot */}
+            <div
+                className="relative flex-1 overflow-hidden rounded-none"
+                style={{
+                    backgroundColor: theme.backgroundColor,
+                }}
+            >
+                {photoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                        src={photoUrl}
+                        alt={`Captured cell ${index + 1}`}
+                        className="w-full h-full object-cover"
+                        draggable={false}
+                    />
+                ) : (
+                    <>
+                        <LiveVideoLayer
+                            stream={stream}
+                            styleFilter={styleFilter}
+                            cameraStatus={cameraStatus}
+                        />
+                        {(!stream || cameraStatus !== "ready") && (
+                            <LoadingLayer cameraStatus={cameraStatus} onRetry={onRetry} />
+                        )}
+                    </>
+                )}
+            </div>
+        </div>
+    );
+}

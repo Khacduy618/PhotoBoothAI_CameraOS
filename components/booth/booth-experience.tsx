@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 
 import { BoothSelectionFlow } from "@/components/booth/booth-selection-flow";
+import { BoothSessionProvider, useBoothSession } from "@/components/booth/booth-session-context";
 import { CameraPreview } from "@/components/camera/camera-preview";
 import {
     defaultBoothSelection,
     normalizeBoothSelection,
 } from "@/config/theme.config";
-import { useCamera } from "@/hooks/use-camera";
 import { SessionService } from "@/services/session/session.service";
 import {
     createSessionStorageService,
@@ -20,10 +20,8 @@ import type { BoothSelection } from "@/types/theme";
 type RestoreStatus = "loading" | "ready";
 
 export function BoothExperience() {
-    const [selection, setSelection] =
-        useState<BoothSelection>(defaultBoothSelection);
-    const [selectionComplete, setSelectionComplete] =
-        useState(false);
+    const [initialSelection, setInitialSelection] =
+        useState<BoothSelection | null>(null);
     const [restoreStatus, setRestoreStatus] =
         useState<RestoreStatus>("loading");
     const [restoredSession, setRestoredSession] =
@@ -32,22 +30,14 @@ export function BoothExperience() {
         useRef<SessionStorageService | null>(null);
     const sessionServiceRef =
         useRef<SessionService | null>(null);
-    const camera = useCamera();
 
     useEffect(() => {
         const storageResult = createSessionStorageService();
 
         if (!storageResult.ok) {
-            const readyTimeoutId = window.setTimeout(
-                () => {
-                    setRestoreStatus("ready");
-                },
-                0,
-            );
-
-            return () => {
-                window.clearTimeout(readyTimeoutId);
-            };
+            setInitialSelection(defaultBoothSelection);
+            setRestoreStatus("ready");
+            return;
         }
 
         sessionStorageRef.current = storageResult.value;
@@ -65,17 +55,17 @@ export function BoothExperience() {
                 return;
             }
 
+            let loadedSelection = defaultBoothSelection;
             if (activeSession.ok && activeSession.value) {
                 setRestoredSession(activeSession.value);
                 if (activeSession.value.selection) {
-                    setSelection(
-                        normalizeBoothSelection(
-                            activeSession.value.selection,
-                        ),
+                    loadedSelection = normalizeBoothSelection(
+                        activeSession.value.selection,
                     );
                 }
             }
 
+            setInitialSelection(loadedSelection);
             setRestoreStatus("ready");
         };
 
@@ -86,28 +76,14 @@ export function BoothExperience() {
         };
     }, []);
 
-    const startNewSession = async () => {
+    const abandonSession = async () => {
         if (restoredSession) {
             await sessionServiceRef.current?.abandonActiveSession();
         }
-
         setRestoredSession(null);
-        setSelectionComplete(false);
     };
 
-    const continueSession = () => {
-        setRestoredSession(null);
-        setSelectionComplete(true);
-    };
-
-    const completeSelection = async () => {
-        await sessionServiceRef.current?.startSession({
-            selection,
-        });
-        setSelectionComplete(true);
-    };
-
-    if (restoreStatus === "loading") {
+    if (restoreStatus === "loading" || !initialSelection) {
         return (
             <section className="mx-auto flex min-h-[70vh] max-w-3xl flex-col items-center justify-center gap-4 text-center">
                 <h1 className="text-4xl font-semibold">
@@ -120,7 +96,57 @@ export function BoothExperience() {
         );
     }
 
-    if (restoredSession && !selectionComplete) {
+    return (
+        <BoothSessionProvider initialSelection={initialSelection}>
+            <BoothInnerExperience
+                restoredSession={restoredSession}
+                onAbandonSession={abandonSession}
+                sessionService={sessionServiceRef.current}
+            />
+        </BoothSessionProvider>
+    );
+}
+
+function BoothInnerExperience({
+    restoredSession,
+    onAbandonSession,
+    sessionService,
+}: {
+    restoredSession: BoothSession | null;
+    onAbandonSession: () => Promise<void>;
+    sessionService: SessionService | null;
+}) {
+    const {
+        selection,
+        selectionComplete,
+        setSelectionComplete,
+        camera,
+    } = useBoothSession();
+
+    const [showRecovery, setShowRecovery] = useState(Boolean(restoredSession));
+
+    const handleStartNew = async () => {
+        await onAbandonSession();
+        setShowRecovery(false);
+        setSelectionComplete(false);
+    };
+
+    const handleContinue = () => {
+        setShowRecovery(false);
+        if (!camera.stream || camera.status !== "ready") {
+            void camera.connect();
+        }
+        setSelectionComplete(true);
+    };
+
+    const handleCompleteSelection = async () => {
+        await sessionService?.startSession({
+            selection,
+        });
+        setSelectionComplete(true);
+    };
+
+    if (showRecovery && restoredSession) {
         return (
             <section className="mx-auto flex min-h-[70vh] max-w-3xl flex-col items-center justify-center gap-8 text-center">
                 <div className="space-y-4">
@@ -139,16 +165,14 @@ export function BoothExperience() {
                     <button
                         type="button"
                         className="rounded-full bg-white px-8 py-5 text-xl font-semibold text-black"
-                        onClick={continueSession}
+                        onClick={handleContinue}
                     >
                         Tiếp tục
                     </button>
                     <button
                         type="button"
                         className="rounded-full border border-white/30 px-8 py-5 text-xl font-semibold"
-                        onClick={() => {
-                            void startNewSession();
-                        }}
+                        onClick={handleStartNew}
                     >
                         Bắt đầu mới
                     </button>
@@ -162,10 +186,7 @@ export function BoothExperience() {
             <BoothSelectionFlow
                 selection={selection}
                 camera={camera}
-                onSelectionChange={setSelection}
-                onComplete={() => {
-                    void completeSelection();
-                }}
+                onComplete={handleCompleteSelection}
             />
         );
     }

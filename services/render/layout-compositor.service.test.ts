@@ -69,7 +69,7 @@ describe("layout compositor", () => {
         });
 
         expect(result.width).toBe(1600);
-        expect(result.height).toBe(1600);
+        expect(result.height).toBe(2275);
         expect(result.sourcePhotoIds).toEqual([
             "photo-1",
             "photo-2",
@@ -100,7 +100,7 @@ describe("layout compositor", () => {
             0,
             0,
             1600,
-            1600,
+            2275,
         );
     });
 
@@ -119,7 +119,7 @@ describe("layout compositor", () => {
         });
 
         expect(result.width).toBe(1200);
-        expect(result.height).toBe(3600);
+        expect(result.height).toBe(3798);
         expect(result.cells).toHaveLength(4);
         expect(result.cells.map((cell) => cell.x)).toEqual([
             result.cells[0].x,
@@ -147,7 +147,7 @@ describe("layout compositor", () => {
         });
 
         expect(result.width).toBe(1600);
-        expect(result.height).toBe(2400);
+        expect(result.height).toBe(3319);
         expect(result.sourcePhotoIds).toEqual([
             "photo-1",
             "photo-2",
@@ -239,7 +239,7 @@ describe("layout compositor", () => {
             0,
             0,
             1600,
-            1600,
+            2275,
         );
     });
 
@@ -271,7 +271,7 @@ describe("layout compositor", () => {
             0,
             0,
             1600,
-            1600,
+            2275,
         );
     });
 });

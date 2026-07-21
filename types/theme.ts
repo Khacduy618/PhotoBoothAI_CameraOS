@@ -49,4 +49,16 @@ export interface BoothSelection {
     layoutId: BoothLayoutId;
     countdownSeconds: BoothCountdownSeconds;
     customization: BoothOutputCustomization;
+    frameColor?: string;
+    stickerId?: string;
+    textLabel?: string;
+}
+
+export interface CapturedPhoto {
+    id: string;
+    sessionId: string;
+    originalBlob: Blob;
+    originalUrl: string;
+    outputUrl: string;
+    usedFallback: boolean;
 }

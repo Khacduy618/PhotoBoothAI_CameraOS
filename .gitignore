@@ -42,3 +42,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+.codegraph/
+
+# scratch and logs
+*.png
+*.log
+*.txt
+*.backup-before-browser

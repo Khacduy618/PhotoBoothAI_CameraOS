@@ -311,7 +311,7 @@ describe("customizer actions", () => {
             id: "text-1",
             text: "A very long custom attendee labe",
             x: 0.5,
-            y: 0.88,
+            y: 0.95,
         });
     });
 

@@ -1,4 +1,5 @@
 import { resolveBoothLayoutConfig } from "@/config/layout.config";
+import { getLayoutGeometry } from "@/services/layout/layout-engine";
 import { createImageFromBlob } from "@/services/render/render-photo-output";
 import type { BoothLayoutConfig } from "@/types/customization";
 
@@ -40,6 +41,7 @@ export interface ComposeLayoutOptions {
     sources: readonly LayoutCompositorSource[];
     createImage?: (blob: Blob) => Promise<HTMLImageElement>;
     createCanvas?: () => CanvasLike;
+    borderColor?: string;
 }
 
 function defaultCreateCanvas(): CanvasLike {
@@ -120,6 +122,7 @@ export async function composePhotoLayout({
     sources,
     createImage = createImageFromBlob,
     createCanvas = defaultCreateCanvas,
+    borderColor,
 }: ComposeLayoutOptions): Promise<ComposeLayoutResult> {
     const layout = resolveBoothLayoutConfig(layoutId);
     assertSourceCount(layout, sources);
@@ -137,17 +140,19 @@ export async function composePhotoLayout({
     const cells: LayoutCompositorCell[] = [];
 
     try {
-        context.fillStyle = "#ffffff";
+        context.fillStyle = borderColor || "#ffffff";
         context.fillRect(0, 0, canvas.width, canvas.height);
 
         const gap = Math.round(
             Math.min(canvas.width, canvas.height) * 0.025,
         );
+        const geometry = getLayoutGeometry(layout.id);
         const cellWidth =
             (canvas.width - gap * (layout.columns + 1)) /
             layout.columns;
+        const gridHeight = canvas.height * (1 - geometry.brandingZoneRatio);
         const cellHeight =
-            (canvas.height - gap * (layout.rows + 1)) /
+            (gridHeight - gap * (layout.rows + 1)) /
             layout.rows;
 
         for (let index = 0; index < sources.length; index += 1) {

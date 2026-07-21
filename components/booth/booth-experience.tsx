@@ -14,6 +14,9 @@ import {
     createSessionStorageService,
     type SessionStorageService,
 } from "@/services/storage/session-storage.service";
+import { EditingWorkspace } from "@/components/editor/EditingWorkspace";
+import { composePhotoLayout } from "@/services/render/layout-compositor.service";
+import { createRenderConfig } from "@/services/render/render-config.builder";
 import type { BoothSession } from "@/types/session";
 import type { BoothSelection } from "@/types/theme";
 
@@ -118,13 +121,18 @@ function BoothInnerExperience({
 }) {
     const {
         selection,
+        updateSelection,
         selectionComplete,
         setSelectionComplete,
+        capturedPhotos,
+        setCapturedPhotos,
         camera,
+        phase,
         setPhase,
     } = useBoothSession();
 
     const [showRecovery, setShowRecovery] = useState(Boolean(restoredSession));
+    const [isExporting, setIsExporting] = useState(false);
 
     const handleStartNew = async () => {
         await onAbandonSession();
@@ -142,12 +150,41 @@ function BoothInnerExperience({
         setPhase("capture");
     };
 
-    const handleCompleteSelection = async () => {
-        await sessionService?.startSession({
-            selection,
-        });
+    const handleStartCapture = () => {
+        if (!camera.stream || camera.status !== "ready") {
+            void camera.connect();
+        }
         setSelectionComplete(true);
         setPhase("capture");
+    };
+
+    const handleExportPhoto = async () => {
+        if (isExporting) return;
+        setIsExporting(true);
+        try {
+            const chronologicalPhotos = capturedPhotos.slice().reverse();
+            const sources = chronologicalPhotos.map((p) => ({ photoId: p.id, blob: p.originalBlob }));
+            const result = await composePhotoLayout({
+                sources: sources.length > 0 ? sources : [],
+                renderConfig: createRenderConfig(selection),
+            });
+            const downloadUrl = URL.createObjectURL(result.blob);
+            const a = document.createElement("a");
+            a.href = downloadUrl;
+            a.download = `photoboothai-customized-${Date.now()}.jpg`;
+            a.click();
+            URL.revokeObjectURL(downloadUrl);
+        } catch (err) {
+            console.error("Lỗi xuất ảnh:", err);
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
+    const handleRetake = () => {
+        // Retake replaces captured photo blobs ONLY while preserving EditingWorkspace & customization state
+        setCapturedPhotos([]);
+        handleStartCapture();
     };
 
     if (showRecovery && restoredSession) {
@@ -190,19 +227,43 @@ function BoothInnerExperience({
             <BoothSelectionFlow
                 selection={selection}
                 camera={camera}
-                onComplete={handleCompleteSelection}
+                onComplete={handleStartCapture}
             />
         );
     }
 
     return (
-        <CameraPreview
-            selection={selection}
-            camera={camera}
-            onBackToSetup={() => {
-                setSelectionComplete(false);
-                setPhase("setup");
-            }}
-        />
+        <div className="relative w-full h-full min-h-screen">
+            {/* Persistent EditingWorkspace Shell */}
+            <EditingWorkspace
+                selection={selection}
+                updateSelection={updateSelection}
+                capturedPhotos={capturedPhotos}
+                onStartCapture={handleStartCapture}
+                onExportPhoto={() => {
+                    void handleExportPhoto();
+                }}
+                onRetake={handleRetake}
+                isExporting={isExporting}
+            />
+
+            {/* Temporary Sibling CaptureOverlay during active camera capture */}
+            {phase === "capture" && (
+                <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4">
+                    <CameraPreview
+                        selection={selection}
+                        camera={camera}
+                        onBackToSetup={() => {
+                            if (capturedPhotos.length > 0) {
+                                setPhase("customize");
+                            } else {
+                                setSelectionComplete(false);
+                                setPhase("setup");
+                            }
+                        }}
+                    />
+                </div>
+            )}
+        </div>
     );
 }

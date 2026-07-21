@@ -34,6 +34,7 @@ interface PreviewRendererProps {
     sheetRef?: React.Ref<HTMLDivElement>;
     activeStrokePoints?: readonly DrawingStrokePoint[] | null;
     activePenColor?: string;
+    activePenWidth?: number;
     children?: React.ReactNode;
 }
 
@@ -44,13 +45,14 @@ export function PreviewRenderer({
     cameraStatus = "ready",
     capturedPhotos = [],
     showMetadata = true,
-    showDemoFallback = true,
+    showDemoFallback = false,
     onSelectionChange,
     onRetry,
     className = "",
     sheetRef,
     activeStrokePoints = null,
     activePenColor = "#ffffff",
+    activePenWidth = 9,
     children,
 }: PreviewRendererProps) {
     const config = renderConfig || (selection ? createRenderConfig(selection) : null);
@@ -137,7 +139,7 @@ export function PreviewRenderer({
                         <path
                             d={activeStrokePoints.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * 1000} ${p.y * 1500}`).join(" ")}
                             stroke={activePenColor}
-                            strokeWidth={9}
+                            strokeWidth={activePenWidth}
                             fill="none"
                             strokeLinecap="round"
                             strokeLinejoin="round"

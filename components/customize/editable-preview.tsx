@@ -18,6 +18,8 @@ interface EditablePreviewProps {
     className?: string;
     enableDrawing?: boolean;
     activePenColor?: string;
+    activePenWidth?: number;
+    showSelectionHandles?: boolean;
 }
 
 export function EditablePreview({
@@ -29,6 +31,8 @@ export function EditablePreview({
     className = "",
     enableDrawing = false,
     activePenColor = "#ffffff",
+    activePenWidth = 9,
+    showSelectionHandles = true,
 }: EditablePreviewProps) {
     const context = useContext(BoothSessionContext);
     const selection = propSelection || context?.selection || {
@@ -134,10 +138,10 @@ export function EditablePreview({
         activePointerIdRef.current = null;
 
         if (activeStrokePoints.length >= 2) {
-            addDrawingStroke(activeStrokePoints, activePenColor);
+            addDrawingStroke(activeStrokePoints, activePenColor, activePenWidth);
         }
         setActiveStrokePoints(null);
-    }, [enableDrawing, activeStrokePoints, activePenColor, addDrawingStroke]);
+    }, [enableDrawing, activeStrokePoints, activePenColor, activePenWidth, addDrawingStroke]);
 
     const handleBackgroundPointerCancel = useCallback(() => {
         activePointerIdRef.current = null;
@@ -311,13 +315,14 @@ export function EditablePreview({
                 showMetadata={showMetadata}
                 activeStrokePoints={activeStrokePoints}
                 activePenColor={activePenColor}
+                activePenWidth={activePenWidth}
             >
                 {/* Pointer-interception layer overlay with touch-none */}
                 <div className="absolute inset-0 pointer-events-none touch-none" style={{ zIndex: 10 }}>
                 {overlays
                     .filter((item) => item.type !== "drawing")
                     .map((item) => {
-                        const isSelected = item.id === selectedOverlayId;
+                        const isSelected = showSelectionHandles && item.id === selectedOverlayId;
                         const wPercent = ((item.baseWidth * item.scale) / OVERLAY_REFERENCE_SIZE.width) * 100;
                         const hPercent = ((item.baseHeight * item.scale) / OVERLAY_REFERENCE_SIZE.height) * 100;
 
@@ -326,7 +331,9 @@ export function EditablePreview({
                                 key={item.id}
                                 data-overlay-item="true"
                                 data-overlay-id={item.id}
-                                className="absolute pointer-events-auto cursor-move select-none touch-none"
+                                className={`absolute select-none touch-none ${
+                                    showSelectionHandles ? "pointer-events-auto cursor-move" : "pointer-events-none"
+                                }`}
                                 style={{
                                     left: `${item.x * 100}%`,
                                     top: `${item.y * 100}%`,
@@ -335,8 +342,8 @@ export function EditablePreview({
                                     transform: `translate(-50%, -50%) rotate(${item.rotationRadians}rad)`,
                                     zIndex: isSelected ? 1000 + (item.zIndex || 0) : (item.zIndex || 10),
                                 }}
-                                onPointerDown={(e) => startMoveDrag(e, item)}
-                                onWheel={(e) => handleWheelGesture(e, item)}
+                                onPointerDown={(e) => showSelectionHandles && startMoveDrag(e, item)}
+                                onWheel={(e) => showSelectionHandles && handleWheelGesture(e, item)}
                             >
                                 {isSelected && (
                                     <>

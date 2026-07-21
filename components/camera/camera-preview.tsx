@@ -522,26 +522,7 @@ export function CameraPreview({
     const phase = context?.phase || "capture";
     const setPhase = context?.setPhase || (() => {});
 
-    if (phase === "customize") {
-        return (
-            <CustomizeFlow
-                onCompleteCustomize={() => setPhase("result")}
-                onBackToCapture={() => setPhase("capture")}
-            />
-        );
-    }
-
-    if (phase === "result") {
-        return (
-            <FinalResultView
-                onBackToCustomize={() => setPhase("customize")}
-                onStartNewSession={() => {
-                    setPhase("setup");
-                    if (onBackToSetup) onBackToSetup();
-                }}
-            />
-        );
-    }
+    // Decoupled editor handles customize and result views. camera-preview serves strictly as a CaptureOverlay.
 
     const selectedTheme = resolveThemeConfig(selection.themeId);
     const resolvedFrame = resolveFrameConfig(selection.frameId);
@@ -897,6 +878,14 @@ export function CameraPreview({
         }
         void video.play().catch(() => {});
     }, [stream, boothState, photoUrl]);
+
+    useEffect(() => {
+        if (boothState === "result") {
+            if (onBackToSetup) {
+                onBackToSetup();
+            }
+        }
+    }, [boothState, onBackToSetup]);
 
     const requiredHoldMs =
         gesture.result.name === "Closed_Fist"
@@ -1426,135 +1415,7 @@ export function CameraPreview({
         );
     }
 
-    if (
-        boothState === "result" &&
-        photoUrl
-    ) {
-        return (
-            <section className="w-full h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] flex flex-col justify-between p-5 text-neutral-900 relative">
-                <header className="shrink-0 mb-2">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <p className="text-[10px] font-extrabold uppercase tracking-[0.25em] text-pink-600 flex items-center gap-1.5">
-                                ✨ MomentAI CameraOS Studio 💖
-                            </p>
-                            <h1 className="text-lg font-black tracking-tight text-pink-950">
-                                Hoàn tất chụp {totalShots} ảnh ({selectedLayout.name})
-                            </h1>
-                        </div>
-                    </div>
-                </header>
 
-                <video
-                    ref={videoRef}
-                    className="pointer-events-none absolute h-px w-px opacity-0"
-                    muted
-                    autoPlay
-                    playsInline
-                    aria-hidden="true"
-                    tabIndex={-1}
-                />
-
-                <div className="flex-1 min-h-0 grid lg:grid-cols-[1.35fr_0.65fr] gap-5 py-3 overflow-hidden">
-                    {/* Left Slot — Continuous Live Preview / Editable Canvas */}
-                    <div className="flex flex-col items-center justify-center bg-white/40 backdrop-blur-xl rounded-3xl p-4 overflow-hidden border border-white/70 shadow-lg h-full relative group">
-                        <EditablePreview
-                            selection={selection}
-                            capturedPhotos={capturedPhotos}
-                            showMetadata={false}
-                            enableDrawing={Boolean(penColor)}
-                            activePenColor={penColor || "#ffffff"}
-                        />
-                    </div>
-
-                    {/* Right Slot — Concise Result Action Panel */}
-                    <div className="flex flex-col h-full min-h-0 justify-between bg-white/60 backdrop-blur-xl rounded-3xl p-5 border border-white/80 shadow-xl relative">
-                        <div className="flex-1 overflow-y-auto pr-1 space-y-4">
-                            <h2 className="text-lg font-black tracking-tight text-pink-950 border-b border-pink-200/50 pb-2">
-                                🎉 Hoàn tất bộ ảnh!
-                            </h2>
-
-                            <div className="p-4 rounded-2xl bg-white/70 backdrop-blur-md border border-pink-200/60 space-y-2 shadow-sm">
-                                <h3 className="font-extrabold text-pink-950 tracking-wide text-xs uppercase border-b border-pink-200/50 pb-2">
-                                    THÔNG TIN BỘ ẢNH:
-                                </h3>
-                                <ul className="text-xs space-y-1.5 text-neutral-800">
-                                    <li className="flex justify-between border-b border-pink-100 pb-1">
-                                        <span className="text-neutral-500 font-medium">Layout:</span>
-                                        <span className="text-pink-950 font-bold">{selectedLayout.name}</span>
-                                    </li>
-                                    <li className="flex justify-between border-b border-pink-100 pb-1">
-                                        <span className="text-neutral-500 font-medium">Khung viền:</span>
-                                        <span className="text-pink-950 font-bold">{resolveFrameConfig(selection.frameId).name}</span>
-                                    </li>
-                                    <li className="flex justify-between border-b border-pink-100 pb-1">
-                                        <span className="text-neutral-500 font-medium">Style ảnh:</span>
-                                        <span className="text-pink-950 font-bold">{resolveStyleConfig(selection.styleId).name}</span>
-                                    </li>
-                                    <li className="flex justify-between border-b border-pink-100 pb-1">
-                                        <span className="text-neutral-500 font-medium">Số lượng ảnh:</span>
-                                        <span className="text-pink-950 font-bold">{totalShots} tấm</span>
-                                    </li>
-                                </ul>
-                            </div>
-
-                            <div className="space-y-2 pt-1">
-                                <p className="text-xs font-bold text-pink-950">Màu cọ vẽ tay (Optional):</p>
-                                <div className="flex flex-wrap gap-2">
-                                    {penColors.map((color) => {
-                                        const isSelected = penColor === color;
-                                        return (
-                                            <button
-                                                key={color}
-                                                type="button"
-                                                aria-label={`Chọn màu bút ${color}`}
-                                                className={`relative flex h-8 w-8 items-center justify-center rounded-full border-2 transition ${
-                                                    isSelected
-                                                        ? "border-pink-500 scale-110 shadow-md"
-                                                        : "border-pink-200 hover:border-pink-400"
-                                                }`}
-                                                style={{ backgroundColor: color }}
-                                                onClick={() => {
-                                                    setPenColor(isSelected ? null : color);
-                                                }}
-                                            >
-                                                {isSelected && (
-                                                    <span className="text-xs font-extrabold text-black drop-shadow-[0_1px_2px_rgba(255,255,255,0.8)]">
-                                                        ✓
-                                                    </span>
-                                                )}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Export & Action Buttons */}
-                        <div className="flex flex-col gap-2.5 border-t border-pink-200/50 pt-4 shrink-0">
-                            <a
-                                href={displayedFinalUrl || photoUrl}
-                                download="photoboothai-customized.jpg"
-                                className="w-full text-center rounded-2xl bg-gradient-to-r from-pink-500 via-rose-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 px-4 py-3 font-extrabold text-white text-xs md:text-sm shadow-lg shadow-pink-400/30 transition-all flex items-center justify-center gap-2"
-                            >
-                                <span>📥</span> Tải ảnh đã xuất
-                            </a>
-
-                            <button
-                                type="button"
-                                className="w-full rounded-2xl border border-pink-200/70 bg-white/70 px-4 py-2.5 font-extrabold text-pink-900 hover:bg-white active:scale-95 transition-all text-xs md:text-sm shadow-sm flex items-center justify-center gap-2"
-                                onClick={() => {
-                                    void handleRetake(true);
-                                }}
-                            >
-                                <span>🔄</span> Chụp lại toàn bộ
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </section>
-        );
-    }
 
     return (
         <section className="mx-auto flex w-full max-w-6xl flex-col gap-4">

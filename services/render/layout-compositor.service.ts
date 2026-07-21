@@ -261,6 +261,15 @@ export async function composePhotoLayout({
                 height,
             });
         }
+        // Await font readiness to guarantee font rendering parity
+        if (typeof document !== "undefined" && "fonts" in document) {
+            try {
+                await document.fonts.ready;
+            } catch {
+                // Ignore font loading errors and fallback safely
+            }
+        }
+
         // Draw unified overlays onto final canvas output
         for (const item of overlays) {
             const rotRad = item.rotationRadians !== undefined ? item.rotationRadians : ((item.rotationDegrees || 0) * Math.PI) / 180;
@@ -314,10 +323,13 @@ export async function composePhotoLayout({
                     context.textBaseline = "middle";
                     context.fillText(item.content.toUpperCase(), 0, 0);
                 } else {
+                    const textToDraw = (item.content || "").toUpperCase();
                     const fontWeightVal = item.fontWeight || 900;
                     context.font = `${fontWeightVal} ${Math.round(fontSize)}px ${item.fontFamily || "system-ui, sans-serif"}`;
                     context.textAlign = (item.align || "center") as CanvasTextAlign;
                     context.textBaseline = "middle";
+                    context.lineJoin = "round";
+                    context.miterLimit = 2;
 
                     const letterSpacingVal = item.letterSpacing || 0;
                     const letterSpacingPx = ((letterSpacingVal * textScale) / 1000) * canvas.width;
@@ -345,13 +357,13 @@ export async function composePhotoLayout({
                     const strokeWidthPx = (((outlineWidthVal) * textScale) / 1000) * canvas.width;
                     if (strokeWidthPx > 0) {
                         context.strokeStyle = item.outlineColor || "#000000";
-                        context.lineWidth = strokeWidthPx * 2;
-                        context.strokeText(item.content, 0, 0);
+                        context.lineWidth = strokeWidthPx * 3;
+                        context.strokeText(textToDraw, 0, 0);
                     }
 
                     // Fill text
                     context.fillStyle = item.color || "#ffffff";
-                    context.fillText(item.content, 0, 0);
+                    context.fillText(textToDraw, 0, 0);
                 }
                 context.restore();
             } else if (item.type === "drawing" && item.points && item.points.length >= 2) {

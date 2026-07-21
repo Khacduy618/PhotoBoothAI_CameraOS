@@ -11,6 +11,8 @@ import type {
     OverlayType,
     AddOverlayOptions,
     OverlayPatch,
+    TextOverlay,
+    StickerOverlay,
 } from "@/types/customization";
 import {
     OVERLAY_REFERENCE_SIZE,
@@ -54,7 +56,7 @@ interface BoothSessionContextValue {
     ) => void;
     updateOverlay: (id: string, patch: OverlayPatch) => void;
     removeOverlay: (id: string) => void;
-    addDrawingStroke: (points: readonly DrawingStrokePoint[], color: string) => void;
+    addDrawingStroke: (points: readonly DrawingStrokePoint[], color: string, strokeWidth?: number) => void;
     undoDrawingStroke: () => void;
     clearDrawingStrokes: () => void;
     selectedOverlayId: string | null;
@@ -537,11 +539,48 @@ function InnerBoothSessionProvider({
                     return merged;
                 });
                 
+                // Keep legacy stickerItems and textLabels strictly in sync to prevent snap-back jumps
+                const updatedStickers = (prev.customization.stickerItems || []).map((s) => {
+                    const matchingOverlay = updated.find((o) => o.id === s.id && o.type === "sticker");
+                    if (!matchingOverlay) return s;
+                    return {
+                        ...s,
+                        x: matchingOverlay.x,
+                        y: matchingOverlay.y,
+                        scale: matchingOverlay.scale,
+                        rotationDegrees: matchingOverlay.rotationDegrees ?? Math.round(((matchingOverlay.rotationRadians || 0) * 180) / Math.PI),
+                    };
+                });
+
+                const updatedTexts = (prev.customization.textLabels || []).map((t) => {
+                    const matchingOverlay = updated.find((o): o is TextOverlay => o.id === t.id && o.type === "text");
+                    if (!matchingOverlay) return t;
+                    const ext = t as unknown as Partial<TextOverlay>;
+                    return {
+                        ...t,
+                        x: matchingOverlay.x,
+                        y: matchingOverlay.y,
+                        scale: matchingOverlay.scale,
+                        rotationDegrees: matchingOverlay.rotationDegrees ?? Math.round(((matchingOverlay.rotationRadians || 0) * 180) / Math.PI),
+                        color: matchingOverlay.color || t.color,
+                        fontSize: matchingOverlay.fontSize || t.fontSize,
+                        fontFamily: matchingOverlay.fontFamily || ext.fontFamily,
+                        fontWeight: matchingOverlay.fontWeight || ext.fontWeight,
+                        outlineColor: matchingOverlay.outlineColor || ext.outlineColor,
+                        outlineWidth: matchingOverlay.outlineWidth || ext.outlineWidth,
+                        shadowPreset: matchingOverlay.shadowPreset || ext.shadowPreset,
+                        letterSpacing: matchingOverlay.letterSpacing || ext.letterSpacing,
+                        align: matchingOverlay.align || ext.align,
+                    };
+                });
+
                 return {
                     ...prev,
                     customization: {
                         ...prev.customization,
                         overlays: updated,
+                        stickerItems: updatedStickers,
+                        textLabels: updatedTexts,
                     },
                 };
             });
@@ -556,6 +595,8 @@ function InnerBoothSessionProvider({
                 customization: {
                     ...prev.customization,
                     overlays: (prev.customization.overlays || []).filter((item) => item.id !== id),
+                    stickerItems: (prev.customization.stickerItems || []).filter((item) => item.id !== id),
+                    textLabels: (prev.customization.textLabels || []).filter((item) => item.id !== id),
                 },
             }));
             setSelectedOverlayId((prev) => (prev === id ? null : prev));
@@ -719,7 +760,7 @@ function InnerBoothSessionProvider({
         [removeOverlay]
     );
     const addDrawingStroke = useCallback(
-        (points: readonly DrawingStrokePoint[], color: string) => {
+        (points: readonly DrawingStrokePoint[], color: string, strokeWidth = 9) => {
             const newStroke: OverlayItem = {
                 id: crypto.randomUUID(),
                 type: "drawing",
@@ -735,7 +776,7 @@ function InnerBoothSessionProvider({
                 points,
                 color,
                 brushType: "pen",
-                strokeWidth: 9,
+                strokeWidth,
             };
             setSelection((prev) => ({
                 ...prev,

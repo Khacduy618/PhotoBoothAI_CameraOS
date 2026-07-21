@@ -13,6 +13,7 @@ import {
 import { BoothSessionContext, useBoothSession } from "@/components/booth/booth-session-context";
 import { LoadingLayer, PreviewCell, getStyleFilter } from "@/components/booth/preview-cell";
 import { PreviewRenderer } from "@/components/booth/preview-renderer";
+import { EditablePreview } from "@/components/customize/editable-preview";
 import { CustomizeFlow } from "@/components/customize/customize-flow";
 import { FinalResultView } from "@/components/result/final-result-view";
 import { ThemeSelector } from "@/components/selectors/theme-selector";
@@ -1430,33 +1431,18 @@ export function CameraPreview({
         photoUrl
     ) {
         return (
-            <section className="mx-auto flex w-full max-w-5xl flex-col gap-5">
-                <header>
-                    <h1 className="text-2xl font-semibold">
-                        Hoàn tất {totalShots} ảnh
-                    </h1>
-
-                    <p className="text-sm text-neutral-500">
-                        Đã chụp đủ layout {selectedLayout.name}. Bạn có thể tải ảnh hiện tại hoặc chụp lại toàn bộ.
-                    </p>
-
-                    {cameraError ? (
-                        <p className="mt-2 text-sm text-red-500">
-                            {cameraError}
-                        </p>
-                    ) : null}
-
-                    {layoutError ? (
-                        <p className="mt-2 text-sm text-amber-400">
-                            Không thể ghép layout cuối: {layoutError}
-                        </p>
-                    ) : null}
-
-                    {capturedPhotos[0]?.usedFallback ? (
-                        <p className="mt-2 text-sm text-amber-400">
-                            Không thể render theme/khung/style; đang dùng ảnh gốc.
-                        </p>
-                    ) : null}
+            <section className="w-full h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] flex flex-col justify-between p-5 text-neutral-900 relative">
+                <header className="shrink-0 mb-2">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <p className="text-[10px] font-extrabold uppercase tracking-[0.25em] text-pink-600 flex items-center gap-1.5">
+                                ✨ MomentAI CameraOS Studio 💖
+                            </p>
+                            <h1 className="text-lg font-black tracking-tight text-pink-950">
+                                Hoàn tất chụp {totalShots} ảnh ({selectedLayout.name})
+                            </h1>
+                        </div>
+                    </div>
                 </header>
 
                 <video
@@ -1469,227 +1455,102 @@ export function CameraPreview({
                     tabIndex={-1}
                 />
 
-                <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] items-stretch min-h-0">
-                    <div
-                        className="relative touch-none overflow-hidden rounded-3xl bg-white/40 backdrop-blur-xl border border-white/70 flex items-center justify-center p-4 min-h-[50vh] max-h-[68vh] shadow-xl"
-                        onPointerDown={startDrawing}
-                        onPointerMove={continueDrawing}
-                        onPointerUp={finishDrawing}
-                        onPointerCancel={finishDrawing}
-                    >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                            src={displayedFinalUrl || photoUrl}
-                            alt="Ảnh layout đã customize"
-                            className="max-h-full max-w-full object-contain shadow-2xl rounded-lg"
-                            draggable={false}
+                <div className="flex-1 min-h-0 grid lg:grid-cols-[1.35fr_0.65fr] gap-5 py-3 overflow-hidden">
+                    {/* Left Slot — Continuous Live Preview / Editable Canvas */}
+                    <div className="flex flex-col items-center justify-center bg-white/40 backdrop-blur-xl rounded-3xl p-4 overflow-hidden border border-white/70 shadow-lg h-full relative group">
+                        <EditablePreview
+                            selection={selection}
+                            capturedPhotos={capturedPhotos}
+                            showMetadata={false}
+                            enableDrawing={Boolean(penColor)}
+                            activePenColor={penColor || "#ffffff"}
                         />
                     </div>
 
-                    <aside className="space-y-4 rounded-3xl border border-white/80 bg-white/60 p-5 text-neutral-900 shadow-2xl backdrop-blur-xl overflow-y-auto max-h-[85vh]">
-                        <div>
-                            <p className="text-[11px] font-extrabold uppercase tracking-[0.25em] text-pink-600 flex items-center gap-1.5">
-                                ✨ Studio Customizer 💖
-                            </p>
-                            <h2 className="mt-1 text-2xl font-black text-pink-950">
-                                Tùy chỉnh Khung, Sticker, Text
+                    {/* Right Slot — Concise Result Action Panel */}
+                    <div className="flex flex-col h-full min-h-0 justify-between bg-white/60 backdrop-blur-xl rounded-3xl p-5 border border-white/80 shadow-xl relative">
+                        <div className="flex-1 overflow-y-auto pr-1 space-y-4">
+                            <h2 className="text-lg font-black tracking-tight text-pink-950 border-b border-pink-200/50 pb-2">
+                                🎉 Hoàn tất bộ ảnh!
                             </h2>
-                            <p className="mt-1 text-xs text-pink-900/70 font-medium">
-                                Thay đổi theme, màu khung, bộ lọc hoặc sticker trên tấm ảnh vừa chụp!
-                            </p>
-                        </div>
 
-                        {/* Reusable Selectors Accordion / Sections */}
-                        <div className="space-y-6">
-                            <ThemeSelector
-                                value={selection.themeId}
-                                onChange={(themeId) => setSelection({ ...selection, themeId })}
-                            />
-
-                            <FrameSelector
-                                frameId={selection.frameId}
-                                frameColor={selection.frameColor}
-                                onChangeFrame={(frameId, defaultColor) =>
-                                    setSelection({ ...selection, frameId, frameColor: defaultColor })
-                                }
-                                onChangeFrameColor={(frameColor) =>
-                                    setSelection({ ...selection, frameColor })
-                                }
-                            />
-
-                            <StyleSelector
-                                value={selection.styleId}
-                                onChange={(styleId) => setSelection({ ...selection, styleId })}
-                            />
-
-                            <StickerSelector
-                                stickerItems={selection.customization.stickerItems}
-                                onAddSticker={(stickerId) => {
-                                    const newSticker = {
-                                        id: `sticker-${Date.now()}-${Math.random()}`,
-                                        stickerId,
-                                        x: 0.5,
-                                        y: 0.5,
-                                        scale: 1,
-                                        rotationDegrees: 0,
-                                    };
-                                    setSelection({
-                                        ...selection,
-                                        customization: {
-                                            ...selection.customization,
-                                            stickerItems: [...selection.customization.stickerItems, newSticker],
-                                        },
-                                    });
-                                }}
-                                onRemoveSticker={(id) => {
-                                    setSelection({
-                                        ...selection,
-                                        customization: {
-                                            ...selection.customization,
-                                            stickerItems: selection.customization.stickerItems.filter(
-                                                (s) => s.id !== id,
-                                            ),
-                                        },
-                                    });
-                                }}
-                            />
-
-                            <TextSelector
-                                textLabels={selection.customization.textLabels}
-                                onAddText={(text) => {
-                                    const newText = {
-                                        id: `text-${Date.now()}-${Math.random()}`,
-                                        text,
-                                        x: 0.5,
-                                        y: 0.9,
-                                        color: "#ffffff",
-                                        fontSize: 48,
-                                        rotationDegrees: 0,
-                                    };
-                                    setSelection({
-                                        ...selection,
-                                        customization: {
-                                            ...selection.customization,
-                                            textLabels: [...selection.customization.textLabels, newText],
-                                        },
-                                    });
-                                }}
-                                onRemoveText={(id) => {
-                                    setSelection({
-                                        ...selection,
-                                        customization: {
-                                            ...selection.customization,
-                                            textLabels: selection.customization.textLabels.filter(
-                                                (l) => l.id !== id,
-                                            ),
-                                        },
-                                    });
-                                }}
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                                <p className="text-sm font-semibold">Màu bút vẽ (Canvas Pen)</p>
-                                {penColor ? (
-                                    <span className="text-xs font-semibold text-emerald-400">✓ Đang bật cọ vẽ</span>
-                                ) : (
-                                    <span className="text-xs text-neutral-400">Tắt cọ (Kéo sticker/chữ)</span>
-                                )}
+                            <div className="p-4 rounded-2xl bg-white/70 backdrop-blur-md border border-pink-200/60 space-y-2 shadow-sm">
+                                <h3 className="font-extrabold text-pink-950 tracking-wide text-xs uppercase border-b border-pink-200/50 pb-2">
+                                    THÔNG TIN BỘ ẢNH:
+                                </h3>
+                                <ul className="text-xs space-y-1.5 text-neutral-800">
+                                    <li className="flex justify-between border-b border-pink-100 pb-1">
+                                        <span className="text-neutral-500 font-medium">Layout:</span>
+                                        <span className="text-pink-950 font-bold">{selectedLayout.name}</span>
+                                    </li>
+                                    <li className="flex justify-between border-b border-pink-100 pb-1">
+                                        <span className="text-neutral-500 font-medium">Khung viền:</span>
+                                        <span className="text-pink-950 font-bold">{resolveFrameConfig(selection.frameId).name}</span>
+                                    </li>
+                                    <li className="flex justify-between border-b border-pink-100 pb-1">
+                                        <span className="text-neutral-500 font-medium">Style ảnh:</span>
+                                        <span className="text-pink-950 font-bold">{resolveStyleConfig(selection.styleId).name}</span>
+                                    </li>
+                                    <li className="flex justify-between border-b border-pink-100 pb-1">
+                                        <span className="text-neutral-500 font-medium">Số lượng ảnh:</span>
+                                        <span className="text-pink-950 font-bold">{totalShots} tấm</span>
+                                    </li>
+                                </ul>
                             </div>
-                            <div className="flex flex-wrap gap-2">
-                                {penColors.map((color) => {
-                                    const isSelected = penColor === color;
-                                    return (
-                                        <button
-                                            key={color}
-                                            type="button"
-                                            aria-label={`Chọn màu bút ${color}`}
-                                            className={`relative flex h-10 w-10 items-center justify-center rounded-full border-2 transition ${
-                                                isSelected
-                                                    ? "border-emerald-400 scale-110 shadow-lg shadow-emerald-500/20"
-                                                    : "border-white/20 hover:border-white/40"
-                                            }`}
-                                            style={{ backgroundColor: color }}
-                                            onClick={() => {
-                                                if (isSelected) {
-                                                    setPenColor(null);
-                                                } else {
-                                                    setPenColor(color);
-                                                }
-                                            }}
-                                        >
-                                            {isSelected && (
-                                                <span className="text-base font-extrabold text-black drop-shadow-[0_1px_2px_rgba(255,255,255,0.8)]">
-                                                    ✓
-                                                </span>
-                                            )}
-                                        </button>
-                                    );
-                                })}
+
+                            <div className="space-y-2 pt-1">
+                                <p className="text-xs font-bold text-pink-950">Màu cọ vẽ tay (Optional):</p>
+                                <div className="flex flex-wrap gap-2">
+                                    {penColors.map((color) => {
+                                        const isSelected = penColor === color;
+                                        return (
+                                            <button
+                                                key={color}
+                                                type="button"
+                                                aria-label={`Chọn màu bút ${color}`}
+                                                className={`relative flex h-8 w-8 items-center justify-center rounded-full border-2 transition ${
+                                                    isSelected
+                                                        ? "border-pink-500 scale-110 shadow-md"
+                                                        : "border-pink-200 hover:border-pink-400"
+                                                }`}
+                                                style={{ backgroundColor: color }}
+                                                onClick={() => {
+                                                    setPenColor(isSelected ? null : color);
+                                                }}
+                                            >
+                                                {isSelected && (
+                                                    <span className="text-xs font-extrabold text-black drop-shadow-[0_1px_2px_rgba(255,255,255,0.8)]">
+                                                        ✓
+                                                    </span>
+                                                )}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
-                            <p className="text-xs text-neutral-400">
-                                {penColor
-                                    ? "Vẽ trực tiếp lên phần viền khung ảnh (không vẽ đè lên hình ảnh)."
-                                    : "Click chọn màu để bật vẽ cọ (có dấu tích). Click lại màu đó để tắt."}
-                            </p>
                         </div>
 
-                        {customizerError ? (
-                            <p className="rounded-xl bg-amber-400/15 p-3 text-sm text-amber-100">
-                                {customizerError} Bạn vẫn có thể tải layout gốc.
-                            </p>
-                        ) : null}
+                        {/* Export & Action Buttons */}
+                        <div className="flex flex-col gap-2.5 border-t border-pink-200/50 pt-4 shrink-0">
+                            <a
+                                href={displayedFinalUrl || photoUrl}
+                                download="photoboothai-customized.jpg"
+                                className="w-full text-center rounded-2xl bg-gradient-to-r from-pink-500 via-rose-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 px-4 py-3 font-extrabold text-white text-xs md:text-sm shadow-lg shadow-pink-400/30 transition-all flex items-center justify-center gap-2"
+                            >
+                                <span>📥</span> Tải ảnh đã xuất
+                            </a>
 
-                        <div className="grid grid-cols-2 gap-2">
                             <button
                                 type="button"
-                                disabled={customizerActions.length === 0}
-                                className="rounded-xl border border-white/20 px-4 py-3 font-semibold disabled:opacity-40"
-                                onClick={undoCustomization}
+                                className="w-full rounded-2xl border border-pink-200/70 bg-white/70 px-4 py-2.5 font-extrabold text-pink-900 hover:bg-white active:scale-95 transition-all text-xs md:text-sm shadow-sm flex items-center justify-center gap-2"
+                                onClick={() => {
+                                    void handleRetake(true);
+                                }}
                             >
-                                Undo
-                            </button>
-                            <button
-                                type="button"
-                                disabled={customizerActions.length === 0}
-                                className="rounded-xl border border-white/20 px-4 py-3 font-semibold disabled:opacity-40"
-                                onClick={clearCustomization}
-                            >
-                                Clear
+                                <span>🔄</span> Chụp lại toàn bộ
                             </button>
                         </div>
-                    </aside>
-                </div>
-
-                <div className="flex flex-wrap gap-3">
-                    <a
-                        href={displayedFinalUrl}
-                        download="momentai-customized-final.jpg"
-                        className="rounded-2xl bg-gradient-to-r from-pink-500 via-rose-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 px-6 py-3.5 font-bold text-white shadow-lg shadow-pink-500/30 transition-all duration-300 hover:scale-[1.02] flex items-center gap-2"
-                    >
-                        <span>📥</span> Tải ảnh đã customize
-                    </a>
-
-                    {finalLayoutUrl ? (
-                        <a
-                            href={finalLayoutUrl}
-                            download="momentai-layout-original.jpg"
-                            className="rounded-2xl border border-white/15 bg-white/10 hover:bg-white/20 px-6 py-3.5 font-semibold text-neutral-200 backdrop-blur-md transition-all flex items-center gap-2"
-                        >
-                            <span>🖼️</span> Tải layout gốc
-                        </a>
-                    ) : null}
-
-                    <button
-                        type="button"
-                        className="rounded-2xl border border-pink-300/30 bg-pink-500/10 hover:bg-pink-500/20 px-6 py-3.5 font-semibold text-pink-200 backdrop-blur-md transition-all flex items-center gap-2"
-                        onClick={() => {
-                            void handleRetake(true);
-                        }}
-                    >
-                        <span>🔄</span> Chụp lại
-                    </button>
+                    </div>
                 </div>
             </section>
         );

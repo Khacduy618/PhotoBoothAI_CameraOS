@@ -175,7 +175,16 @@ function syncCustomization(
                     color: item.color || "#ffffff",
                     fontSize: item.fontSize || 48,
                     rotationDegrees: degrees,
-                });
+                    fontFamily: item.fontFamily,
+                    fontWeight: item.fontWeight,
+                    outlineColor: item.outlineColor,
+                    outlineWidth: item.outlineWidth,
+                    shadowPreset: item.shadowPreset,
+                    letterSpacing: item.letterSpacing,
+                    align: item.align,
+                    scale: item.scale,
+                    opacity: item.opacity,
+                } as unknown as TextLabelCustomization);
             } else if (item.type === "drawing") {
                 drawingStrokes.push({
                     id: item.id,

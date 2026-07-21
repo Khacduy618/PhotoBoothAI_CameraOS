@@ -314,9 +314,16 @@ export async function composePhotoLayout({
                     context.textBaseline = "middle";
                     context.fillText(item.content.toUpperCase(), 0, 0);
                 } else {
-                    context.font = `bold ${Math.round(fontSize)}px ${item.fontFamily || "sans-serif"}`;
+                    const fontWeightVal = item.fontWeight || 900;
+                    context.font = `${fontWeightVal} ${Math.round(fontSize)}px ${item.fontFamily || "system-ui, sans-serif"}`;
                     context.textAlign = (item.align || "center") as CanvasTextAlign;
                     context.textBaseline = "middle";
+
+                    const letterSpacingVal = item.letterSpacing || 0;
+                    const letterSpacingPx = ((letterSpacingVal * textScale) / 1000) * canvas.width;
+                    if (letterSpacingPx !== 0 && "letterSpacing" in context) {
+                        (context as unknown as { letterSpacing: string }).letterSpacing = `${letterSpacingPx}px`;
+                    }
 
                     // Apply shadow presets
                     if (item.shadowPreset === "soft") {

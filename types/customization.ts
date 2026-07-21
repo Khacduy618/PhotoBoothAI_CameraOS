@@ -92,6 +92,7 @@ export interface TextOverlay extends OverlayBase {
     content: string;       // Custom text string or preset string
     color?: string;
     fontFamily?: string;
+    fontWeight?: string | number;
     fontSize?: number;      // Logical font size
     align?: "left" | "center" | "right";
     letterSpacing?: number;

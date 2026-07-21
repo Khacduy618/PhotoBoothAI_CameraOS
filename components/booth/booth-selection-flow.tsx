@@ -2,7 +2,7 @@
 
 import React, { useState, useContext, useEffect } from "react";
 import { LiveSelectionPreview } from "@/components/booth/live-selection-preview";
-import { WizardShell } from "@/components/wizard/wizard-shell";
+import { SetupStepShell } from "@/components/wizard/setup-step-shell";
 import { BoothSessionContext } from "@/components/booth/booth-session-context";
 import { ThemeSelector } from "@/components/selectors/theme-selector";
 import { FrameSelector } from "@/components/selectors/frame-selector";
@@ -210,7 +210,7 @@ export function BoothSelectionFlow({
                 <button type="button" onClick={() => setActiveStep("sticker")}>✍️ Sticker & Text</button>
             </div>
 
-            <WizardShell
+            <SetupStepShell
                 steps={WIZARD_STEPS}
                 activeStep={activeStep}
                 onStepChange={setActiveStep}
@@ -404,57 +404,67 @@ export function BoothSelectionFlow({
                 />
             </div>
 
-            {/* Step: Review — Full Summary + Confirmation */}
-            <div className={activeStep === "review" ? "space-y-6" : "hidden"}>
-                <div className="p-5 rounded-2xl bg-neutral-100 border border-pink-200/50 space-y-3 shadow-inner">
-                    <h3 className="font-bold text-pink-900 tracking-wide text-sm uppercase">Tóm tắt cấu hình:</h3>
-                    <ul className="text-sm space-y-2 text-neutral-800">
-                        <li className="flex justify-between border-b border-pink-200/20 pb-1">
-                            <span className="text-neutral-500">Layout:</span>
+            {/* Step: Review — Concise Summary Panel */}
+            <div className={activeStep === "review" ? "space-y-4" : "hidden"}>
+                <div className="p-4 rounded-2xl bg-white/70 backdrop-blur-md border border-pink-200/60 space-y-2.5 shadow-sm">
+                    <h3 className="font-extrabold text-pink-950 tracking-wide text-xs uppercase border-b border-pink-200/50 pb-2">
+                        TÓM TẮT CẤU HÌNH:
+                    </h3>
+                    <ul className="text-xs space-y-1.5 text-neutral-800">
+                        <li className="flex justify-between border-b border-pink-100 pb-1">
+                            <span className="text-neutral-500 font-medium">Layout:</span>
                             <span className="text-pink-950 font-bold">{resolveBoothLayoutConfig(selection.layoutId).name}</span>
                         </li>
-                        <li className="flex justify-between border-b border-pink-200/20 pb-1">
-                            <span className="text-neutral-500">Đếm ngược:</span>
+                        <li className="flex justify-between border-b border-pink-100 pb-1">
+                            <span className="text-neutral-500 font-medium">Đếm ngược:</span>
                             <span className="text-pink-950 font-bold">{selection.countdownSeconds} giây</span>
                         </li>
-                        <li className="flex justify-between border-b border-pink-200/20 pb-1">
-                            <span className="text-neutral-500">Theme màu:</span>
+                        <li className="flex justify-between border-b border-pink-100 pb-1">
+                            <span className="text-neutral-500 font-medium">Theme màu:</span>
                             <span className="text-pink-950 font-bold">{resolveThemeConfig(selection.themeId).name}</span>
                         </li>
-                        <li className="flex justify-between border-b border-pink-200/20 pb-1">
-                            <span className="text-neutral-500">Khung viền:</span>
+                        <li className="flex justify-between border-b border-pink-100 pb-1">
+                            <span className="text-neutral-500 font-medium">Khung viền:</span>
                             <span className="text-pink-950 font-bold">
                                 {resolveFrameConfig(selection.frameId).name} {selection.frameColor ? `(${selection.frameColor})` : ""}
                             </span>
                         </li>
-                        <li className="flex justify-between border-b border-pink-200/20 pb-1">
-                            <span className="text-neutral-500">Style ảnh:</span>
-                            <span className="text-pink-955 font-bold">{styleConfigs.find(s => s.id === selection.styleId)?.name ?? "Gốc"}</span>
+                        <li className="flex justify-between border-b border-pink-100 pb-1">
+                            <span className="text-neutral-500 font-medium">Style ảnh:</span>
+                            <span className="text-pink-950 font-bold">{styleConfigs.find(s => s.id === selection.styleId)?.name ?? "Gốc"}</span>
                         </li>
-                        <li className="flex justify-between border-b border-pink-200/20 pb-1">
-                            <span className="text-neutral-500">Nhãn dán:</span>
-                            <span className="text-pink-955 font-bold">
+                        <li className="flex justify-between border-b border-pink-100 pb-1">
+                            <span className="text-neutral-500 font-medium">Nhãn dán:</span>
+                            <span className="text-pink-950 font-bold">
                                 {selection.customization.stickerItems.length > 0
                                     ? `${selection.customization.stickerItems.length} sticker`
                                     : "Không"}
                             </span>
                         </li>
-                        <li className="flex justify-between">
-                            <span className="text-neutral-500">Nhãn chữ:</span>
-                            <span className="text-pink-955 font-bold truncate max-w-[200px]">
+                        <li className="flex justify-between border-b border-pink-100 pb-1">
+                            <span className="text-neutral-500 font-medium">Nhãn chữ:</span>
+                            <span className="text-pink-950 font-bold truncate max-w-[180px]">
                                 {selection.customization.textLabels.length > 0
                                     ? `${selection.customization.textLabels.length} nhãn chữ`
+                                    : "Không"}
+                            </span>
+                        </li>
+                        <li className="flex justify-between">
+                            <span className="text-neutral-500 font-medium">Vẽ tay (Drawing):</span>
+                            <span className="text-pink-950 font-bold">
+                                {selection.customization.drawingStrokes && selection.customization.drawingStrokes.length > 0
+                                    ? `${selection.customization.drawingStrokes.length} nét vẽ`
                                     : "Không"}
                             </span>
                         </li>
                     </ul>
                 </div>
 
-                <p className="text-xs text-neutral-500 leading-relaxed">
-                    Xem lại toàn bộ cấu hình ở bên trái. Nhấn <strong className="text-pink-600">"Bắt đầu chụp!"</strong> để bắt đầu chụp ảnh.
+                <p className="text-[11px] font-medium text-pink-900/80 leading-relaxed">
+                    Xem lại toàn bộ cấu hình ở bên trái. Bạn vẫn có thể nhấp chọn, di chuyển hoặc chỉnh sửa sticker/text trực tiếp trên khung preview trước khi bấm <strong>"Tiếp tục vào camera"</strong>.
                 </p>
             </div>
-        </WizardShell>
+        </SetupStepShell>
         </>
     );
 }

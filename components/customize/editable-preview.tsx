@@ -3,15 +3,17 @@
 import React, { useRef, useEffect, useCallback, useContext } from "react";
 import { PreviewRenderer } from "@/components/booth/preview-renderer";
 import { BoothSessionContext, useBoothSession } from "@/components/booth/booth-session-context";
-import { OVERLAY_REFERENCE_SIZE, clampOverlayPosition } from "@/types/customization";
+import { OVERLAY_REFERENCE_SIZE } from "@/types/customization";
 import type { OverlayItem, DrawingStrokePoint } from "@/types/customization";
-import type { BoothSelection } from "@/types/theme";
+import type { BoothSelection, CapturedPhoto } from "@/types/theme";
 import { createRenderConfig } from "@/services/render/render-config.builder";
+import { mapPointerToSheetCoordinates } from "@/utils/pointer-mapping";
 
 interface EditablePreviewProps {
     selection?: BoothSelection;
     stream?: MediaStream | null;
     cameraStatus?: string;
+    capturedPhotos?: CapturedPhoto[];
     showMetadata?: boolean;
     className?: string;
     enableDrawing?: boolean;
@@ -22,6 +24,7 @@ export function EditablePreview({
     selection: propSelection,
     stream = null,
     cameraStatus = "ready",
+    capturedPhotos: propCapturedPhotos,
     showMetadata = true,
     className = "",
     enableDrawing = false,
@@ -42,9 +45,10 @@ export function EditablePreview({
     const addDrawingStroke = context?.addDrawingStroke || (() => {});
     const selectedOverlayId = context?.selectedOverlayId ?? null;
     const setSelectedOverlayId = context?.setSelectedOverlayId || (() => {});
-    const capturedPhotos = context?.capturedPhotos || [];
+    const capturedPhotos = propCapturedPhotos || context?.capturedPhotos || [];
 
-    const containerRef = useRef<HTMLDivElement | null>(null);
+    const sheetRef = useRef<HTMLDivElement | null>(null);
+    const activePointerIdRef = useRef<number | null>(null);
     const [activeStrokePoints, setActiveStrokePoints] = React.useState<readonly DrawingStrokePoint[] | null>(null);
 
     const overlays = selection ? createRenderConfig(selection).overlays : [];
@@ -75,7 +79,7 @@ export function EditablePreview({
         return () => window.removeEventListener("keydown", handleKeyDown);
     }, [selectedOverlayId, removeOverlay]);
 
-    // Handle background click to deselect / draw stroke
+    // Handle background pointer down (select deselect / start drawing)
     const handleBackgroundPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
         const target = e.target as HTMLElement;
         if (target.closest("[data-overlay-item]") || target.closest("[data-handle]")) {
@@ -83,15 +87,23 @@ export function EditablePreview({
         }
 
         if (enableDrawing) {
-            if (typeof e.currentTarget.setPointerCapture === "function") {
-                e.currentTarget.setPointerCapture(e.pointerId);
+            if (activePointerIdRef.current !== null && activePointerIdRef.current !== e.pointerId) {
+                return;
             }
-            const rect = e.currentTarget.getBoundingClientRect();
-            const pt = {
-                x: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
-                y: Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
-            };
-            setActiveStrokePoints([pt]);
+            activePointerIdRef.current = e.pointerId;
+
+            if (typeof e.currentTarget.setPointerCapture === "function") {
+                try {
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                } catch {
+                    // Ignore capture errors on unsupported browsers
+                }
+            }
+
+            const pt = mapPointerToSheetCoordinates(e, sheetRef.current, { clamp: true });
+            if (pt) {
+                setActiveStrokePoints([pt]);
+            }
             return;
         }
 
@@ -100,19 +112,27 @@ export function EditablePreview({
 
     const handleBackgroundPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
         if (!enableDrawing || !activeStrokePoints) return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        const pt = {
-            x: Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width)),
-            y: Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height)),
-        };
-        setActiveStrokePoints((prev) => (prev ? [...prev, pt] : [pt]));
+        if (activePointerIdRef.current !== null && activePointerIdRef.current !== e.pointerId) return;
+
+        const pt = mapPointerToSheetCoordinates(e, sheetRef.current, { clamp: true });
+        if (pt) {
+            setActiveStrokePoints((prev) => (prev ? [...prev, pt] : [pt]));
+        }
     }, [enableDrawing, activeStrokePoints]);
 
     const handleBackgroundPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
         if (!enableDrawing || !activeStrokePoints) return;
-        if (typeof e.currentTarget.releasePointerCapture === "function") {
-            e.currentTarget.releasePointerCapture(e.pointerId);
+        if (activePointerIdRef.current !== null && activePointerIdRef.current !== e.pointerId) return;
+
+        if (typeof e.currentTarget.hasPointerCapture === "function" && e.currentTarget.hasPointerCapture(e.pointerId)) {
+            try {
+                e.currentTarget.releasePointerCapture(e.pointerId);
+            } catch {
+                // Ignore release capture errors
+            }
         }
+        activePointerIdRef.current = null;
+
         if (activeStrokePoints.length >= 2) {
             addDrawingStroke(activeStrokePoints, activePenColor);
         }
@@ -120,6 +140,7 @@ export function EditablePreview({
     }, [enableDrawing, activeStrokePoints, activePenColor, addDrawingStroke]);
 
     const handleBackgroundPointerCancel = useCallback(() => {
+        activePointerIdRef.current = null;
         if (!enableDrawing) return;
         setActiveStrokePoints(null);
     }, [enableDrawing]);
@@ -133,7 +154,6 @@ export function EditablePreview({
             // Shift + Scroll: Rotate in radians
             const rotDelta = e.deltaY > 0 ? (5 * Math.PI) / 180 : (-5 * Math.PI) / 180;
             let nextRot = (item.rotationRadians || 0) + rotDelta;
-            // Normalize to [0, 2pi]
             if (nextRot < 0) nextRot += 2 * Math.PI;
             if (nextRot > 2 * Math.PI) nextRot -= 2 * Math.PI;
 
@@ -152,62 +172,61 @@ export function EditablePreview({
         }
     }, [updateOverlay]);
 
-    // Move drag handler
+    // Move drag handler using unclamped pointer mapping & initial offset
     const startMoveDrag = useCallback((e: React.PointerEvent<HTMLDivElement>, item: OverlayItem) => {
         e.preventDefault();
         e.stopPropagation();
 
         setSelectedOverlayId(item.id);
 
-        const container = containerRef.current;
-        if (!container) return;
+        const sheetEl = sheetRef.current;
+        if (!sheetEl) return;
 
-        const rect = container.getBoundingClientRect();
-        
-        // Find pointer initial offset from item center
-        const pointerNormX = (e.clientX - rect.left) / rect.width;
-        const pointerNormY = (e.clientY - rect.top) / rect.height;
-        const offsetX = pointerNormX - item.x;
-        const offsetY = pointerNormY - item.y;
+        const startPointer = mapPointerToSheetCoordinates(e, sheetEl, { clamp: false });
+        if (!startPointer) return;
+
+        const initialX = item.x;
+        const initialY = item.y;
 
         const handlePointerMove = (moveEvent: PointerEvent) => {
-            const currentNormX = (moveEvent.clientX - rect.left) / rect.width;
-            const currentNormY = (moveEvent.clientY - rect.top) / rect.height;
+            const currentPointer = mapPointerToSheetCoordinates(moveEvent, sheetEl, { clamp: false });
+            if (!currentPointer) return;
 
-            const nextX = currentNormX - offsetX;
-            const nextY = currentNormY - offsetY;
+            const deltaX = currentPointer.x - startPointer.x;
+            const deltaY = currentPointer.y - startPointer.y;
 
-            updateOverlay(item.id, { x: nextX, y: nextY });
+            updateOverlay(item.id, {
+                x: initialX + deltaX,
+                y: initialY + deltaY,
+            });
         };
 
         const handlePointerUp = () => {
             window.removeEventListener("pointermove", handlePointerMove);
             window.removeEventListener("pointerup", handlePointerUp);
+            window.removeEventListener("pointercancel", handlePointerUp);
         };
 
         window.addEventListener("pointermove", handlePointerMove);
         window.addEventListener("pointerup", handlePointerUp);
+        window.addEventListener("pointercancel", handlePointerUp);
     }, [setSelectedOverlayId, updateOverlay]);
 
-    // Resize handle drag handler
+    // Resize handle drag handler in design space units
     const startResizeDrag = useCallback((e: React.PointerEvent<HTMLDivElement>, item: OverlayItem) => {
         e.preventDefault();
         e.stopPropagation();
 
-        const container = containerRef.current;
-        if (!container) return;
-
-        const rect = container.getBoundingClientRect();
-        const initialScale = item.scale || 1;
+        const sheetEl = sheetRef.current;
+        if (!sheetEl) return;
 
         const handlePointerMove = (moveEvent: PointerEvent) => {
-            // Pointer normalized position
-            const normX = (moveEvent.clientX - rect.left) / rect.width;
-            const normY = (moveEvent.clientY - rect.top) / rect.height;
+            const norm = mapPointerToSheetCoordinates(moveEvent, sheetEl, { clamp: false });
+            if (!norm) return;
 
             // Vector from center to pointer in design space units
-            const dx = (normX - item.x) * OVERLAY_REFERENCE_SIZE.width;
-            const dy = (normY - item.y) * OVERLAY_REFERENCE_SIZE.height;
+            const dx = (norm.x - item.x) * OVERLAY_REFERENCE_SIZE.width;
+            const dy = (norm.y - item.y) * OVERLAY_REFERENCE_SIZE.height;
 
             // Rotate back into unrotated coordinate space
             const angle = -(item.rotationRadians || 0);
@@ -228,31 +247,31 @@ export function EditablePreview({
         const handlePointerUp = () => {
             window.removeEventListener("pointermove", handlePointerMove);
             window.removeEventListener("pointerup", handlePointerUp);
+            window.removeEventListener("pointercancel", handlePointerUp);
         };
 
         window.addEventListener("pointermove", handlePointerMove);
         window.addEventListener("pointerup", handlePointerUp);
+        window.addEventListener("pointercancel", handlePointerUp);
     }, [updateOverlay]);
 
-    // Rotation handle drag handler
+    // Rotation handle drag handler around object center in viewport coordinates
     const startRotateDrag = useCallback((e: React.PointerEvent<HTMLDivElement>, item: OverlayItem) => {
         e.preventDefault();
         e.stopPropagation();
 
-        const container = containerRef.current;
-        if (!container) return;
+        const sheetEl = sheetRef.current;
+        if (!sheetEl) return;
 
-        const rect = container.getBoundingClientRect();
+        const rect = sheetEl.getBoundingClientRect();
+        const centerClientX = rect.left + item.x * rect.width;
+        const centerClientY = rect.top + item.y * rect.height;
 
         const handlePointerMove = (moveEvent: PointerEvent) => {
-            const normX = (moveEvent.clientX - rect.left) / rect.width;
-            const normY = (moveEvent.clientY - rect.top) / rect.height;
+            const dx = moveEvent.clientX - centerClientX;
+            const dy = moveEvent.clientY - centerClientY;
 
-            // Reference vector in design space units
-            const dx = (normX - item.x) * OVERLAY_REFERENCE_SIZE.width;
-            const dy = (normY - item.y) * OVERLAY_REFERENCE_SIZE.height;
-
-            // Angle of rotation (offset by 90 degrees since handle is at top)
+            // Angle of rotation (offset by +PI/2 since rotation handle is at the top)
             let nextRot = Math.atan2(dy, dx) + Math.PI / 2;
             
             // Normalize to [0, 2pi]
@@ -265,23 +284,26 @@ export function EditablePreview({
         const handlePointerUp = () => {
             window.removeEventListener("pointermove", handlePointerMove);
             window.removeEventListener("pointerup", handlePointerUp);
+            window.removeEventListener("pointercancel", handlePointerUp);
         };
 
         window.addEventListener("pointermove", handlePointerMove);
         window.addEventListener("pointerup", handlePointerUp);
+        window.addEventListener("pointercancel", handlePointerUp);
     }, [updateOverlay]);
 
     return (
         <div 
-            ref={containerRef} 
             className={`relative w-full h-full ${className}`}
             onPointerDown={handleBackgroundPointerDown}
             onPointerMove={handleBackgroundPointerMove}
             onPointerUp={handleBackgroundPointerUp}
             onPointerCancel={handleBackgroundPointerCancel}
+            onLostPointerCapture={handleBackgroundPointerCancel}
         >
             {/* Standard Pure Visual Renderer */}
             <PreviewRenderer
+                sheetRef={sheetRef}
                 selection={selection}
                 stream={stream}
                 cameraStatus={cameraStatus}
@@ -290,8 +312,8 @@ export function EditablePreview({
                 activeStrokePoints={activeStrokePoints}
                 activePenColor={activePenColor}
             >
-                {/* Pointer-interception layer overlay */}
-                <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 10 }}>
+                {/* Pointer-interception layer overlay with touch-none */}
+                <div className="absolute inset-0 pointer-events-none touch-none" style={{ zIndex: 10 }}>
                 {overlays
                     .filter((item) => item.type !== "drawing")
                     .map((item) => {
@@ -304,7 +326,7 @@ export function EditablePreview({
                                 key={item.id}
                                 data-overlay-item="true"
                                 data-overlay-id={item.id}
-                                className="absolute pointer-events-auto cursor-move select-none"
+                                className="absolute pointer-events-auto cursor-move select-none touch-none"
                                 style={{
                                     left: `${item.x * 100}%`,
                                     top: `${item.y * 100}%`,
@@ -324,22 +346,22 @@ export function EditablePreview({
                                         {/* Corner Resize Handles */}
                                         <div 
                                             data-handle="resize-tl"
-                                            className="absolute w-3 h-3 bg-white border border-pink-500 rounded-full cursor-nwse-resize -left-1.5 -top-1.5 pointer-events-auto"
+                                            className="absolute w-3 h-3 bg-white border border-pink-500 rounded-full cursor-nwse-resize -left-1.5 -top-1.5 pointer-events-auto touch-none"
                                             onPointerDown={(e) => startResizeDrag(e, item)}
                                         />
                                         <div 
                                             data-handle="resize-tr"
-                                            className="absolute w-3 h-3 bg-white border border-pink-500 rounded-full cursor-nesw-resize -right-1.5 -top-1.5 pointer-events-auto"
+                                            className="absolute w-3 h-3 bg-white border border-pink-500 rounded-full cursor-nesw-resize -right-1.5 -top-1.5 pointer-events-auto touch-none"
                                             onPointerDown={(e) => startResizeDrag(e, item)}
                                         />
                                         <div 
                                             data-handle="resize-bl"
-                                            className="absolute w-3 h-3 bg-white border border-pink-500 rounded-full cursor-nesw-resize -left-1.5 -bottom-1.5 pointer-events-auto"
+                                            className="absolute w-3 h-3 bg-white border border-pink-500 rounded-full cursor-nesw-resize -left-1.5 -bottom-1.5 pointer-events-auto touch-none"
                                             onPointerDown={(e) => startResizeDrag(e, item)}
                                         />
                                         <div 
                                             data-handle="resize-br"
-                                            className="absolute w-3 h-3 bg-white border border-pink-500 rounded-full cursor-nwse-resize -right-1.5 -bottom-1.5 pointer-events-auto"
+                                            className="absolute w-3 h-3 bg-white border border-pink-500 rounded-full cursor-nwse-resize -right-1.5 -bottom-1.5 pointer-events-auto touch-none"
                                             onPointerDown={(e) => startResizeDrag(e, item)}
                                         />
 
@@ -347,7 +369,7 @@ export function EditablePreview({
                                         <div className="absolute w-0.5 h-4 bg-pink-500 -top-4 left-1/2 -translate-x-1/2 pointer-events-none" />
                                         <div 
                                             data-handle="rotate"
-                                            className="absolute w-4 h-4 bg-white border-2 border-pink-500 rounded-full cursor-grab active:cursor-grabbing -top-8 left-1/2 -translate-x-1/2 flex items-center justify-center pointer-events-auto shadow-sm"
+                                            className="absolute w-4 h-4 bg-white border-2 border-pink-500 rounded-full cursor-grab active:cursor-grabbing -top-8 left-1/2 -translate-x-1/2 flex items-center justify-center pointer-events-auto shadow-sm touch-none"
                                             onPointerDown={(e) => startRotateDrag(e, item)}
                                             title="Drag to rotate"
                                         >
@@ -357,7 +379,7 @@ export function EditablePreview({
                                         </div>
 
                                         {/* Quick Delete / Duplicate UI Overlay Actions below item */}
-                                        <div className="absolute flex gap-2 -bottom-10 left-1/2 -translate-x-1/2 pointer-events-auto z-30">
+                                        <div className="absolute flex gap-2 -bottom-10 left-1/2 -translate-x-1/2 pointer-events-auto z-30 touch-none">
                                             <button
                                                 type="button"
                                                 onClick={(e) => {

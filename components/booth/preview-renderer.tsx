@@ -31,6 +31,7 @@ interface PreviewRendererProps {
     onSelectionChange?: (selection: BoothSelection) => void;
     onRetry?: () => void;
     className?: string;
+    sheetRef?: React.Ref<HTMLDivElement>;
     activeStrokePoints?: readonly DrawingStrokePoint[] | null;
     activePenColor?: string;
     children?: React.ReactNode;
@@ -47,6 +48,7 @@ export function PreviewRenderer({
     onSelectionChange,
     onRetry,
     className = "",
+    sheetRef,
     activeStrokePoints = null,
     activePenColor = "#ffffff",
     children,
@@ -67,6 +69,7 @@ export function PreviewRenderer({
             aria-label="Preview renderer"
         >
             <div
+                ref={sheetRef}
                 className="relative h-full max-w-full rounded-none shadow-2xl flex flex-col p-[2.5%] transition-all duration-300 animate-fade-in touch-none select-none"
                 style={{
                     aspectRatio: sheetAspectRatio,

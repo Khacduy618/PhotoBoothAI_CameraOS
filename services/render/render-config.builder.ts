@@ -1,6 +1,6 @@
 import type { BoothSelection } from "@/types/theme";
 import type { RenderConfig } from "@/types/render-config";
-import type { OverlayItem } from "@/types/customization";
+import type { OverlayItem, StickerOverlay, TextOverlay } from "@/types/customization";
 import { resolveBoothLayoutConfig } from "@/config/layout.config";
 import { resolveThemeConfig, resolveStyleConfig, resolveFrameConfig } from "@/config/theme.config";
 import { AssetManager } from "@/services/platform/asset-manager";
@@ -22,6 +22,7 @@ function buildOverlaysFromCustomization(
 
     customization.stickerItems.forEach((sticker, idx) => {
         const rotRad = ((sticker.rotationDegrees || 0) * Math.PI) / 180;
+        const ext = sticker as unknown as Partial<StickerOverlay>;
         overlays.push({
             id: sticker.id,
             type: "sticker",
@@ -30,18 +31,19 @@ function buildOverlaysFromCustomization(
             y: sticker.y,
             baseWidth: 150,
             baseHeight: 150,
-            scale: sticker.scale,
+            scale: sticker.scale ?? 1,
             rotationRadians: rotRad,
             rotationDegrees: sticker.rotationDegrees,
-            zIndex: 10 + idx,
-            opacity: 1,
-            flipX: false,
-            flipY: false,
+            zIndex: ext.zIndex ?? (10 + idx),
+            opacity: ext.opacity ?? 1,
+            flipX: ext.flipX ?? false,
+            flipY: ext.flipY ?? false,
         });
     });
 
     customization.textLabels.forEach((label, idx) => {
         const rotRad = ((label.rotationDegrees || 0) * Math.PI) / 180;
+        const ext = label as unknown as Partial<TextOverlay>;
         overlays.push({
             id: label.id,
             type: "text",
@@ -50,13 +52,20 @@ function buildOverlaysFromCustomization(
             y: label.y,
             baseWidth: 200,
             baseHeight: 50,
-            scale: 1,
+            scale: ext.scale ?? (label as any).scale ?? 1,
             rotationRadians: rotRad,
             rotationDegrees: label.rotationDegrees,
             color: label.color,
             fontSize: label.fontSize,
-            zIndex: 20 + idx,
-            opacity: 1,
+            fontFamily: ext.fontFamily ?? (label as any).fontFamily,
+            fontWeight: ext.fontWeight ?? (label as any).fontWeight,
+            outlineColor: ext.outlineColor ?? (label as any).outlineColor,
+            outlineWidth: ext.outlineWidth ?? (label as any).outlineWidth,
+            shadowPreset: ext.shadowPreset ?? (label as any).shadowPreset,
+            letterSpacing: ext.letterSpacing ?? (label as any).letterSpacing,
+            align: ext.align ?? (label as any).align,
+            zIndex: ext.zIndex ?? (20 + idx),
+            opacity: ext.opacity ?? (label as any).opacity ?? 1,
         });
     });
 

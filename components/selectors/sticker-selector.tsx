@@ -35,15 +35,26 @@ export function StickerSelector({
     const sendOverlayToBack = sessionContext?.sendOverlayToBack;
     const overlays = sessionContext?.selection?.customization?.overlays || [];
     
-    const count = stickerItems.length;
+    const activeStickerItems = sessionContext?.selection?.customization?.stickerItems || stickerItems || [];
+    const count = activeStickerItems.length;
     const isMaxReached = count >= 4;
 
     const handleAdd = (stickerId: string) => {
         if (isMaxReached) return;
-        if (onAddSticker) {
+        if (sessionContext?.addSticker) {
+            sessionContext.addSticker(stickerId);
+        } else if (onAddSticker) {
             onAddSticker(stickerId);
         } else if (onSelectPresetSticker) {
             onSelectPresetSticker(stickerId);
+        }
+    };
+
+    const handleRemove = (id: string) => {
+        if (sessionContext?.removeSticker) {
+            sessionContext.removeSticker(id);
+        } else {
+            onRemoveSticker(id);
         }
     };
 
@@ -98,13 +109,13 @@ export function StickerSelector({
             </div>
 
             {/* List of added stickers */}
-            {stickerItems.length > 0 && (
+            {activeStickerItems.length > 0 && (
                 <div className="space-y-2 pt-3 border-t border-pink-200/50">
                     <label className="text-xs font-extrabold text-pink-950 uppercase tracking-wider block">
                         Danh sách sticker trên khung:
                     </label>
                     <div className="flex flex-wrap gap-2">
-                        {stickerItems.map((item: StickerCustomization, idx: number) => {
+                        {activeStickerItems.map((item: StickerCustomization) => {
                             const foundObj = stickerConfigs.find((s) => s.id === item.stickerId);
                             const emoji = foundObj ? foundObj.emoji : item.stickerId;
                             const isSelected = item.id === selectedOverlayId;
@@ -125,7 +136,7 @@ export function StickerSelector({
                                         disabled={disabled}
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            onRemoveSticker(item.id);
+                                            handleRemove(item.id);
                                         }}
                                         className={`ml-1 text-xs font-black ${isSelected ? "text-white/80 hover:text-white" : "text-pink-600 hover:text-red-600"}`}
                                         title="Xóa sticker"

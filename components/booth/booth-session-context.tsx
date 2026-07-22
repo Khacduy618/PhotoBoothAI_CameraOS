@@ -482,11 +482,40 @@ function InnerBoothSessionProvider({
                 // Auto-select
                 setTimeout(() => setSelectedOverlayId(newId), 0);
                 
+                const updatedOverlays = [...overlays, newOverlay];
+
+                const updatedStickers = (prev.customization.stickerItems || []).slice();
+                if (newOverlay.type === "sticker") {
+                    updatedStickers.push({
+                        id: newOverlay.id,
+                        stickerId: newOverlay.content,
+                        x: newOverlay.x,
+                        y: newOverlay.y,
+                        scale: newOverlay.scale,
+                        rotationDegrees: newOverlay.rotationDegrees ?? Math.round(((newOverlay.rotationRadians || 0) * 180) / Math.PI),
+                    });
+                }
+
+                const updatedTexts = (prev.customization.textLabels || []).slice();
+                if (newOverlay.type === "text") {
+                    updatedTexts.push({
+                        id: newOverlay.id,
+                        text: newOverlay.content,
+                        x: newOverlay.x,
+                        y: newOverlay.y,
+                        color: newOverlay.color || "#ffffff",
+                        fontSize: newOverlay.fontSize || 48,
+                        rotationDegrees: newOverlay.rotationDegrees ?? Math.round(((newOverlay.rotationRadians || 0) * 180) / Math.PI),
+                    });
+                }
+
                 return {
                     ...prev,
                     customization: {
                         ...prev.customization,
-                        overlays: [...overlays, newOverlay],
+                        overlays: updatedOverlays,
+                        stickerItems: updatedStickers,
+                        textLabels: updatedTexts,
                     },
                 };
             });

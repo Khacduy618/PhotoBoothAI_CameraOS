@@ -325,7 +325,16 @@ export async function composePhotoLayout({
                 } else {
                     const textToDraw = (item.content || "").toUpperCase();
                     const fontWeightVal = item.fontWeight || 900;
-                    context.font = `${fontWeightVal} ${Math.round(fontSize)}px ${item.fontFamily || "system-ui, sans-serif"}`;
+                    
+                    const fontMap: Record<string, string> = {
+                        "sans-serif": 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                        "serif": 'Georgia, "Times New Roman", serif',
+                        "cursive": '"Brush Script MT", "Snell Roundhand", cursive',
+                        "monospace": 'Monaco, "Courier New", monospace',
+                    };
+                    const resolvedFont = fontMap[item.fontFamily || "sans-serif"] || item.fontFamily || "system-ui, sans-serif";
+
+                    context.font = `${fontWeightVal} ${Math.round(fontSize)}px ${resolvedFont}`;
                     context.textAlign = (item.align || "center") as CanvasTextAlign;
                     context.textBaseline = "middle";
                     context.lineJoin = "round";
@@ -337,10 +346,14 @@ export async function composePhotoLayout({
                         (context as unknown as { letterSpacing: string }).letterSpacing = `${letterSpacingPx}px`;
                     }
 
+                    const outlineWidthVal = item.outlineWidth !== undefined ? item.outlineWidth : 2;
+                    const outlineColorVal = item.outlineColor || "#000000";
+
                     // Apply shadow presets
                     if (item.shadowPreset === "soft") {
                         context.shadowColor = "rgba(0,0,0,0.3)";
                         context.shadowBlur = 8 * textScale;
+                        context.shadowOffsetX = 0;
                         context.shadowOffsetY = 4 * textScale;
                     } else if (item.shadowPreset === "hard") {
                         context.shadowColor = "rgba(0,0,0,0.8)";
@@ -350,14 +363,21 @@ export async function composePhotoLayout({
                     } else if (item.shadowPreset === "neon") {
                         context.shadowColor = item.color || "#ffffff";
                         context.shadowBlur = 20 * textScale;
+                        context.shadowOffsetX = 0;
+                        context.shadowOffsetY = 0;
+                    } else if (outlineWidthVal === 0) {
+                        // Default subtle drop shadow matching DOM Preview
+                        context.shadowColor = "rgba(0,0,0,0.5)";
+                        context.shadowBlur = 4 * textScale;
+                        context.shadowOffsetX = 0;
+                        context.shadowOffsetY = 2 * textScale;
                     }
 
-                    // Stroke / outline
-                    const outlineWidthVal = item.outlineWidth !== undefined ? item.outlineWidth : 2;
-                    const strokeWidthPx = (((outlineWidthVal) * textScale) / 1000) * canvas.width;
-                    if (strokeWidthPx > 0) {
-                        context.strokeStyle = item.outlineColor || "#000000";
-                        context.lineWidth = strokeWidthPx * 3;
+                    // Stroke / outline (ONLY when outlineWidthVal > 0)
+                    if (outlineWidthVal > 0) {
+                        const strokeWidthPx = ((outlineWidthVal * textScale) / 1000) * canvas.width;
+                        context.strokeStyle = outlineColorVal;
+                        context.lineWidth = Math.max(1, strokeWidthPx * 1.5);
                         context.strokeText(textToDraw, 0, 0);
                     }
 

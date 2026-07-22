@@ -190,6 +190,14 @@ export function PreviewRenderer({
 
                             const letterSpacingCqw = (((item.letterSpacing || 0) * textScale) / 1000) * 100;
 
+                            const fontMap: Record<string, string> = {
+                                "sans-serif": 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                                "serif": 'Georgia, "Times New Roman", serif',
+                                "cursive": '"Brush Script MT", "Snell Roundhand", cursive',
+                                "monospace": 'Monaco, "Courier New", monospace',
+                            };
+                            const fontStack = fontMap[item.fontFamily || "sans-serif"] || item.fontFamily || "system-ui, sans-serif";
+
                             // Outlines & Shadows Presets implementation
                             let textShadow = "";
                             const outlineColor = item.outlineColor || "#000000";
@@ -203,7 +211,7 @@ export function PreviewRenderer({
                             } else if (item.shadowPreset === "hard") {
                                 textShadow = (textShadow ? textShadow + ", " : "") + "4px 4px 0px rgba(0,0,0,0.8)";
                             } else if (item.shadowPreset === "neon") {
-                                textShadow = (textShadow ? textShadow + ", " : "") + `0 0 5px #fff, 0 0 10px ${item.color}, 0 0 20px ${item.color}`;
+                                textShadow = (textShadow ? textShadow + ", " : "") + `0 0 5px #fff, 0 0 10px ${item.color || "#ffffff"}, 0 0 20px ${item.color || "#ffffff"}`;
                             } else if (!textShadow) {
                                 textShadow = "0 2px 4px rgba(0,0,0,0.5)";
                             }
@@ -240,7 +248,7 @@ export function PreviewRenderer({
                                         top: `${item.y * 100}%`,
                                         color: item.color || "#ffffff",
                                         fontSize: `${sizeCqw}cqw`,
-                                        fontFamily: item.fontFamily || "system-ui, sans-serif",
+                                        fontFamily: fontStack,
                                         letterSpacing: `${letterSpacingCqw}cqw`,
                                         transform: `translate(-50%, -50%) rotate(${rotRad}rad)`,
                                         textShadow,

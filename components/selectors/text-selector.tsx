@@ -35,15 +35,26 @@ export function TextSelector({
     const sendOverlayToBack = sessionContext?.sendOverlayToBack;
     const overlays = sessionContext?.selection?.customization?.overlays || [];
 
-    const count = textLabels.length;
+    const activeTextLabels = sessionContext?.selection?.customization?.textLabels || textLabels || [];
+    const count = activeTextLabels.length;
     const isMaxReached = count >= 4;
 
     const handleAdd = (text: string) => {
         if (isMaxReached || !text.trim()) return;
-        if (onAddText) {
+        if (sessionContext?.addTextLabel) {
+            sessionContext.addTextLabel(text.trim());
+        } else if (onAddText) {
             onAddText(text.trim());
         } else if (onSelectPresetText) {
             onSelectPresetText(text.trim());
+        }
+    };
+
+    const handleRemove = (id: string) => {
+        if (sessionContext?.removeTextLabel) {
+            sessionContext.removeTextLabel(id);
+        } else {
+            onRemoveText(id);
         }
     };
 
@@ -78,24 +89,24 @@ export function TextSelector({
                 <input
                     type="text"
                     value={inputText}
-                    disabled={disabled || isMaxReached}
                     onChange={(e) => setInputText(e.target.value)}
+                    placeholder="Nhập nội dung nhãn chữ..."
+                    disabled={disabled || isMaxReached}
+                    className="flex-1 rounded-xl border border-pink-200 bg-white/90 px-3 py-2 text-xs font-bold text-pink-950 placeholder:text-pink-950/40 focus:border-pink-500 focus:outline-none shadow-sm disabled:opacity-50"
                     onKeyDown={(e) => {
                         if (e.key === "Enter") {
                             e.preventDefault();
                             handleAddCustom();
                         }
                     }}
-                    placeholder={isMaxReached ? "Đã đạt tối đa 4 nhãn chữ" : "Nhập chữ custom (ví dụ: MEMORIES 2026)..."}
-                    className="flex-1 rounded-xl border border-pink-300 bg-white/80 px-3.5 py-2 text-xs text-pink-950 font-bold placeholder-pink-900/40 focus:outline-none focus:ring-2 focus:ring-pink-400 shadow-sm disabled:opacity-50 disabled:bg-neutral-100"
                 />
                 <button
                     type="button"
                     disabled={disabled || isMaxReached || !inputText.trim()}
                     onClick={handleAddCustom}
-                    className="rounded-xl bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 px-4 py-2 font-black text-xs text-white shadow-sm transition active:scale-95 shrink-0 disabled:opacity-40"
+                    className="rounded-xl border border-pink-200/70 bg-gradient-to-r from-pink-500 to-rose-500 px-4 py-2 text-xs font-black text-white hover:brightness-105 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm shrink-0"
                 >
-                    + Thêm Text
+                    + Thêm Chữ
                 </button>
             </div>
 
@@ -126,13 +137,13 @@ export function TextSelector({
             </div>
 
             {/* List of added text labels */}
-            {textLabels.length > 0 && (
+            {activeTextLabels.length > 0 && (
                 <div className="space-y-2 pt-3 border-t border-pink-200/50">
                     <label className="text-xs font-extrabold text-pink-950 uppercase tracking-wider block">
-                        Danh sách nhãn chữ đã thêm:
+                        Danh sách chữ đã thêm:
                     </label>
-                    <div className="space-y-1.5">
-                        {textLabels.map((item: TextLabelCustomization, idx: number) => {
+                    <div className="space-y-2">
+                        {activeTextLabels.map((item: TextLabelCustomization, idx: number) => {
                             const isSelected = item.id === selectedOverlayId;
 
                             return (
@@ -153,7 +164,7 @@ export function TextSelector({
                                         disabled={disabled}
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            onRemoveText(item.id);
+                                            handleRemove(item.id);
                                         }}
                                         className={`font-extrabold px-2 py-0.5 rounded-lg shrink-0 text-xs ${
                                             isSelected 

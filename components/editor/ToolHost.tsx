@@ -57,13 +57,28 @@ export const TOOL_RENDERERS: Record<EditorToolId, ToolRenderer> = {
         <StickerSelector
             stickerItems={props.selection.customization.stickerItems}
             onAddSticker={(stickerId) => {
+                const newId = `sticker-${Date.now()}-${Math.random()}`;
                 const newSticker = {
-                    id: `sticker-${Date.now()}-${Math.random()}`,
+                    id: newId,
                     stickerId,
                     x: 0.5,
                     y: 0.5,
                     scale: 1,
                     rotationDegrees: 0,
+                };
+                const newOverlay = {
+                    id: newId,
+                    type: "sticker" as const,
+                    content: stickerId,
+                    x: 0.5,
+                    y: 0.5,
+                    baseWidth: 150,
+                    baseHeight: 150,
+                    scale: 1,
+                    rotationRadians: 0,
+                    rotationDegrees: 0,
+                    zIndex: 600 + (props.selection.customization.overlays || []).filter((o) => o.type === "sticker").length,
+                    opacity: 1,
                 };
                 props.updateSelection({
                     customization: {
@@ -71,6 +86,10 @@ export const TOOL_RENDERERS: Record<EditorToolId, ToolRenderer> = {
                         stickerItems: [
                             ...props.selection.customization.stickerItems,
                             newSticker,
+                        ],
+                        overlays: [
+                            ...(props.selection.customization.overlays || []),
+                            newOverlay,
                         ],
                     },
                 });
@@ -82,6 +101,9 @@ export const TOOL_RENDERERS: Record<EditorToolId, ToolRenderer> = {
                         stickerItems: props.selection.customization.stickerItems.filter(
                             (s) => s.id !== id,
                         ),
+                        overlays: (props.selection.customization.overlays || []).filter(
+                            (o) => o.id !== id,
+                        ),
                     },
                 });
             }}
@@ -92,8 +114,9 @@ export const TOOL_RENDERERS: Record<EditorToolId, ToolRenderer> = {
         <TextSelector
             textLabels={props.selection.customization.textLabels}
             onAddText={(text) => {
+                const newId = `text-${Date.now()}-${Math.random()}`;
                 const newText = {
-                    id: `text-${Date.now()}-${Math.random()}`,
+                    id: newId,
                     text,
                     x: 0.5,
                     y: 0.9,
@@ -101,12 +124,32 @@ export const TOOL_RENDERERS: Record<EditorToolId, ToolRenderer> = {
                     fontSize: 48,
                     rotationDegrees: 0,
                 };
+                const newOverlay = {
+                    id: newId,
+                    type: "text" as const,
+                    content: text,
+                    x: 0.5,
+                    y: 0.9,
+                    baseWidth: 200,
+                    baseHeight: 60,
+                    scale: 1,
+                    rotationRadians: 0,
+                    rotationDegrees: 0,
+                    zIndex: 700 + (props.selection.customization.overlays || []).filter((o) => o.type === "text").length,
+                    opacity: 1,
+                    color: "#ffffff",
+                    fontSize: 48,
+                };
                 props.updateSelection({
                     customization: {
                         ...props.selection.customization,
                         textLabels: [
                             ...props.selection.customization.textLabels,
                             newText,
+                        ],
+                        overlays: [
+                            ...(props.selection.customization.overlays || []),
+                            newOverlay,
                         ],
                     },
                 });
@@ -117,6 +160,9 @@ export const TOOL_RENDERERS: Record<EditorToolId, ToolRenderer> = {
                         ...props.selection.customization,
                         textLabels: props.selection.customization.textLabels.filter(
                             (l) => l.id !== id,
+                        ),
+                        overlays: (props.selection.customization.overlays || []).filter(
+                            (o) => o.id !== id,
                         ),
                     },
                 });

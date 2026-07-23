@@ -20,12 +20,8 @@ export interface EditorToolConfig {
 
 export const EDITOR_TOOLS: readonly EditorToolConfig[] = [
     { id: "summary", title: "📊 Tóm tắt", shortLabel: "Summary", icon: "📊" },
-    { id: "theme",   title: "🎨 Theme màu", shortLabel: "Theme",   icon: "🎨" },
-    { id: "frame",   title: "🖼️ Khung ảnh", shortLabel: "Frame",   icon: "🖼️" },
-    { id: "filter",  title: "✨ Bộ lọc Filter", shortLabel: "Filter", icon: "✨" },
-    { id: "sticker", title: "🥳 Nhãn dán Sticker", shortLabel: "Sticker", icon: "🥳" },
-    { id: "text",    title: "✍️ Nhãn chữ Text", shortLabel: "Text", icon: "✍️" },
-    { id: "drawing", title: "✏️ Vẽ cọ Drawing", shortLabel: "Drawing", icon: "✏️" },
+    { id: "frame", title: "🖼️ Khung Canva", shortLabel: "Frame", icon: "🖼️" },
+    { id: "drawing", title: "✏️ Vẽ bút", shortLabel: "Drawing", icon: "✏️" },
 ] as const;
 
 interface EditingToolbarProps {

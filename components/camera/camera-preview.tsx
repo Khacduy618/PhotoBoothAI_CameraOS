@@ -40,6 +40,7 @@ import type { CameraController } from "@/hooks/use-camera";
 import { useGestureRecognizer } from "@/hooks/use-gesture-recognizer";
 import { composePhotoLayout } from "@/services/render/layout-compositor.service";
 import { renderPhotoOutput } from "@/services/render/render-photo-output";
+import { createRenderConfig } from "@/services/render/render-config.builder";
 import {
     saveSharePhoto,
     cleanupExpiredSharePhotos,
@@ -643,36 +644,6 @@ export function CameraPreview({
             return initialActions;
         });
 
-    useEffect(() => {
-        const syncedActions: CustomizerAction[] = [];
-        if (selection.customization?.stickerItems) {
-            selection.customization.stickerItems.forEach((st, idx) => {
-                const stickerObj = resolveStickerConfig(st.stickerId);
-                const emoji = stickerObj ? stickerObj.emoji : st.stickerId;
-                syncedActions.push({
-                    type: "sticker",
-                    id: st.id || `setup-sticker-${idx}`,
-                    sticker: emoji,
-                    x: st.x ?? 0.5,
-                    y: st.y ?? 0.5,
-                });
-            });
-        }
-        if (selection.customization?.textLabels) {
-            selection.customization.textLabels.forEach((tl, idx) => {
-                if (tl.text) {
-                    syncedActions.push({
-                        type: "text",
-                        id: tl.id || `setup-text-${idx}`,
-                        text: tl.text,
-                        x: tl.x ?? 0.5,
-                        y: tl.y ?? 0.9,
-                    });
-                }
-            });
-        }
-        setCustomizerActions(syncedActions);
-    }, [selection.customization]);
     const [selectedSticker, setSelectedSticker] =
         useState<(typeof stickerOptions)[number]>(() => {
             if (selection.stickerId && (stickerOptions as readonly string[]).includes(selection.stickerId)) {
@@ -1044,35 +1015,25 @@ export function CameraPreview({
             try {
                 setLayoutError(null);
 
-                // Re-render each individual photo with the current frame selection on the fly
-                const renderedSources = await Promise.all(
-                    capturedPhotos
-                        .slice(0, totalShots)
-                        .reverse()
-                        .map(async (photo) => {
-                            const renderedBlob = await renderPhotoOutput({
-                                original: photo.originalBlob,
-                                theme: selectedTheme,
-                                frame: currentFrame,
-                                style: selectedStyle,
-                            });
-                            return {
-                                photoId: photo.id,
-                                blob: renderedBlob,
-                            };
-                        })
-                );
+                const orderedPhotos = capturedPhotos
+                    .slice(0, totalShots)
+                    .reverse();
+                const renderedSources = orderedPhotos.map((photo) => ({
+                    photoId: photo.id,
+                    blob: photo.originalBlob,
+                }));
+                const renderConfig = createRenderConfig({
+                    selection,
+                    capturedPhotos: orderedPhotos,
+                });
 
                 if (cancelled) {
                     return;
                 }
 
                 const layoutOutput = await composePhotoLayout({
-                    layoutId: selectedLayout.id,
+                    renderConfig,
                     sources: renderedSources,
-                    borderColor: currentFrame.id !== "none" ? currentFrame.borderColor : selectedTheme.backgroundColor,
-                    patternUrl: currentFrame.patternUrl,
-                    textColor: currentFrame.id === "white-border" ? "#111827" : selectedTheme.textColor,
                 });
 
                 if (cancelled) {
@@ -1141,10 +1102,8 @@ export function CameraPreview({
     }, [
         boothState,
         capturedPhotos,
-        currentFrame,
         selectedLayout.id,
-        selectedTheme,
-        selectedStyle,
+        selection,
         totalShots,
     ]);
 
@@ -1170,7 +1129,7 @@ export function CameraPreview({
 
                 const customizedBlob = await renderCustomizedLayout(
                     finalLayoutUrl,
-                    customizerActions,
+                    [],
                     {
                         layoutId: selectedLayout.id,
                         textColor,
@@ -1208,7 +1167,14 @@ export function CameraPreview({
         return () => {
             cancelled = true;
         };
-    }, [customizerActions, finalLayoutUrl]);
+    }, [
+        finalLayoutUrl,
+        selectedLayout.id,
+        selectedTheme.id,
+        selectedTheme.textColor,
+        selection.frameColor,
+        selection.frameId,
+    ]);
 
     useEffect(() => {
         if (

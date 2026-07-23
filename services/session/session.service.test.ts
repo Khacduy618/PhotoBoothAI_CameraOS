@@ -63,8 +63,8 @@ describe("SessionService", () => {
                     themeId: "classic",
                     frameId: "none",
                     styleId: "none",
-                    layoutId: "2x2",
-                    countdownSeconds: 3,
+                    layoutId: "single-4x6-landscape",
+                    countdownSeconds: 8,
                 }),
             });
         }

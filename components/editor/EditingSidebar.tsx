@@ -41,8 +41,9 @@ export function EditingSidebar({
     isExporting = false,
 }: EditingSidebarProps) {
     const isPostCapture = capturedPhotos.length > 0;
-    const TOOL_ORDER: EditorToolId[] = ["summary", "theme", "frame", "filter", "sticker", "text", "drawing"];
-    const currentIdx = TOOL_ORDER.indexOf(activeTool);
+    const TOOL_ORDER: EditorToolId[] = ["summary", "frame", "drawing"];
+    const safeActiveTool: EditorToolId = TOOL_ORDER.includes(activeTool) ? activeTool : "frame";
+    const currentIdx = TOOL_ORDER.indexOf(safeActiveTool);
     const prevTool = currentIdx > 0 ? TOOL_ORDER[currentIdx - 1] : null;
     const nextTool = currentIdx < TOOL_ORDER.length - 1 ? TOOL_ORDER[currentIdx + 1] : null;
 
@@ -71,7 +72,7 @@ export function EditingSidebar({
 
                 {/* Setup Step Shell Tabs Toolbar */}
                 <EditingToolbar
-                    activeTool={activeTool}
+                    activeTool={safeActiveTool}
                     onSelectTool={onSelectTool}
                 />
 
@@ -86,7 +87,7 @@ export function EditingSidebar({
                         <span>←</span> {prevTool ? TOOL_NAMES[prevTool] : "Đầu"}
                     </button>
                     <span className="text-[11px] font-black text-pink-900 uppercase tracking-wider px-2">
-                        Bước {currentIdx + 1}/{TOOL_ORDER.length}: <span className="text-pink-600">{TOOL_NAMES[activeTool]}</span>
+                        Bước {currentIdx + 1}/{TOOL_ORDER.length}: <span className="text-pink-600">{TOOL_NAMES[safeActiveTool]}</span>
                     </span>
                     <button
                         type="button"
@@ -100,7 +101,7 @@ export function EditingSidebar({
 
                 <div className="pt-1">
                     <ToolHost
-                        activeTool={activeTool}
+                        activeTool={safeActiveTool}
                         selection={selection}
                         updateSelection={updateSelection}
                         capturedPhotos={capturedPhotos}

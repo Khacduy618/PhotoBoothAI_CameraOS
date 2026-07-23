@@ -1,4 +1,4 @@
-import { resolveBoothLayoutConfig } from "@/config/layout.config";
+import { defaultBoothLayoutId, defaultCountdownSeconds, resolveBoothLayoutConfig } from "@/config/layout.config";
 import type {
     BoothFlowContext,
     BoothFlowError,
@@ -7,7 +7,7 @@ import type {
 } from "@/types/booth";
 import type { BoothLayoutId } from "@/types/customization";
 
-const defaultLayout = resolveBoothLayoutConfig("2x2");
+const defaultLayout = resolveBoothLayoutConfig(defaultBoothLayoutId);
 
 export function createBoothFlowState(
     layoutId: BoothLayoutId = defaultLayout.id,
@@ -20,6 +20,7 @@ export function createBoothFlowState(
             layoutId: layout.id,
             totalShots: layout.shotCount,
             currentShotIndex: 0,
+            countdownSeconds: defaultCountdownSeconds,
             savedPhotoIds: [],
             triggerLocked: false,
             awaitingGestureRelease: false,
@@ -97,7 +98,7 @@ export function reduceBoothFlow(
                 value: "frame-selection",
                 context: {
                     ...state.context,
-                    countdownSeconds: event.seconds,
+                    countdownSeconds: defaultCountdownSeconds,
                 },
             };
 

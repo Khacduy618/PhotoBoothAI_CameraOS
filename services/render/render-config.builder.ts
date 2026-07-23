@@ -1,5 +1,5 @@
 import type { BoothSelection } from "@/types/theme";
-import type { RenderConfig } from "@/types/render-config";
+import type { RenderConfig, AssetManifest, CreateRenderConfigInput } from "@/types/render-config";
 import type { OverlayItem, StickerOverlay, TextOverlay } from "@/types/customization";
 import { resolveBoothLayoutConfig } from "@/config/layout.config";
 import { resolveThemeConfig, resolveStyleConfig, resolveFrameConfig } from "@/config/theme.config";
@@ -89,7 +89,7 @@ function buildOverlaysFromCustomization(
         });
     }
 
-    return overlays;
+    return [...overlays].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
 }
 
 /**
@@ -100,7 +100,12 @@ function buildOverlaysFromCustomization(
  *
  * No render surface parses BoothSelection fields directly.
  */
-export function createRenderConfig(selection: BoothSelection): RenderConfig {
+export function createRenderConfig(
+    inputOrSelection: BoothSelection | CreateRenderConfigInput
+): RenderConfig {
+    const selection: BoothSelection = "selection" in inputOrSelection ? inputOrSelection.selection : inputOrSelection;
+    const capturedPhotos = "capturedPhotos" in inputOrSelection ? inputOrSelection.capturedPhotos || [] : [];
+
     const layout = resolveBoothLayoutConfig(selection.layoutId);
     const theme = resolveThemeConfig(selection.themeId);
     const style = resolveStyleConfig(selection.styleId);
@@ -112,6 +117,30 @@ export function createRenderConfig(selection: BoothSelection): RenderConfig {
 
     const overlays = buildOverlaysFromCustomization(selection.customization);
 
+    // Build AssetManifest
+    const stickerUrls: string[] = [];
+    const fontDescriptors: string[] = [];
+
+    overlays.forEach((item) => {
+        if (item.type === "sticker") {
+            const stickerObj = AssetManager.getStickerConfigs().find((s) => s.id === item.content);
+            if (stickerObj) {
+                stickerUrls.push(stickerObj.id);
+            }
+        } else if (item.type === "text") {
+            const fontSpec = `${item.fontWeight || 900} ${item.fontSize || 48}px "${item.fontFamily || "sans-serif"}"`;
+            fontDescriptors.push(fontSpec);
+        }
+    });
+
+    const assetManifest: AssetManifest = {
+        backgroundUrl: frame.kind === "template" ? frame.patternUrl : undefined,
+        frameUrl: frame.assetUrl ?? frame.patternUrl,
+        stickerUrls,
+        capturedPhotoBlobs: capturedPhotos.map((p) => p.originalBlob),
+        fontDescriptors,
+    };
+
     return {
         layout,
         theme,
@@ -119,6 +148,7 @@ export function createRenderConfig(selection: BoothSelection): RenderConfig {
         frameColor: selection.frameColor ?? frame.borderColor,
         style,
         overlays,
+        assetManifest,
         outputWidth: layout.outputWidth,
         outputHeight: layout.outputHeight,
     };

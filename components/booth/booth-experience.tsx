@@ -129,6 +129,7 @@ function BoothInnerExperience({
         camera,
         phase,
         setPhase,
+        setActiveStep,
     } = useBoothSession();
 
     const [showRecovery, setShowRecovery] = useState(Boolean(restoredSession));
@@ -182,9 +183,11 @@ function BoothInnerExperience({
     };
 
     const handleRetake = () => {
-        // Retake replaces captured photo blobs ONLY while preserving EditingWorkspace & customization state
         setCapturedPhotos([]);
-        handleStartCapture();
+        updateSelection(defaultBoothSelection);
+        setSelectionComplete(false);
+        setActiveStep("layout");
+        setPhase("setup");
     };
 
     if (showRecovery && restoredSession) {

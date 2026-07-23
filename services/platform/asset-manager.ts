@@ -13,7 +13,8 @@ export interface FramePackage {
     config: {
         borderColor: string;
         borderWidthRatio: number;
-        kind: "none" | "solid" | "template";
+        kind: "none" | "solid" | "template" | "png-overlay";
+        assetUrl?: string;
     };
 }
 
@@ -49,24 +50,18 @@ const framePackages: FramePackage[] = [
         config: { borderColor: "#facc15", borderWidthRatio: 0.022, kind: "solid" },
     },
     {
-        id: "pink-heart",
+        id: "canva-placeholder",
         metadata: {
-            name: "Khung Tim Dễ Thương",
-            category: "Pastel",
-            description: "Khung họa tiết Trái tim hồng Pastel đáng yêu.",
+            name: "Canva PNG",
+            category: "Canva",
+            description: "Khung PNG 4x6 local export từ Canva. Thay placeholder bằng asset đã duyệt.",
         },
-        thumbnailUrl: "bg-pink-100 bg-[url('/frames/pink-heart-pattern.jpg')] bg-cover border border-pink-300",
-        config: { borderColor: "#fce7f3", borderWidthRatio: 0.028, kind: "template" },
-    },
-    {
-        id: "lavender-star",
-        metadata: {
-            name: "Khung Mây Sao Tím",
-            category: "Pastel",
-            description: "Khung họa tiết Ngôi sao lấp lánh tím pastel.",
+        thumbnailUrl: "bg-gradient-to-br from-pink-100 via-white to-amber-100 border border-pink-300",
+        config: {
+            borderColor: "#ffffff",
+            borderWidthRatio: 0,
+            kind: "png-overlay",
         },
-        thumbnailUrl: "bg-purple-100 bg-[url('/frames/lavender-star-pattern.jpg')] bg-cover border border-purple-300",
-        config: { borderColor: "#f3e8ff", borderWidthRatio: 0.028, kind: "template" },
     },
     {
         id: "girly",
@@ -161,8 +156,10 @@ export class AssetManager {
                 name: pkg.metadata.name,
                 description: pkg.metadata.description,
                 borderColor: pkg.config.borderColor,
-                borderWidth: Math.round(pkg.config.borderWidthRatio * 1280),
+                borderWidth: Math.round(pkg.config.borderWidthRatio * 1200),
                 kind: pkg.config.kind,
+                assetUrl: pkg.config.assetUrl,
+                source: pkg.config.kind === "png-overlay" ? "canva" : "bundled",
             };
         }
         const config = frameConfigs.find((f) => f.id === frameId);

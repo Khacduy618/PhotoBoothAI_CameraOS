@@ -1,7 +1,6 @@
 import {
     defaultBoothLayoutId,
     defaultCountdownSeconds,
-    isBoothCountdownSeconds,
     isBoothLayoutId,
 } from "@/config/layout.config";
 import type {
@@ -56,22 +55,13 @@ export const frameConfigs = [
         kind: "solid",
     },
     {
-        id: "pink-heart",
-        name: "Khung Tim Dễ Thương",
-        description: "Khung họa tiết Trái tim hồng Pastel đáng yêu.",
+        id: "canva-placeholder",
+        name: "Canva PNG Placeholder",
+        description: "Slot metadata cho khung Canva PNG 4x6 portrait. Chưa gắn file cho tới khi asset PNG được duyệt.",
         borderColor: "#fce7f3",
-        borderWidth: 36,
-        kind: "template",
-        patternUrl: "/frames/pink-heart-pattern.jpg",
-    },
-    {
-        id: "lavender-star",
-        name: "Khung Mây Sao Tím",
-        description: "Khung họa tiết Ngôi sao lấp lánh tím pastel.",
-        borderColor: "#f3e8ff",
-        borderWidth: 36,
-        kind: "template",
-        patternUrl: "/frames/lavender-star-pattern.jpg",
+        borderWidth: 0,
+        kind: "png-overlay",
+        source: "canva",
     },
     {
         id: "gold",
@@ -161,10 +151,7 @@ export function normalizeBoothSelection(
         layoutId: selection?.layoutId && isBoothLayoutId(selection.layoutId)
             ? selection.layoutId
             : defaultBoothSelection.layoutId,
-        countdownSeconds: selection?.countdownSeconds &&
-            isBoothCountdownSeconds(selection.countdownSeconds)
-            ? selection.countdownSeconds
-            : defaultBoothSelection.countdownSeconds,
+        countdownSeconds: defaultCountdownSeconds,
     };
 }
 
@@ -176,6 +163,6 @@ export function isBoothSelectionComplete(
             frameConfigs.some((frame) => frame.id === selection.frameId) &&
             styleConfigs.some((style) => style.id === selection.styleId) &&
             isBoothLayoutId(selection.layoutId) &&
-            isBoothCountdownSeconds(selection.countdownSeconds),
+            selection.countdownSeconds === defaultCountdownSeconds,
     );
 }

@@ -2,6 +2,11 @@
 
 import React, { createContext, useContext, useState, useCallback } from "react";
 import { CameraProvider, useCameraContext } from "@/components/camera/camera-provider";
+import {
+    defaultBoothLayoutId,
+    defaultCountdownSeconds,
+    resolveBoothLayoutConfig,
+} from "@/config/layout.config";
 import type { CameraController } from "@/hooks/use-camera";
 import type { BoothSelection, CapturedPhoto } from "@/types/theme";
 import type {
@@ -290,7 +295,18 @@ function syncCustomization(
     }
 
     return customization;
-}interface BoothSessionProviderProps {
+}
+
+function normalizeBoothSelection(selection: BoothSelection): BoothSelection {
+    return {
+        ...selection,
+        layoutId: resolveBoothLayoutConfig(selection.layoutId).id,
+        countdownSeconds: defaultCountdownSeconds,
+        customization: syncCustomization(selection.customization),
+    };
+}
+
+interface BoothSessionProviderProps {
     initialSelection: BoothSelection;
     children: React.ReactNode;
 }
@@ -304,23 +320,17 @@ function InnerBoothSessionProvider({
             themeId: "",
             frameId: "none",
             styleId: "none",
-            layoutId: "2x2",
-            countdownSeconds: 3,
+            layoutId: defaultBoothLayoutId,
+            countdownSeconds: defaultCountdownSeconds,
             customization: { stickerItems: [], textLabels: [], drawingStrokes: [], overlays: [] },
         };
-        return {
-            ...initialWithCustom,
-            customization: syncCustomization(initialWithCustom.customization),
-        };
+        return normalizeBoothSelection(initialWithCustom);
     });
 
     const setSelection = useCallback((value: React.SetStateAction<BoothSelection>) => {
         rawSetSelection((prev) => {
             const resolved = typeof value === "function" ? value(prev) : value;
-            return {
-                ...resolved,
-                customization: syncCustomization(resolved.customization),
-            };
+            return normalizeBoothSelection(resolved);
         });
     }, []);
 

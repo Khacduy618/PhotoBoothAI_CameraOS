@@ -3,11 +3,11 @@
 import React from "react";
 import { PreviewCell } from "@/components/booth/preview-cell";
 import { resolveStickerConfig } from "@/config/sticker.config";
-import { getLayoutGeometry } from "@/services/layout/layout-engine";
+import { resolveRenderPlan } from "@/services/render/render-plan.service";
 import type { BoothSelection, CapturedPhoto } from "@/types/theme";
 import type { RenderConfig } from "@/types/render-config";
 import { createRenderConfig } from "@/services/render/render-config.builder";
-import type { OverlayItem, DrawingStrokePoint, DrawingOverlay } from "@/types/customization";
+import type { DrawingStrokePoint, DrawingOverlay } from "@/types/customization";
 
 function getContrastColor(hexColor: string): string {
     if (!hexColor || !hexColor.startsWith("#")) return "#ffffff";
@@ -59,8 +59,20 @@ export function PreviewRenderer({
     if (!config) return null;
 
     const { layout, theme, frame, style, overlays } = config;
-    const geometry = getLayoutGeometry(layout.id);
-    const sheetAspectRatio = geometry.sheetAspectRatio;
+    const cellFrame = {
+        ...frame,
+        id: "none",
+        borderColor: "transparent",
+        borderWidth: 0,
+        kind: "none" as const,
+    };
+    const renderPlan = resolveRenderPlan(config, {
+        width: config.outputWidth,
+        height: config.outputHeight,
+        pixelRatio: 1,
+        type: "preview",
+    });
+    const sheetAspectRatio = `${renderPlan.sheet.width} / ${renderPlan.sheet.height}`;
 
     // Reverse chronological order for captured photos
     const chronological = [...capturedPhotos].reverse();
@@ -72,7 +84,7 @@ export function PreviewRenderer({
         >
             <div
                 ref={sheetRef}
-                className="relative h-full max-w-full rounded-none shadow-2xl flex flex-col p-[2.5%] transition-all duration-300 animate-fade-in touch-none select-none"
+                className="relative h-full max-w-full rounded-none shadow-2xl transition-all duration-300 animate-fade-in touch-none select-none"
                 style={{
                     aspectRatio: sheetAspectRatio,
                     boxSizing: "border-box",
@@ -85,32 +97,36 @@ export function PreviewRenderer({
                 }}
             >
                 <div
-                    className="grid w-full"
-                    style={{
-                        height: `${(1 - geometry.brandingZoneRatio) * 100}%`,
-                        gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`,
-                        gridTemplateRows: `repeat(${layout.rows}, minmax(0, 1fr))`,
-                        gap: "2.5%",
-                    }}
+                    className="absolute inset-0"
                     aria-label={`Layout preview ${layout.name}`}
                 >
-                    {Array.from({ length: layout.shotCount }).map((_, index) => {
+                    {renderPlan.grid.cells.slice(0, layout.shotCount).map((cell, index) => {
                          const hasPhoto = index < chronological.length;
                          const cellPhoto = hasPhoto ? chronological[index] : null;
 
                          return (
-                             <PreviewCell
-                                 key={index}
-                                 index={index}
-                                 stream={stream}
-                                 cameraStatus={cameraStatus}
-                                 photoUrl={cellPhoto ? cellPhoto.outputUrl : null}
-                                 theme={theme}
-                                 frame={frame}
-                                 style={style}
-                                 onRetry={onRetry}
-                                 showDemoFallback={showDemoFallback}
-                             />
+                             <div
+                                 key={cell.id}
+                                 className="absolute"
+                                 style={{
+                                     left: `${(cell.x / renderPlan.sheet.width) * 100}%`,
+                                     top: `${(cell.y / renderPlan.sheet.height) * 100}%`,
+                                     width: `${(cell.width / renderPlan.sheet.width) * 100}%`,
+                                     height: `${(cell.height / renderPlan.sheet.height) * 100}%`,
+                                 }}
+                             >
+                                 <PreviewCell
+                                     index={index}
+                                     stream={stream}
+                                     cameraStatus={cameraStatus}
+                                     photoUrl={cellPhoto ? cellPhoto.outputUrl : null}
+                                     theme={theme}
+                                     frame={cellFrame}
+                                     style={style}
+                                     onRetry={onRetry}
+                                     showDemoFallback={showDemoFallback}
+                                 />
+                             </div>
                          );
                     })}
                 </div>
@@ -118,7 +134,7 @@ export function PreviewRenderer({
                 {/* SVG Drawing Strokes Overlay */}
                 <svg
                     className="absolute inset-0 w-full h-full pointer-events-none"
-                    viewBox="0 0 1000 1500"
+                    viewBox={`0 0 ${renderPlan.sheet.width} ${renderPlan.sheet.height}`}
                     preserveAspectRatio="none"
                     style={{ zIndex: 5 }}
                 >
@@ -127,7 +143,7 @@ export function PreviewRenderer({
                         .map((stroke) => (
                             <path
                                 key={stroke.id}
-                                d={stroke.points!.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * 1000} ${p.y * 1500}`).join(" ")}
+                                d={stroke.points!.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * renderPlan.sheet.width} ${p.y * renderPlan.sheet.height}`).join(" ")}
                                 stroke={stroke.color || "#ffffff"}
                                 strokeWidth={stroke.strokeWidth || 9}
                                 fill="none"
@@ -137,7 +153,7 @@ export function PreviewRenderer({
                         ))}
                     {activeStrokePoints && activeStrokePoints.length >= 2 && (
                         <path
-                            d={activeStrokePoints.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * 1000} ${p.y * 1500}`).join(" ")}
+                            d={activeStrokePoints.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * renderPlan.sheet.width} ${p.y * renderPlan.sheet.height}`).join(" ")}
                             stroke={activePenColor}
                             strokeWidth={activePenWidth}
                             fill="none"
@@ -184,7 +200,7 @@ export function PreviewRenderer({
                             const rotRad = item.rotationRadians ?? 0;
                             
                             // Align styles mapping
-                            let textAlignStyle: React.CSSProperties = {
+                            const textAlignStyle: React.CSSProperties = {
                                 textAlign: item.align || "center",
                             };
 

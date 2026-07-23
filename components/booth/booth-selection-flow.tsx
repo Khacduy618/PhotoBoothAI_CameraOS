@@ -4,30 +4,17 @@ import React, { useState, useContext, useEffect } from "react";
 import { LiveSelectionPreview } from "@/components/booth/live-selection-preview";
 import { SetupStepShell } from "@/components/wizard/setup-step-shell";
 import { BoothSessionContext } from "@/components/booth/booth-session-context";
-import { ThemeSelector } from "@/components/selectors/theme-selector";
-import { FrameSelector } from "@/components/selectors/frame-selector";
-import { StyleSelector } from "@/components/selectors/style-selector";
-import { StickerSelector } from "@/components/selectors/sticker-selector";
-import { TextSelector } from "@/components/selectors/text-selector";
 import {
     boothLayoutConfigs,
     countdownSecondOptions,
     resolveBoothLayoutConfig,
 } from "@/config/layout.config";
 import {
-    resolveStickerConfig,
-    stickerConfigs,
-    textLabelPresetConfigs,
-} from "@/config/sticker.config";
-import {
     defaultBoothSelection,
     isBoothSelectionComplete,
-    resolveFrameConfig,
-    resolveThemeConfig,
-    styleConfigs,
-    themeConfigs,
 } from "@/config/theme.config";
 import { AssetManager } from "@/services/platform/asset-manager";
+import { stickerConfigs } from "@/config/sticker.config";
 import type { CameraController } from "@/hooks/use-camera";
 import type {
     BoothCountdownSeconds,
@@ -47,14 +34,8 @@ interface WizardStepConfig {
 }
 
 const WIZARD_STEPS: WizardStepConfig[] = [
-    { id: "layout",    title: "📸 1. Chọn Layout ảnh",          shortLabel: "Layout" },
-    { id: "countdown", title: "⏱️ 2. Chọn thời gian đếm ngược", shortLabel: "Countdown" },
-    { id: "theme",     title: "🎨 3. Chọn Theme màu nền",       shortLabel: "Theme" },
-    { id: "frame",     title: "🖼️ 4. Chọn Khung ảnh dễ thương", shortLabel: "Frame" },
-    { id: "style",     title: "✨ 5. Chọn Style / Filter ảnh",   shortLabel: "Style" },
-    { id: "sticker",   title: "🥳 6. Chọn Nhãn dán Sticker",    shortLabel: "Sticker" },
-    { id: "text",      title: "✍️ 7. Chọn Nhãn chữ Chúc mừng",  shortLabel: "Text" },
-    { id: "review",    title: "💖 8. Xác nhận & Bắt đầu chụp",  shortLabel: "Review" },
+    { id: "layout", title: "📸 Chọn số ảnh", shortLabel: "Shots" },
+    { id: "review", title: "⏱️ Xác nhận đếm ngược 8 giây", shortLabel: "Ready" },
 ];
 
 // --- Helpers ---
@@ -139,6 +120,9 @@ export function BoothSelectionFlow({
 
     const [localActiveStep, setLocalActiveStep] = useState("layout");
     const activeStep = context?.activeStep || localActiveStep;
+    const safeActiveStep = WIZARD_STEPS.some((step) => step.id === activeStep)
+        ? activeStep
+        : "layout";
     const setActiveStep = context?.setActiveStep || setLocalActiveStep;
     const canContinue = isBoothSelectionComplete(selection);
 
@@ -157,7 +141,7 @@ export function BoothSelectionFlow({
         setCustomTextVal(selectedSetupText?.text || "");
     }, [selectedSetupText?.text]);
 
-    const currentIndex = WIZARD_STEPS.findIndex(s => s.id === activeStep);
+    const currentIndex = WIZARD_STEPS.findIndex(s => s.id === safeActiveStep);
     const safeIndex = currentIndex >= 0 ? currentIndex : 0;
     const hasBack = safeIndex > 0;
     const isLastStep = safeIndex === WIZARD_STEPS.length - 1;
@@ -203,16 +187,11 @@ export function BoothSelectionFlow({
 
     return (
         <>
-            {/* Hidden category buttons for testing-library backward compatibility */}
-            <div className="hidden" aria-hidden="true">
-                <button type="button" onClick={() => setActiveStep("layout")}>📸 Layout</button>
-                <button type="button" onClick={() => setActiveStep("theme")}>🖼️ Khung & Style</button>
-                <button type="button" onClick={() => setActiveStep("sticker")}>✍️ Sticker & Text</button>
-            </div>
+            {/* Simplified attendee flow starts directly at shot selection. */}
 
             <SetupStepShell
                 steps={WIZARD_STEPS}
-                activeStep={activeStep}
+                activeStep={safeActiveStep}
                 onStepChange={setActiveStep}
                 onComplete={onComplete}
                 completeLabel="Tiếp tục vào camera"
@@ -228,7 +207,7 @@ export function BoothSelectionFlow({
                                 <span className="animate-sparkle-shine">✨</span> PhotoBoothAI Studio <span className="animate-sparkle-shine">💖</span>
                             </p>
                             <h1 className="text-lg font-black tracking-tight text-pink-950">
-                                Thiết lập trải nghiệm chụp ảnh Hàn Quốc
+                                Chọn số ảnh, khung có lề vẽ 60px
                             </h1>
                         </div>
                     </div>
@@ -262,7 +241,7 @@ export function BoothSelectionFlow({
             }
         >
             {/* Step: Layout */}
-            <div className={activeStep === "layout" ? "space-y-4" : "hidden"}>
+            <div className={safeActiveStep === "layout" ? "space-y-4" : "hidden"}>
                 <SelectionGroup
                     label="Chọn Layout"
                     value={selection.layoutId}
@@ -271,13 +250,20 @@ export function BoothSelectionFlow({
                         setSelection({
                             ...selection,
                             layoutId: layoutId as BoothSelection["layoutId"],
+                            countdownSeconds: 8,
+                            customization: {
+                                ...selection.customization,
+                                stickerItems: [],
+                                textLabels: [],
+                                overlays: selection.customization.overlays?.filter((item) => item.type === "drawing") ?? [],
+                            },
                         });
                     }}
                 />
             </div>
 
             {/* Step: Countdown */}
-            <div className={activeStep === "countdown" ? "space-y-4" : "hidden"}>
+            <div className={safeActiveStep === "countdown" ? "space-y-4" : "hidden"}>
                 <CountdownSelectionGroup
                     value={selection.countdownSeconds}
                     onChange={(countdownSeconds) => {
@@ -289,179 +275,33 @@ export function BoothSelectionFlow({
                 />
             </div>
 
-            {/* Step: Theme */}
-            <div className={activeStep === "theme" ? "space-y-4" : "hidden"}>
-                <ThemeSelector
-                    value={selection.themeId}
-                    onChange={(themeId) => {
-                        setSelection({
-                            ...selection,
-                            themeId,
-                        });
-                    }}
-                />
-            </div>
-
-            {/* Step: Frame */}
-            <div className={activeStep === "frame" ? "space-y-6" : "hidden"}>
-                <FrameSelector
-                    frameId={selection.frameId}
-                    frameColor={selection.frameColor}
-                    onChangeFrame={(frameId, defaultColor) => {
-                        setSelection({
-                            ...selection,
-                            frameId,
-                            frameColor: defaultColor,
-                        });
-                    }}
-                    onChangeFrameColor={(frameColor) => {
-                        setSelection({
-                            ...selection,
-                            frameColor,
-                        });
-                    }}
-                />
-            </div>
-            <div className={activeStep === "style" ? "space-y-4" : "hidden"}>
-                <StyleSelector
-                    value={selection.styleId}
-                    onChange={(styleId) => {
-                        setSelection({
-                            ...selection,
-                            styleId,
-                        });
-                    }}
-                />
-            </div>
-
-            {/* Step: Sticker */}
-            <div className={activeStep === "sticker" ? "space-y-4" : "hidden"}>
-                <StickerSelector
-                    stickerItems={selection.customization.stickerItems}
-                    onSelectPresetSticker={(stickerId) => {
-                        if (context?.addSticker) {
-                            if (stickerId) {
-                                context.addSticker(stickerId);
-                            }
-                        } else {
-                            setSelection({
-                                ...selection,
-                                customization: replaceSetupSticker(
-                                    selection.customization,
-                                    stickerId,
-                                ),
-                            });
-                        }
-                    }}
-                    onRemoveSticker={(id) => {
-                        if (context?.removeSticker) {
-                            context.removeSticker(id);
-                        } else {
-                            setSelection({
-                                ...selection,
-                                customization: {
-                                    ...selection.customization,
-                                    stickerItems: selection.customization.stickerItems.filter(s => s.id !== id),
-                                },
-                            });
-                        }
-                    }}
-                />
-            </div>
-
-            {/* Step: Text */}
-            <div className={activeStep === "text" ? "space-y-4" : "hidden"}>
-                <TextSelector
-                    textLabels={selection.customization.textLabels}
-                    onSelectPresetText={(text) => {
-                        if (context?.addTextLabel) {
-                            if (text) {
-                                context.addTextLabel(text);
-                            }
-                        } else {
-                            setSelection({
-                                ...selection,
-                                customization: replaceSetupTextLabel(
-                                    selection.customization,
-                                    text,
-                                ),
-                            });
-                        }
-                    }}
-                    onRemoveText={(id) => {
-                        if (context?.removeTextLabel) {
-                            context.removeTextLabel(id);
-                        } else {
-                            setSelection({
-                                ...selection,
-                                customization: {
-                                    ...selection.customization,
-                                    textLabels: selection.customization.textLabels.filter(l => l.id !== id),
-                                },
-                            });
-                        }
-                    }}
-                />
-            </div>
-
-            {/* Step: Review — Concise Summary Panel */}
-            <div className={activeStep === "review" ? "space-y-4" : "hidden"}>
-                <div className="p-4 rounded-2xl bg-white/70 backdrop-blur-md border border-pink-200/60 space-y-2.5 shadow-sm">
-                    <h3 className="font-extrabold text-pink-950 tracking-wide text-xs uppercase border-b border-pink-200/50 pb-2">
-                        TÓM TẮT CẤU HÌNH:
+            {/* Step: Review — fixed 8s countdown summary */}
+            <div className={safeActiveStep === "review" ? "space-y-4" : "hidden"}>
+                <div className="rounded-3xl border border-pink-200/70 bg-white/75 p-5 shadow-sm backdrop-blur-md">
+                    <p className="text-[10px] font-extrabold uppercase tracking-[0.28em] text-pink-600">
+                        Capture plan
+                    </p>
+                    <h3 className="mt-2 text-2xl font-black text-pink-950">
+                        {resolveBoothLayoutConfig(selection.layoutId).shotCount} ảnh · Đếm ngược 8 giây
                     </h3>
-                    <ul className="text-xs space-y-1.5 text-neutral-800">
-                        <li className="flex justify-between border-b border-pink-100 pb-1">
-                            <span className="text-neutral-500 font-medium">Layout:</span>
-                            <span className="text-pink-950 font-bold">{resolveBoothLayoutConfig(selection.layoutId).name}</span>
+                    <ul className="mt-4 space-y-2 text-sm text-neutral-800">
+                        <li className="flex justify-between border-b border-pink-100 pb-2">
+                            <span className="font-medium text-neutral-500">Layout 4x6:</span>
+                            <span className="font-bold text-pink-950">{resolveBoothLayoutConfig(selection.layoutId).name}</span>
                         </li>
-                        <li className="flex justify-between border-b border-pink-100 pb-1">
-                            <span className="text-neutral-500 font-medium">Đếm ngược:</span>
-                            <span className="text-pink-950 font-bold">{selection.countdownSeconds} giây</span>
-                        </li>
-                        <li className="flex justify-between border-b border-pink-100 pb-1">
-                            <span className="text-neutral-500 font-medium">Theme màu:</span>
-                            <span className="text-pink-950 font-bold">{resolveThemeConfig(selection.themeId).name}</span>
-                        </li>
-                        <li className="flex justify-between border-b border-pink-100 pb-1">
-                            <span className="text-neutral-500 font-medium">Khung viền:</span>
-                            <span className="text-pink-950 font-bold">
-                                {resolveFrameConfig(selection.frameId).name} {selection.frameColor ? `(${selection.frameColor})` : ""}
-                            </span>
-                        </li>
-                        <li className="flex justify-between border-b border-pink-100 pb-1">
-                            <span className="text-neutral-500 font-medium">Style ảnh:</span>
-                            <span className="text-pink-950 font-bold">{styleConfigs.find(s => s.id === selection.styleId)?.name ?? "Gốc"}</span>
-                        </li>
-                        <li className="flex justify-between border-b border-pink-100 pb-1">
-                            <span className="text-neutral-500 font-medium">Nhãn dán:</span>
-                            <span className="text-pink-950 font-bold">
-                                {selection.customization.stickerItems.length > 0
-                                    ? `${selection.customization.stickerItems.length} sticker`
-                                    : "Không"}
-                            </span>
-                        </li>
-                        <li className="flex justify-between border-b border-pink-100 pb-1">
-                            <span className="text-neutral-500 font-medium">Nhãn chữ:</span>
-                            <span className="text-pink-950 font-bold truncate max-w-[180px]">
-                                {selection.customization.textLabels.length > 0
-                                    ? `${selection.customization.textLabels.length} nhãn chữ`
-                                    : "Không"}
-                            </span>
+                        <li className="flex justify-between border-b border-pink-100 pb-2">
+                            <span className="font-medium text-neutral-500">Countdown:</span>
+                            <span className="font-bold text-pink-950">8 giây / ảnh</span>
                         </li>
                         <li className="flex justify-between">
-                            <span className="text-neutral-500 font-medium">Vẽ tay (Drawing):</span>
-                            <span className="text-pink-950 font-bold">
-                                {selection.customization.drawingStrokes && selection.customization.drawingStrokes.length > 0
-                                    ? `${selection.customization.drawingStrokes.length} nét vẽ`
-                                    : "Không"}
-                            </span>
+                            <span className="font-medium text-neutral-500">Customize sau capture:</span>
+                            <span className="font-bold text-pink-950">Khung Canva PNG + bút vẽ</span>
                         </li>
                     </ul>
                 </div>
 
-                <p className="text-[11px] font-medium text-pink-900/80 leading-relaxed">
-                    Xem lại toàn bộ cấu hình ở bên trái. Bạn vẫn có thể nhấp chọn, di chuyển hoặc chỉnh sửa sticker/text trực tiếp trên khung preview trước khi bấm <strong>"Tiếp tục vào camera"</strong>.
+                <p className="text-[12px] font-medium leading-relaxed text-pink-900/80">
+                    Nhãn dán và chữ trang trí đã được tắt trong flow mới. Khung sẽ chọn sau khi lưu đủ ảnh gốc, rồi ảnh cuối được render từ derivative đã lưu.
                 </p>
             </div>
         </SetupStepShell>

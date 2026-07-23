@@ -19,8 +19,10 @@ export interface FrameConfig {
     description: string;
     borderColor: string;
     borderWidth: number;
-    kind?: "none" | "solid" | "template";
+    kind?: "none" | "solid" | "template" | "png-overlay";
     patternUrl?: string;
+    assetUrl?: string;
+    source?: "bundled" | "canva";
 }
 
 export interface StickerConfig {

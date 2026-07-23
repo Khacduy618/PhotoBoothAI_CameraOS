@@ -90,7 +90,7 @@ describe("Drawing & Typography Parity Regression Lock", () => {
         const path = document.querySelector("svg path");
         expect(path).toBeTruthy();
         expect(path?.getAttribute("stroke")).toBe("#00ff00");
-        expect(path?.getAttribute("d")).toBe("M 100 150 L 200 300");
+        expect(path?.getAttribute("d")).toBe("M 180 120 L 360 240");
     });
 
     it("renders text overlays with outlined text-shadow styling and no black background pills", () => {
@@ -237,6 +237,7 @@ describe("Drawing & Typography Parity Regression Lock", () => {
                         zIndex: 20
                     }
                 ],
+                assetManifest: { stickerUrls: [], capturedPhotoBlobs: [], fontDescriptors: [] },
                 outputWidth: 1200,
                 outputHeight: 1800
             }

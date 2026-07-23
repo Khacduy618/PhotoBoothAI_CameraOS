@@ -53,7 +53,7 @@ describe("BoothExperience", () => {
         render(<BoothExperience />);
 
         expect(
-            await screen.findByText("Thiết lập trải nghiệm chụp ảnh Hàn Quốc"),
+            await screen.findByText("Chọn số ảnh, khung có lề vẽ 60px"),
         ).toBeTruthy();
         expect(
             screen.queryByText("Camera preview mounted"),
@@ -61,20 +61,14 @@ describe("BoothExperience", () => {
         expect(cameraPreviewMock).not.toHaveBeenCalled();
     });
 
-    it("mounts camera preview with the selected values after setup is complete", async () => {
+    it("mounts camera preview with the selected fixed-8s setup after setup is complete", async () => {
         render(<BoothExperience />);
 
-        await screen.findByText("Thiết lập trải nghiệm chụp ảnh Hàn Quốc");
+        await screen.findByText("Chọn số ảnh, khung có lề vẽ 60px");
 
-        // Navigate to frame & style step
-        const frameTabBtn = screen.getAllByText(/Khung & Style/i).find(el => el.tagName === 'BUTTON');
-        if (frameTabBtn) fireEvent.click(frameTabBtn);
-
-        const partyLabel = screen.getAllByText("Party").find(el => el.closest('label'));
-        if (partyLabel) fireEvent.click(partyLabel);
-
-        fireEvent.click(screen.getByText("Viền vàng"));
-        fireEvent.click(screen.getByText("Warm"));
+        fireEvent.click(screen.getByText("2 ảnh stacked"));
+        fireEvent.click(screen.getByRole("button", { name: "Tiếp tục" }));
+        expect(screen.getByText(/2 ảnh · Đếm ngược 8 giây/i)).toBeTruthy();
 
         fireEvent.click(
             screen.getByRole("button", {
@@ -88,9 +82,10 @@ describe("BoothExperience", () => {
         expect(cameraPreviewMock).toHaveBeenCalledWith(
             expect.objectContaining({
                 selection: expect.objectContaining({
-                    themeId: "party",
-                    frameId: "gold",
-                    styleId: "warm",
+                    layoutId: "stacked-2-4x6-portrait",
+                    countdownSeconds: 8,
+                    frameId: "none",
+                    styleId: "none",
                 }),
                 camera: cameraControllerMock,
                 onBackToSetup: expect.any(Function),
@@ -99,21 +94,13 @@ describe("BoothExperience", () => {
         );
     });
 
-    it("can return from preview to setup without losing the current selection", async () => {
+    it("can return from preview to setup without losing the simplified selection", async () => {
         render(<BoothExperience />);
 
-        await screen.findByText("Thiết lập trải nghiệm chụp ảnh Hàn Quốc");
+        await screen.findByText("Chọn số ảnh, khung có lề vẽ 60px");
 
-        // Navigate to frame & style step
-        const frameTabBtn = screen.getAllByText(/Khung & Style/i).find(el => el.tagName === 'BUTTON');
-        if (frameTabBtn) fireEvent.click(frameTabBtn);
-
-        const partyLabel = screen.getAllByText("Party").find(el => el.closest('label'));
-        if (partyLabel) fireEvent.click(partyLabel);
-
-        fireEvent.click(screen.getByText("Viền vàng"));
-        fireEvent.click(screen.getByText("Warm"));
-
+        fireEvent.click(screen.getByText("2 ảnh stacked"));
+        fireEvent.click(screen.getByRole("button", { name: "Tiếp tục" }));
         fireEvent.click(
             screen.getByRole("button", {
                 name: "Tiếp tục vào camera",
@@ -127,14 +114,12 @@ describe("BoothExperience", () => {
         );
 
         expect(
-            screen.getByText("Thiết lập trải nghiệm chụp ảnh Hàn Quốc"),
+            screen.getByText("Chọn số ảnh, khung có lề vẽ 60px"),
         ).toBeTruthy();
-
-        // Navigate to the relevant steps to verify selections are preserved
-        const frameTabBtn2 = screen.getAllByText(/Khung & Style/i).find(el => el.tagName === 'BUTTON');
-        if (frameTabBtn2) fireEvent.click(frameTabBtn2);
-        expect(screen.getByDisplayValue("party")).toBeTruthy();
-        expect(screen.getByDisplayValue("warm")).toBeTruthy();
+        expect(screen.getByDisplayValue("stacked-2-4x6-portrait")).toBeTruthy();
+        expect(screen.queryByText("Khung & Style")).toBeNull();
+        expect(screen.queryByText("Nhãn Sticker")).toBeNull();
+        expect(screen.queryByText("Thêm Text")).toBeNull();
     });
 
     it("offers active session recovery after reload", async () => {

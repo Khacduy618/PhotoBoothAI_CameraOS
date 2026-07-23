@@ -1,4 +1,13 @@
-export type BoothLayoutId = "2x2" | "1x4-vertical" | "2x3";
+export type BoothLayoutId =
+    | "single-4x6-landscape"
+    | "stacked-2-4x6-portrait"
+    | "grid-2x2-4x6-portrait"
+    | "stacked-4-4x6-portrait"
+    | "grid-2x3-4x6-portrait"
+    | "grid-2x4-4x6-portrait"
+    | "2x2"
+    | "1x4-vertical"
+    | "2x3";
 
 export interface BoothLayoutConfig {
     id: BoothLayoutId;

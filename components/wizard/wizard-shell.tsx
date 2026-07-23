@@ -74,7 +74,7 @@ export function WizardShell({
     };
 
     return (
-        <section className="w-full h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] flex flex-col justify-between  p-5 text-neutral-900 relative">
+        <section className="w-full h-[calc(100vh-3rem)] max-h-[calc(100vh-3rem)] flex flex-col justify-between p-5 text-neutral-900 relative overflow-hidden bg-[radial-gradient(circle_at_18%_12%,rgba(244,114,182,0.28),transparent_32%),radial-gradient(circle_at_86%_18%,rgba(168,85,247,0.24),transparent_30%),linear-gradient(135deg,#fff7ed_0%,#fdf2f8_42%,#eef2ff_100%)]">
             {headerSlot && (
                 <header className="shrink-0 mb-2">
                     {headerSlot}
@@ -84,13 +84,13 @@ export function WizardShell({
             {/* Main grid: preview left, options right */}
             <div className="flex-1 min-h-0 grid lg:grid-cols-[1.35fr_0.65fr] gap-5 py-3 overflow-hidden">
                 {/* Left — Live Preview or Camera */}
-                <div className="flex flex-col items-center justify-center bg-white/40 backdrop-blur-xl rounded-3xl p-4 overflow-hidden border border-white/70 shadow-lg h-full relative group">
+                <div className="flex flex-col items-center justify-center bg-white/45 backdrop-blur-2xl rounded-[2rem] p-4 overflow-hidden border border-white/80 shadow-2xl shadow-pink-200/30 h-full relative group ring-1 ring-pink-100/50">
                     <div className="absolute inset-0 bg-pink-400/10 opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none rounded-3xl blur-3xl" />
                     {previewSlot}
                 </div>
 
                 {/* Right — Options sidebar */}
-                <div className="flex flex-col h-full min-h-0 justify-between bg-white/60 backdrop-blur-xl rounded-3xl p-5 border border-white/80 shadow-xl relative">
+                <div className="flex flex-col h-full min-h-0 justify-between bg-white/68 backdrop-blur-2xl rounded-[2rem] p-5 border border-white/85 shadow-2xl shadow-rose-200/30 relative ring-1 ring-pink-100/60">
                     <div className="flex-1 overflow-y-auto pr-1 space-y-5">
                         {/* Step title */}
                         <h2 className="text-lg font-black tracking-tight text-pink-950 border-b border-pink-200/50 pb-2">
@@ -122,6 +122,7 @@ export function WizardShell({
                         <button
                             type="button"
                             onClick={handleNext}
+                            hidden={isLast}
                             className={`flex-1 rounded-2xl px-4 py-3 font-extrabold bg-gradient-to-r from-pink-500 via-rose-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white active:scale-95 transition-all text-xs md:text-sm shadow-lg shadow-pink-400/40 ${
                                 isLast ? "hidden" : "block"
                             }`}
@@ -133,6 +134,7 @@ export function WizardShell({
                             type="button"
                             onClick={onComplete}
                             disabled={!canContinue}
+                            hidden={!isLast}
                             className={`flex-1 rounded-2xl px-4 py-3 font-extrabold bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white active:scale-95 transition-all text-xs md:text-sm shadow-lg shadow-emerald-400/40 disabled:opacity-50 ${
                                 isLast ? "block" : "hidden"
                             }`}

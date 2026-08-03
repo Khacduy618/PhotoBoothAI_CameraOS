@@ -61,10 +61,10 @@ describe("SessionService", () => {
                 photoIds: [],
                 selection: expect.objectContaining({
                     themeId: "classic",
-                    frameId: "none",
+                    frameId: "white-border",
                     styleId: "none",
-                    layoutId: "2x2",
-                    countdownSeconds: 3,
+                    layoutId: "four-landscape-2x2",
+                    countdownSeconds: 8,
                 }),
             });
         }

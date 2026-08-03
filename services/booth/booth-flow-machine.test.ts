@@ -30,7 +30,7 @@ function selectLayoutFlow(
     return applyEvents(createBoothFlowState(), [
         { type: "START" },
         { type: "SELECT_LAYOUT", layoutId },
-        { type: "SELECT_COUNTDOWN", seconds: 3 },
+        { type: "SELECT_COUNTDOWN", seconds: 8 },
         { type: "SELECT_FRAME" },
         { type: "CAMERA_READY" },
     ]);
@@ -50,14 +50,15 @@ function captureShot(
 }
 
 describe("booth flow machine", () => {
-    it("starts at attract with 2x2 defaults", () => {
+    it("starts at attract with default booth selection defaults", () => {
         const state = createBoothFlowState();
 
         expect(state.value).toBe("attract");
         expect(state.context).toEqual(
             expect.objectContaining({
-                layoutId: "2x2",
+                layoutId: "four-landscape-2x2",
                 totalShots: 4,
+                countdownSeconds: 8,
                 currentShotIndex: 0,
                 savedPhotoIds: [],
                 triggerLocked: false,
@@ -72,9 +73,9 @@ describe("booth flow machine", () => {
         expect(state.value).toBe("preview-ready");
         expect(state.context).toEqual(
             expect.objectContaining({
-                layoutId: "1x4-vertical",
+                layoutId: "four-portrait-1x4",
                 totalShots: 4,
-                countdownSeconds: 3,
+                countdownSeconds: 8,
             }),
         );
     });
@@ -301,7 +302,7 @@ describe("booth flow machine", () => {
         state = reduceBoothFlow(state, { type: "RETAKE_ALL" });
 
         expect(state.value).toBe("preview-ready");
-        expect(state.context.layoutId).toBe("1x4-vertical");
+        expect(state.context.layoutId).toBe("four-portrait-1x4");
         expect(state.context.savedPhotoIds).toEqual([]);
         expect(state.context.currentShotIndex).toBe(0);
     });

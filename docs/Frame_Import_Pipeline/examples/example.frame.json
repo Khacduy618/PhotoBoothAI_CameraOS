@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "id": "canva-party-neon",
+  "name": "Party Neon",
+  "assetType": "png",
+  "assetUrl": "/frames/canva/party-neon.png",
+  "thumbnailUrl": "/frames/canva/party-neon.thumbnail.png",
+  "output": {
+    "width": 1200,
+    "height": 1800,
+    "aspectRatio": "4:6",
+    "orientation": "portrait"
+  },
+  "shotCount": 4,
+  "slots": [
+    {
+      "id": "slot-1",
+      "order": 0,
+      "x": 0.06,
+      "y": 0.16,
+      "width": 0.42,
+      "height": 0.29,
+      "fit": "cover"
+    },
+    {
+      "id": "slot-2",
+      "order": 1,
+      "x": 0.52,
+      "y": 0.16,
+      "width": 0.42,
+      "height": 0.29,
+      "fit": "cover"
+    },
+    {
+      "id": "slot-3",
+      "order": 2,
+      "x": 0.06,
+      "y": 0.48,
+      "width": 0.42,
+      "height": 0.29,
+      "fit": "cover"
+    },
+    {
+      "id": "slot-4",
+      "order": 3,
+      "x": 0.52,
+      "y": 0.48,
+      "width": 0.42,
+      "height": 0.29,
+      "fit": "cover"
+    }
+  ],
+  "importMetadata": {
+    "source": "canva",
+    "maskSource": "alpha",
+    "sourceHash": "sha256-placeholder",
+    "confidence": 0.96,
+    "reviewedByHuman": false,
+    "analyzerVersion": "alpha-slot-analyzer-v1"
+  },
+  "fallback": {
+    "backgroundColor": "#ffffff"
+  },
+  "license": {
+    "type": "canva",
+    "source": "Canva",
+    "usage": "project-bundled",
+    "attributionRequired": false
+  }
+}

@@ -7,7 +7,7 @@ export interface OverlayItem {
     y: number;
     scale: number;
     rotationDegrees: number;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
 }
 
 export class OverlayManager {

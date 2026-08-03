@@ -80,3 +80,56 @@ export function deleteSharePhoto(
 ): void {
     storage.removeItem(getSharePhotoKey(photoId));
 }
+
+export const SHARE_PHOTO_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
+export function cleanupExpiredSharePhotos(
+    storage: SharePhotoStorage & {
+        length?: number;
+        key?: (index: number) => string | null;
+        keys?: () => string[];
+    },
+    maxAgeMs: number = SHARE_PHOTO_TTL_MS,
+    now: () => number = Date.now,
+): void {
+    const keysToRemove: string[] = [];
+
+    if (typeof storage.length === "number" && typeof storage.key === "function") {
+        for (let i = 0; i < storage.length; i += 1) {
+            const key = storage.key(i);
+            if (key && key.startsWith(SHARE_PHOTO_PREFIX)) {
+                keysToRemove.push(key);
+            }
+        }
+    }
+
+    const currentTime = now();
+
+    keysToRemove.forEach((key) => {
+        try {
+            const raw = storage.getItem(key);
+            if (!raw) return;
+            const parsed: unknown = JSON.parse(raw);
+            if (isSharePhotoRecord(parsed)) {
+                const age = currentTime - new Date(parsed.savedAt).getTime();
+                if (age >= maxAgeMs) {
+                    storage.removeItem(key);
+                }
+            } else {
+                storage.removeItem(key);
+            }
+        } catch {
+            storage.removeItem(key);
+        }
+    });
+}
+
+export function scheduleSharePhotoCleanup(
+    storage: SharePhotoStorage,
+    photoId: string,
+    delayMs: number = SHARE_PHOTO_TTL_MS,
+): NodeJS.Timeout | number {
+    return setTimeout(() => {
+        deleteSharePhoto(storage, photoId);
+    }, delayMs);
+}

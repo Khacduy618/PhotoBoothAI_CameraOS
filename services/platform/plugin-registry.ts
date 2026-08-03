@@ -1,13 +1,13 @@
 import React from "react";
 
-export interface WizardStep {
+export interface WizardStep<TSession = unknown> {
     id: string;
     title: string;
-    component: React.ComponentType<any>;
-    validate?: (session: any) => boolean;
+    component: React.ComponentType<Record<string, unknown>>;
+    validate?: (session: TSession) => boolean;
     canSkip?: boolean;
-    isVisible?: (session: any) => boolean;
-    next?: (session: any) => string;
+    isVisible?: (session: TSession) => boolean;
+    next?: (session: TSession) => string;
 }
 
 export class PluginRegistry {
@@ -24,7 +24,7 @@ export class PluginRegistry {
         return [...this.steps];
     }
 
-    static getVisibleSteps(session: any): WizardStep[] {
+    static getVisibleSteps(session: unknown): WizardStep[] {
         return this.steps.filter(step => !step.isVisible || step.isVisible(session));
     }
 

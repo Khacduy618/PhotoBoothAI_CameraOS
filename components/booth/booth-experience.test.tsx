@@ -4,7 +4,7 @@ import {
     render,
     screen,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const cameraControllerMock = vi.hoisted(() => ({
     adapter: {
@@ -13,7 +13,7 @@ const cameraControllerMock = vi.hoisted(() => ({
         getStream: vi.fn(() => null),
         capture: vi.fn(),
     },
-    stream: null,
+    stream: null as MediaStream | null,
     devices: [],
     error: null,
     status: "idle",
@@ -39,20 +39,53 @@ vi.mock("@/components/camera/camera-preview", () => ({
     CameraPreview: cameraPreviewMock,
 }));
 
-import { BoothExperience } from "@/components/booth/booth-experience";
+import {
+    BoothExperience,
+    resolvePostCaptureDefaultFramePatch,
+} from "@/components/booth/booth-experience";
+import { defaultBoothSelection } from "@/config/theme.config";
+
+beforeEach(() => {
+    cameraControllerMock.stream = {} as MediaStream;
+    cameraControllerMock.status = "ready";
+    cameraControllerMock.error = null;
+});
 
 afterEach(() => {
     cleanup();
     window.localStorage.clear();
+    window.sessionStorage.clear();
     cameraPreviewMock.mockClear();
 });
 
 describe("BoothExperience", () => {
+    it("applies a default compatible frame only after enough photos are captured", () => {
+        expect(resolvePostCaptureDefaultFramePatch(defaultBoothSelection, 0)).toBeNull();
+        expect(resolvePostCaptureDefaultFramePatch(defaultBoothSelection, 4)).toBeNull();
+        expect(resolvePostCaptureDefaultFramePatch({
+            ...defaultBoothSelection,
+            frameId: "gold",
+        }, 4)).toBeNull();
+    });
+
+    it("waits for the selected shot count before applying the default review frame", () => {
+        const twoShotSelection = {
+            ...defaultBoothSelection,
+            layoutId: "two-landscape-1x2" as const,
+        };
+
+        expect(resolvePostCaptureDefaultFramePatch(twoShotSelection, 1)).toBeNull();
+        expect(resolvePostCaptureDefaultFramePatch(twoShotSelection, 2)).toEqual({
+            frameId: "white-border-2shot-landscape",
+            frameColor: "#ffffff",
+        });
+    });
+
     it("does not mount camera preview before setup is complete", async () => {
         render(<BoothExperience />);
 
         expect(
-            await screen.findByText("Xem trước layout trước khi chụp"),
+            await screen.findByText("Chọn số ảnh, chọn frame sau khi chụp"),
         ).toBeTruthy();
         expect(
             screen.queryByText("Camera preview mounted"),
@@ -60,30 +93,15 @@ describe("BoothExperience", () => {
         expect(cameraPreviewMock).not.toHaveBeenCalled();
     });
 
-    it("mounts camera preview with the selected values after setup is complete", async () => {
+    it("mounts camera preview with the selected fixed-8s setup after setup is complete", async () => {
         render(<BoothExperience />);
 
-        await screen.findByText("Xem trước layout trước khi chụp");
+        await screen.findByText("Chọn số ảnh, chọn frame sau khi chụp");
 
-        // Navigate to theme step and select Party
-        const themeStepBtn = screen.getAllByText(/Theme/i).find(el => el.tagName === 'BUTTON');
-        if (themeStepBtn) fireEvent.click(themeStepBtn);
-        const partyLabel = screen.getAllByText("Party").find(el => el.closest('label'));
-        if (partyLabel) fireEvent.click(partyLabel);
-
-        // Navigate to frame step and select Viền vàng
-        const frameStepBtn = screen.getAllByText(/Frame/i).find(el => el.tagName === 'BUTTON');
-        if (frameStepBtn) fireEvent.click(frameStepBtn);
-        fireEvent.click(screen.getByText("Viền vàng"));
-
-        // Navigate to style step and select Warm
-        const styleStepBtn = screen.getAllByText(/Style/i).find(el => el.tagName === 'BUTTON');
-        if (styleStepBtn) fireEvent.click(styleStepBtn);
-        fireEvent.click(screen.getByText("Warm"));
-
+        fireEvent.click(screen.getByRole("button", { name: "2 shots" }));
         fireEvent.click(
             screen.getByRole("button", {
-                name: "Tiếp tục vào camera",
+                name: "Bắt đầu chụp",
             }),
         );
 
@@ -93,9 +111,10 @@ describe("BoothExperience", () => {
         expect(cameraPreviewMock).toHaveBeenCalledWith(
             expect.objectContaining({
                 selection: expect.objectContaining({
-                    themeId: "party",
-                    frameId: "gold",
-                    styleId: "warm",
+                    layoutId: "two-landscape-1x2",
+                    countdownSeconds: 8,
+                    frameId: "white-border",
+                    styleId: "none",
                 }),
                 camera: cameraControllerMock,
                 onBackToSetup: expect.any(Function),
@@ -104,30 +123,15 @@ describe("BoothExperience", () => {
         );
     });
 
-    it("can return from preview to setup without losing the current selection", async () => {
+    it("can return from preview to setup without losing the simplified selection", async () => {
         render(<BoothExperience />);
 
-        await screen.findByText("Xem trước layout trước khi chụp");
+        await screen.findByText("Chọn số ảnh, chọn frame sau khi chụp");
 
-        // Navigate to theme step and select Party
-        const themeStepBtn = screen.getAllByText(/Theme/i).find(el => el.tagName === 'BUTTON');
-        if (themeStepBtn) fireEvent.click(themeStepBtn);
-        const partyLabel = screen.getAllByText("Party").find(el => el.closest('label'));
-        if (partyLabel) fireEvent.click(partyLabel);
-
-        // Navigate to frame step and select Viền vàng
-        const frameStepBtn = screen.getAllByText(/Frame/i).find(el => el.tagName === 'BUTTON');
-        if (frameStepBtn) fireEvent.click(frameStepBtn);
-        fireEvent.click(screen.getByText("Viền vàng"));
-
-        // Navigate to style step and select Warm
-        const styleStepBtn = screen.getAllByText(/Style/i).find(el => el.tagName === 'BUTTON');
-        if (styleStepBtn) fireEvent.click(styleStepBtn);
-        fireEvent.click(screen.getByText("Warm"));
-
+        fireEvent.click(screen.getByRole("button", { name: "2 shots" }));
         fireEvent.click(
             screen.getByRole("button", {
-                name: "Tiếp tục vào camera",
+                name: "Bắt đầu chụp",
             }),
         );
 
@@ -138,21 +142,12 @@ describe("BoothExperience", () => {
         );
 
         expect(
-            screen.getByText("Xem trước layout trước khi chụp"),
+            screen.getByText("Chọn số ảnh, chọn frame sau khi chụp"),
         ).toBeTruthy();
-
-        // Navigate to the relevant steps to verify selections are preserved
-        const themeBtn2 = screen.getAllByText(/Theme/i).find(el => el.tagName === 'BUTTON');
-        if (themeBtn2) fireEvent.click(themeBtn2);
-        expect(screen.getByDisplayValue("party")).toBeTruthy();
-
-        const frameBtn2 = screen.getAllByText(/Frame/i).find(el => el.tagName === 'BUTTON');
-        if (frameBtn2) fireEvent.click(frameBtn2);
-        // Frame uses visual cards now, check it's still selected
-
-        const styleBtn2 = screen.getAllByText(/Style/i).find(el => el.tagName === 'BUTTON');
-        if (styleBtn2) fireEvent.click(styleBtn2);
-        expect(screen.getByDisplayValue("warm")).toBeTruthy();
+        expect(screen.getByRole("button", { name: "2 shots" }).getAttribute("aria-pressed")).toBe("true");
+        expect(screen.queryByText("Frame viền")).toBeNull();
+        expect(screen.queryByText("Nhãn Sticker")).toBeNull();
+        expect(screen.queryByText("Thêm Text")).toBeNull();
     });
 
     it("offers active session recovery after reload", async () => {

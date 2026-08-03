@@ -4,11 +4,30 @@ import {
     composePhotoLayout,
     type CanvasLike,
 } from "@/services/render/layout-compositor.service";
+import { createRenderConfig } from "@/services/render/render-config.builder";
+import { RenderAssetLoaderService } from "@/services/render/render-asset-loader.service";
+import type { BoothSelection, FrameConfig } from "@/types/theme";
 
 function createSource(photoId: string): { photoId: string; blob: Blob } {
     return {
         photoId,
         blob: new Blob([photoId], { type: "image/jpeg" }),
+    };
+}
+
+function createRenderSelection(layoutId: BoothSelection["layoutId"] = "2x2"): BoothSelection {
+    return {
+        themeId: "classic",
+        frameId: "white-border",
+        styleId: "none",
+        layoutId,
+        countdownSeconds: 8,
+        customization: {
+            stickerItems: [],
+            textLabels: [],
+            drawingStrokes: [],
+            overlays: [],
+        },
     };
 }
 
@@ -68,8 +87,8 @@ describe("layout compositor", () => {
             createCanvas: () => canvas,
         });
 
-        expect(result.width).toBe(1600);
-        expect(result.height).toBe(2275);
+        expect(result.width).toBe(1200);
+        expect(result.height).toBe(1800);
         expect(result.sourcePhotoIds).toEqual([
             "photo-1",
             "photo-2",
@@ -79,6 +98,91 @@ describe("layout compositor", () => {
         expect(result.cells).toHaveLength(4);
         expect(drawImage).toHaveBeenCalledTimes(4);
         expect(result.blob.type).toBe("image/jpeg");
+    });
+
+    it("uses preserved source blobs when renderConfig is provided without captured photo assets", async () => {
+        const { canvas, drawImage } = createCanvasStub();
+        const renderConfig = createRenderConfig(createRenderSelection("2x2"));
+
+        await composePhotoLayout({
+            renderConfig,
+            sources: [
+                createSource("photo-1"),
+                createSource("photo-2"),
+                createSource("photo-3"),
+                createSource("photo-4"),
+            ],
+            createImage: async () => createImage(),
+            createCanvas: () => canvas,
+        });
+
+        expect(drawImage).toHaveBeenCalledTimes(4);
+    });
+
+    it("returns compositor cell metadata from compatible frame slots", async () => {
+        const { canvas } = createCanvasStub();
+        const renderConfig = createRenderConfig(createRenderSelection("four-portrait-2x2"));
+        const metadataFrame: FrameConfig = {
+            ...renderConfig.frame,
+            id: "metadata-frame",
+            kind: "png-overlay",
+            source: "canva",
+            shotCount: 4,
+            photoViewportOrientation: "portrait",
+            layoutFamily: "2x2",
+            outputWidth: 1200,
+            outputHeight: 1800,
+            slots: [
+                { id: "frame-slot-1", index: 0, x: 101, y: 121, width: 301, height: 321 },
+                { id: "frame-slot-2", index: 1, x: 501, y: 121, width: 301, height: 321 },
+                { id: "frame-slot-3", index: 2, x: 101, y: 521, width: 301, height: 321 },
+                { id: "frame-slot-4", index: 3, x: 501, y: 521, width: 301, height: 321 },
+            ],
+        };
+
+        const result = await composePhotoLayout({
+            renderConfig: {
+                ...renderConfig,
+                frame: metadataFrame,
+                photoSlots: undefined,
+            },
+            sources: [
+                createSource("photo-1"),
+                createSource("photo-2"),
+                createSource("photo-3"),
+                createSource("photo-4"),
+            ],
+            createImage: async () => createImage(),
+            createCanvas: () => canvas,
+        });
+
+        expect(result.cells[0]).toEqual({
+            photoId: "photo-1",
+            x: 101,
+            y: 121,
+            width: 301,
+            height: 321,
+        });
+    });
+
+    it("fails instead of exporting placeholders when default photo loading fails", async () => {
+        const renderConfig = createRenderConfig(createRenderSelection("2x2"));
+        const loadPhotoSpy = vi
+            .spyOn(RenderAssetLoaderService, "loadPhoto")
+            .mockRejectedValueOnce(new Error("photo decode failed"));
+
+        await expect(composePhotoLayout({
+            renderConfig,
+            sources: [
+                createSource("photo-1"),
+                createSource("photo-2"),
+                createSource("photo-3"),
+                createSource("photo-4"),
+            ],
+            createCanvas: () => createCanvasStub().canvas,
+        })).rejects.toThrow("photo decode failed");
+
+        loadPhotoSpy.mockRestore();
     });
 
     it("clears canvas pixels after successful composition", async () => {
@@ -99,35 +203,31 @@ describe("layout compositor", () => {
         expect(clearRect).toHaveBeenCalledWith(
             0,
             0,
-            1600,
-            2275,
+            1200,
+            1800,
         );
     });
 
-    it("composes 1x4 vertical output at the approved dimensions", async () => {
+    it("composes 2-shot stacked output at the approved 4x6 dimensions", async () => {
         const { canvas, drawImage } = createCanvasStub();
         const result = await composePhotoLayout({
-            layoutId: "1x4-vertical",
+            layoutId: "stacked-2-4x6-portrait",
             sources: [
                 createSource("photo-1"),
                 createSource("photo-2"),
-                createSource("photo-3"),
-                createSource("photo-4"),
             ],
             createImage: async () => createImage(),
             createCanvas: () => canvas,
         });
 
         expect(result.width).toBe(1200);
-        expect(result.height).toBe(3798);
-        expect(result.cells).toHaveLength(4);
+        expect(result.height).toBe(1800);
+        expect(result.cells).toHaveLength(2);
         expect(result.cells.map((cell) => cell.x)).toEqual([
             result.cells[0].x,
             result.cells[0].x,
-            result.cells[0].x,
-            result.cells[0].x,
         ]);
-        expect(drawImage).toHaveBeenCalledTimes(4);
+        expect(drawImage).toHaveBeenCalledTimes(2);
     });
 
     it("composes 2x3 output from six preserved originals", async () => {
@@ -146,8 +246,8 @@ describe("layout compositor", () => {
             createCanvas: () => canvas,
         });
 
-        expect(result.width).toBe(1600);
-        expect(result.height).toBe(3319);
+        expect(result.width).toBe(1200);
+        expect(result.height).toBe(1800);
         expect(result.sourcePhotoIds).toEqual([
             "photo-1",
             "photo-2",
@@ -238,8 +338,8 @@ describe("layout compositor", () => {
         expect(clearRect).toHaveBeenCalledWith(
             0,
             0,
-            1600,
-            2275,
+            1200,
+            1800,
         );
     });
 
@@ -270,8 +370,8 @@ describe("layout compositor", () => {
         expect(clearRect).toHaveBeenCalledWith(
             0,
             0,
-            1600,
-            2275,
+            1200,
+            1800,
         );
     });
 });

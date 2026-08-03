@@ -2,7 +2,14 @@
 
 Status: PM requested for Sprint 1 execution readiness on 2026-07-19.
 
-> Historical note: this Sprint 1 plan records the original MVP delivery plan approved on 2026-07-19. Current post-PR1-PR6 Phase 1 execution follows `docs/product/PHASE_1_DELIVERY_PLAN.md`. Do not use this document alone to sequence PR7+ work.
+> Historical note: this Sprint 1 plan records the original MVP delivery plan approved on 2026-07-19. Current Phase 1 execution follows `docs/product/PHASE_1_DELIVERY_PLAN.md` and detailed task files in `docs/product/phase-tasks/`. Do not use this document alone to sequence current Phase 1 work.
+>
+> Current execution note:
+>
+> - This Sprint 1 plan is historical traceability.
+> - Current Phase 1 execution is governed by `docs/product/PHASE_1_DELIVERY_PLAN.md`.
+> - Detailed execution checklists live in `docs/product/phase-tasks/`.
+> - Story equivalence and acceptance criteria remain mapped through `docs/product/PRODUCT_BACKLOG.md`, `docs/product/ROLE_TASK_MATRIX.md` and `docs/testing/ACCEPTANCE_EVIDENCE_MATRIX.md`.
 
 ## Sprint 1 goal
 

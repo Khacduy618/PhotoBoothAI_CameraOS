@@ -4,6 +4,7 @@ import {
     deleteSharePhoto,
     getSharePhoto,
     saveSharePhoto,
+    cleanupExpiredSharePhotos,
     type SharePhotoStorage,
 } from "@/services/sharing/share-photo-storage.service";
 
@@ -74,5 +75,43 @@ describe("share photo storage", () => {
         deleteSharePhoto(storage, "photo-2");
 
         expect(getSharePhoto(storage, "photo-2")).toBeNull();
+    });
+
+    it("cleans up expired share photos older than 2 minutes", () => {
+        const storage = new MemoryStorage();
+        const now = new Date("2026-07-21T12:00:00.000Z").getTime();
+
+        const freshRecord = {
+            photoId: "fresh",
+            dataUrl: "data:image/jpeg;base64,fresh",
+            mimeType: "image/jpeg",
+            savedAt: new Date(now - 30 * 1000).toISOString(), // 30s ago
+        };
+
+        const expiredRecord = {
+            photoId: "expired",
+            dataUrl: "data:image/jpeg;base64,expired",
+            mimeType: "image/jpeg",
+            savedAt: new Date(now - 130 * 1000).toISOString(), // 130s ago (> 2m)
+        };
+
+        saveSharePhoto(storage, freshRecord);
+        saveSharePhoto(storage, expiredRecord);
+
+        // MemoryStorage helper for cleanup scan
+        const storageWithKeyScan = Object.assign(storage, {
+            get length() {
+                return 2;
+            },
+            key(index: number) {
+                const keys = ["photoboothai:share-photo:v1:fresh", "photoboothai:share-photo:v1:expired"];
+                return keys[index] ?? null;
+            },
+        });
+
+        cleanupExpiredSharePhotos(storageWithKeyScan, 120_000, () => now);
+
+        expect(getSharePhoto(storage, "fresh")).toEqual(freshRecord);
+        expect(getSharePhoto(storage, "expired")).toBeNull();
     });
 });

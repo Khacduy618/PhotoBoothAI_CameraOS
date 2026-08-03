@@ -2,15 +2,12 @@
 
 import React from "react";
 import { PreviewCell } from "@/components/booth/preview-cell";
-import { resolveBoothLayoutConfig } from "@/config/layout.config";
 import { resolveStickerConfig } from "@/config/sticker.config";
-import {
-    resolveFrameConfig,
-    resolveStyleConfig,
-    resolveThemeConfig,
-} from "@/config/theme.config";
-import { getLayoutGeometry } from "@/services/layout/layout-engine";
+import { resolveRenderPlan } from "@/services/render/render-plan.service";
 import type { BoothSelection, CapturedPhoto } from "@/types/theme";
+import type { RenderConfig } from "@/types/render-config";
+import { createRenderConfig } from "@/services/render/render-config.builder";
+import type { DrawingStrokePoint, DrawingOverlay } from "@/types/customization";
 
 function getContrastColor(hexColor: string): string {
     if (!hexColor || !hexColor.startsWith("#")) return "#ffffff";
@@ -24,362 +21,285 @@ function getContrastColor(hexColor: string): string {
 }
 
 interface PreviewRendererProps {
-    selection: BoothSelection;
-    stream: MediaStream | null;
-    cameraStatus: string;
+    selection?: BoothSelection;
+    renderConfig?: RenderConfig;
+    stream?: MediaStream | null;
+    cameraStatus?: string;
     capturedPhotos?: CapturedPhoto[];
     showMetadata?: boolean;
+    showDemoFallback?: boolean;
     onSelectionChange?: (selection: BoothSelection) => void;
     onRetry?: () => void;
+    className?: string;
+    sheetRef?: React.Ref<HTMLDivElement>;
+    activeStrokePoints?: readonly DrawingStrokePoint[] | null;
+    activePenColor?: string;
+    activePenWidth?: number;
+    children?: React.ReactNode;
 }
 
 export function PreviewRenderer({
     selection,
-    stream,
-    cameraStatus,
+    renderConfig,
+    stream = null,
+    cameraStatus = "ready",
     capturedPhotos = [],
     showMetadata = true,
+    showDemoFallback = false,
     onSelectionChange,
     onRetry,
+    className = "",
+    sheetRef,
+    activeStrokePoints = null,
+    activePenColor = "#ffffff",
+    activePenWidth = 9,
+    children,
 }: PreviewRendererProps) {
-    const layout = resolveBoothLayoutConfig(selection.layoutId);
-    const theme = resolveThemeConfig(selection.themeId);
-    const resolvedFrame = resolveFrameConfig(selection.frameId);
-    const frame = selection.frameColor && selection.frameId !== "none"
-        ? { ...resolvedFrame, borderColor: selection.frameColor }
-        : resolvedFrame;
-    const style = resolveStyleConfig(selection.styleId);
-    const geometry = getLayoutGeometry(selection.layoutId);
+    const config = renderConfig || (selection ? createRenderConfig(selection) : null);
+    if (!config) return null;
 
-    // Derive aspect ratio dynamically from the layout engine
-    const sheetAspectRatio = geometry.sheetAspectRatio;
+    const { layout, theme, frame, style, overlays } = config;
+    const cellFrame = {
+        ...frame,
+        id: "none",
+        borderColor: "transparent",
+        borderWidth: 0,
+        kind: "none" as const,
+    };
+    const renderPlan = resolveRenderPlan(config, {
+        width: config.outputWidth,
+        height: config.outputHeight,
+        pixelRatio: 1,
+        type: "preview",
+    });
+    const sheetAspectRatio = `${renderPlan.sheet.width} / ${renderPlan.sheet.height}`;
 
     // Reverse chronological order for captured photos
     const chronological = [...capturedPhotos].reverse();
 
-    const selectionRef = React.useRef(selection);
-    React.useEffect(() => {
-        selectionRef.current = selection;
-    }, [selection]);
-
-    const handleDragStart = (
-        e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>,
-        itemId: string,
-        type: "sticker" | "text",
-    ) => {
-        if (!onSelectionChange) return;
-        e.preventDefault();
-
-        const sheetEl = e.currentTarget.parentElement;
-        if (!sheetEl) return;
-
-        const rect = sheetEl.getBoundingClientRect();
-        const isTouch = "touches" in e;
-
-        // For pinch-to-zoom + rotation on touch
-        let prevTouchDist: number | null = null;
-        let prevTouchAngle: number | null = null;
-        let initialScale = 1;
-        let initialRotation = 0;
-
-        // Get initial scale/rotation from current item
-        const currentSel = selectionRef.current;
-        if (type === "sticker") {
-            const item = currentSel.customization.stickerItems.find((s) => s.id === itemId);
-            if (item) { initialScale = item.scale; initialRotation = item.rotationDegrees; }
-        } else {
-            const item = currentSel.customization.textLabels.find((l) => l.id === itemId);
-            if (item) { initialRotation = item.rotationDegrees; }
-        }
-
-        const getTouchDistAngle = (touches: ArrayLike<{ clientX: number; clientY: number }>) => {
-            if (touches.length < 2) return null;
-            const dx = touches[1].clientX - touches[0].clientX;
-            const dy = touches[1].clientY - touches[0].clientY;
-            return { dist: Math.hypot(dx, dy), angle: Math.atan2(dy, dx) * (180 / Math.PI) };
-        };
-
-        if (isTouch && (e as React.TouchEvent).touches.length >= 2) {
-            const da = getTouchDistAngle((e as React.TouchEvent).touches);
-            if (da) { prevTouchDist = da.dist; prevTouchAngle = da.angle; }
-        }
-
-        const handleDragMove = (moveEvent: MouseEvent | TouchEvent) => {
-            const moveIsTouch = "touches" in moveEvent;
-            const touches = moveIsTouch ? (moveEvent as TouchEvent).touches : null;
-
-            // Multi-touch: pinch scale + rotation
-            if (touches && touches.length >= 2) {
-                moveEvent.preventDefault();
-                const da = getTouchDistAngle(touches);
-                if (da && prevTouchDist !== null && prevTouchAngle !== null) {
-                    const scaleRatio = da.dist / prevTouchDist;
-                    const angleDelta = da.angle - prevTouchAngle;
-
-                    const sel = selectionRef.current;
-                    const customization = { ...sel.customization };
-
-                    if (type === "sticker") {
-                        customization.stickerItems = customization.stickerItems.map((item) =>
-                            item.id === itemId
-                                ? {
-                                    ...item,
-                                    scale: Math.max(0.3, Math.min(4, initialScale * scaleRatio)),
-                                    rotationDegrees: Math.round(initialRotation + angleDelta),
-                                }
-                                : item,
-                        );
-                    } else {
-                        customization.textLabels = customization.textLabels.map((item) =>
-                            item.id === itemId
-                                ? {
-                                    ...item,
-                                    rotationDegrees: Math.round(initialRotation + angleDelta),
-                                }
-                                : item,
-                        );
-                    }
-
-                    onSelectionChange({ ...sel, customization });
-                }
-                return;
-            }
-
-            // Single touch/mouse: drag position
-            const currentX = moveIsTouch
-                ? (moveEvent as TouchEvent).touches[0].clientX
-                : (moveEvent as MouseEvent).clientX;
-            const currentY = moveIsTouch
-                ? (moveEvent as TouchEvent).touches[0].clientY
-                : (moveEvent as MouseEvent).clientY;
-
-            const x = Math.max(0.02, Math.min(0.98, (currentX - rect.left) / rect.width));
-            const y = Math.max(0.02, Math.min(0.98, (currentY - rect.top) / rect.height));
-
-            const currentSelection = selectionRef.current;
-            const customization = { ...currentSelection.customization };
-            if (type === "sticker") {
-                customization.stickerItems = customization.stickerItems.map((item) =>
-                    item.id === itemId ? { ...item, x, y } : item,
-                );
-            } else {
-                customization.textLabels = customization.textLabels.map((item) =>
-                    item.id === itemId ? { ...item, x, y } : item,
-                );
-            }
-
-            onSelectionChange({
-                ...currentSelection,
-                customization,
-            });
-        };
-
-        const handleDragEnd = () => {
-            window.removeEventListener("mousemove", handleDragMove);
-            window.removeEventListener("mouseup", handleDragEnd);
-            window.removeEventListener("touchmove", handleDragMove);
-            window.removeEventListener("touchend", handleDragEnd);
-        };
-
-        window.addEventListener("mousemove", handleDragMove);
-        window.addEventListener("mouseup", handleDragEnd);
-        window.addEventListener("touchmove", handleDragMove, { passive: false });
-        window.addEventListener("touchend", handleDragEnd);
-    };
-
-    // Wheel gesture: scroll = scale, shift+scroll = rotate
-    const handleWheelGesture = (
-        e: React.WheelEvent<HTMLDivElement>,
-        itemId: string,
-        type: "sticker" | "text",
-    ) => {
-        if (!onSelectionChange) return;
-        e.preventDefault();
-        e.stopPropagation();
-
-        const currentSelection = selectionRef.current;
-        const customization = { ...currentSelection.customization };
-
-        if (e.shiftKey) {
-            // Rotate
-            const rotDelta = e.deltaY > 0 ? 5 : -5;
-            if (type === "sticker") {
-                customization.stickerItems = customization.stickerItems.map((item) =>
-                    item.id === itemId
-                        ? { ...item, rotationDegrees: item.rotationDegrees + rotDelta }
-                        : item,
-                );
-            } else {
-                customization.textLabels = customization.textLabels.map((item) =>
-                    item.id === itemId
-                        ? { ...item, rotationDegrees: item.rotationDegrees + rotDelta }
-                        : item,
-                );
-            }
-        } else {
-            // Scale
-            const scaleDelta = e.deltaY > 0 ? -0.1 : 0.1;
-            if (type === "sticker") {
-                customization.stickerItems = customization.stickerItems.map((item) =>
-                    item.id === itemId
-                        ? { ...item, scale: Math.max(0.3, Math.min(4, item.scale + scaleDelta)) }
-                        : item,
-                );
-            } else {
-                // For text, scale the fontSize
-                customization.textLabels = customization.textLabels.map((item) =>
-                    item.id === itemId
-                        ? { ...item, fontSize: Math.max(16, Math.min(120, item.fontSize + (e.deltaY > 0 ? -4 : 4))) }
-                        : item,
-                );
-            }
-        }
-
-        onSelectionChange({ ...currentSelection, customization });
-    };
-
     return (
         <section
-            className="w-full flex-1 flex items-center justify-center overflow-hidden min-h-0"
+            className={`relative w-full h-full flex items-center justify-center overflow-hidden ${className}`}
             aria-label="Preview renderer"
         >
             <div
-                className="relative h-full max-w-full rounded-none shadow-2xl flex flex-col p-[2.5%] transition-all duration-300 animate-fade-in"
+                ref={sheetRef}
+                className="relative h-full max-w-full rounded-none shadow-2xl transition-all duration-300 animate-fade-in touch-none select-none"
                 style={{
                     aspectRatio: sheetAspectRatio,
                     boxSizing: "border-box",
                     maxHeight: "100%",
                     backgroundColor: frame.id !== "none" ? frame.borderColor : theme.backgroundColor,
+                    backgroundImage: frame.patternUrl ? `url(${frame.patternUrl})` : undefined,
+                    backgroundSize: "cover",
+                    backgroundPosition: "center",
                     containerType: "inline-size",
                 }}
             >
                 <div
-                    className="grid w-full"
-                    style={{
-                        height: `${(1 - geometry.brandingZoneRatio) * 100}%`,
-                        gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`,
-                        gridTemplateRows: `repeat(${layout.rows}, minmax(0, 1fr))`,
-                        gap: "2.5%",
-                    }}
+                    className="absolute inset-0"
                     aria-label={`Layout preview ${layout.name}`}
                 >
-                    {Array.from({ length: layout.shotCount }).map((_, index) => {
+                    {renderPlan.grid.cells.slice(0, layout.shotCount).map((cell, index) => {
                          const hasPhoto = index < chronological.length;
                          const cellPhoto = hasPhoto ? chronological[index] : null;
- 
+
+                         const resolvedPhotoUrl = cellPhoto
+                             ? cellPhoto.outputUrl || cellPhoto.originalUrl
+                             : null;
+
                          return (
-                             <PreviewCell
-                                 key={index}
-                                 index={index}
-                                 stream={stream}
-                                 cameraStatus={cameraStatus}
-                                 photoUrl={cellPhoto ? cellPhoto.outputUrl : null}
-                                 theme={theme}
-                                 frame={frame}
-                                 style={style}
-                                 onRetry={onRetry}
-                             />
+                             <div
+                                 key={cell.id}
+                                 className="absolute"
+                                 style={{
+                                     left: `${(cell.x / renderPlan.sheet.width) * 100}%`,
+                                     top: `${(cell.y / renderPlan.sheet.height) * 100}%`,
+                                     width: `${(cell.width / renderPlan.sheet.width) * 100}%`,
+                                     height: `${(cell.height / renderPlan.sheet.height) * 100}%`,
+                                 }}
+                             >
+                                 <PreviewCell
+                                     index={index}
+                                     stream={stream}
+                                     cameraStatus={cameraStatus}
+                                     photoUrl={resolvedPhotoUrl}
+                                     theme={theme}
+                                     frame={cellFrame}
+                                     style={style}
+                                     onRetry={onRetry}
+                                     showDemoFallback={showDemoFallback}
+                                 />
+                             </div>
                          );
                     })}
                 </div>
- 
-                {/* Sticker overlays */}
-                {selection.customization.stickerItems.map((item) => {
-                    const sticker = resolveStickerConfig(item.stickerId);
-                    return (
-                        <div
-                            key={item.id}
-                            className={`absolute drop-shadow-[0_2px_8px_rgba(0,0,0,0.5)] select-none ${
-                                onSelectionChange
-                                    ? "cursor-move hover:scale-110 active:scale-125 transition-transform touch-none"
-                                    : "pointer-events-none"
-                            }`}
-                            style={{
-                                left: `${item.x * 100}%`,
-                                top: `${item.y * 100}%`,
-                                fontSize: `${7.5 * item.scale}cqw`,
-                                transform: `translate(-50%, -50%) rotate(${item.rotationDegrees}deg)`,
-                            }}
-                            onMouseDown={(e) => handleDragStart(e, item.id, "sticker")}
-                            onTouchStart={(e) => handleDragStart(e, item.id, "sticker")}
-                            onWheel={(e) => handleWheelGesture(e, item.id, "sticker")}
-                            aria-label={`Sticker preview ${sticker.name}`}
-                            title="Scroll: scale · Shift+Scroll: rotate"
-                        >
-                            {sticker.emoji}
-                        </div>
-                    );
-                })}
 
-                {/* Text overlays */}
-                {selection.customization.textLabels.map((label) => {
-                    const isBranding = label.id === "setup-text-preset";
-                    if (isBranding) {
-                        const frameBg = frame.id !== "none" ? frame.borderColor : theme.backgroundColor;
-                        const textColor = getContrastColor(frameBg);
-                        return (
-                            <div
-                                key={label.id}
-                                className={`absolute w-full text-center font-black tracking-widest uppercase transition-all duration-300 select-none drop-shadow-sm ${
-                                    onSelectionChange ? "cursor-move touch-none" : "pointer-events-none"
-                                }`}
-                                style={{
-                                    left: "50%",
-                                    top: `${label.y * 100}%`,
-                                    color: textColor,
-                                    fontSize: `${label.fontSize ? label.fontSize / 12 : 3.5}cqw`,
-                                    transform: `translate(-50%, -50%) rotate(${label.rotationDegrees}deg)`,
-                                    fontFamily: selection.themeId === "party" ? "Georgia, serif" : "system-ui, sans-serif",
-                                }}
-                                onMouseDown={(e) => handleDragStart(e, label.id, "text")}
-                                onTouchStart={(e) => handleDragStart(e, label.id, "text")}
-                                onWheel={(e) => handleWheelGesture(e, label.id, "text")}
-                                title="Scroll: size · Shift+Scroll: rotate"
-                            >
-                                {label.text}
-                            </div>
-                        );
-                    }
-                    return (
-                        <div
-                            key={label.id}
-                            className={`absolute max-w-[80%] whitespace-nowrap rounded-full bg-black/60 backdrop-blur px-[3cqw] py-[1cqw] text-center font-black uppercase tracking-wide text-white shadow-2xl select-none ${
-                                onSelectionChange ? "cursor-move touch-none" : "pointer-events-none"
-                            }`}
-                            style={{
-                                left: `${label.x * 100}%`,
-                                top: `${label.y * 100}%`,
-                                color: label.color,
-                                fontSize: `${label.fontSize / 12}cqw`,
-                                transform: `translate(-50%, -50%) rotate(${label.rotationDegrees}deg)`,
-                            }}
-                            onMouseDown={(e) => handleDragStart(e, label.id, "text")}
-                            onTouchStart={(e) => handleDragStart(e, label.id, "text")}
-                            onWheel={(e) => handleWheelGesture(e, label.id, "text")}
-                            title="Scroll: size · Shift+Scroll: rotate"
-                        >
-                            {label.text}
-                        </div>
-                    );
-                })}
+                {/* Frame Overlay Layer - Always lays ON TOP of all photo viewports */}
+                {frame.assetUrl ? (
+                    <img
+                        src={frame.assetUrl}
+                        alt={frame.name}
+                        className="absolute inset-0 w-full h-full object-fill pointer-events-none select-none z-10"
+                    />
+                ) : frame.borderWidth > 0 && frame.borderColor !== "transparent" ? (
+                    <div
+                        className="absolute inset-0 pointer-events-none select-none z-10 border-solid"
+                        style={{
+                            borderColor: frame.borderColor,
+                            borderWidth: `${(frame.borderWidth / renderPlan.sheet.width) * 100}cqw`,
+                        }}
+                    />
+                ) : null}
 
-                {/* Visual metadata overlay */}
-                {/* {showMetadata && (
-                    <div className="absolute top-4 left-4 max-w-[70%] rounded-xl bg-black/80 backdrop-blur border border-white/10 p-3 text-left text-[11px] text-white pointer-events-none select-none shadow-md leading-relaxed">
-                        <div className="font-bold text-emerald-300 mb-0.5">
-                            Realtime setup preview
-                        </div>
-                        <div className="text-neutral-300">
-                            Layout: {layout.name} · {layout.shotCount} ảnh · Countdown: {selection.countdownSeconds}s
-                        </div>
-                        <div className="text-neutral-300">
-                            Theme: {theme.name} · Khung: {frame.name} · Style: {style.name}
-                        </div>
-                        <div className="text-neutral-400 uppercase tracking-wider text-[9px] mt-0.5">
-                            Camera: {cameraStatus.toUpperCase()}
-                        </div>
-                    </div>
-                )} */}
+                {/* SVG Drawing Strokes Overlay */}
+                <svg
+                    className="absolute inset-0 w-full h-full pointer-events-none"
+                    viewBox={`0 0 ${renderPlan.sheet.width} ${renderPlan.sheet.height}`}
+                    preserveAspectRatio="none"
+                    style={{ zIndex: 5 }}
+                >
+                    {overlays
+                        .filter((o): o is DrawingOverlay => o.type === "drawing" && Boolean(o.points && o.points.length >= 2))
+                        .map((stroke) => (
+                            <path
+                                key={stroke.id}
+                                d={stroke.points!.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * renderPlan.sheet.width} ${p.y * renderPlan.sheet.height}`).join(" ")}
+                                stroke={stroke.color || "#ffffff"}
+                                strokeWidth={stroke.strokeWidth || 9}
+                                fill="none"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            />
+                        ))}
+                    {activeStrokePoints && activeStrokePoints.length >= 2 && (
+                        <path
+                            d={activeStrokePoints.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x * renderPlan.sheet.width} ${p.y * renderPlan.sheet.height}`).join(" ")}
+                            stroke={activePenColor}
+                            strokeWidth={activePenWidth}
+                            fill="none"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                        />
+                    )}
+                </svg>
+
+                {/* Unified Overlays */}
+                {overlays
+                    .filter((o) => o.type !== "drawing")
+                    .map((item) => {
+                        if (item.type === "sticker") {
+                            const sticker = resolveStickerConfig(item.content);
+                            const stickerScale = item.scale ?? 1;
+                            const sizeCqw = ((item.baseWidth * stickerScale) / 1000) * 100;
+                            const rotRad = item.rotationRadians ?? 0;
+                            const flipX = item.flipX ? -1 : 1;
+                            const flipY = item.flipY ? -1 : 1;
+
+                            return (
+                                <div
+                                    key={item.id}
+                                    className="absolute drop-shadow-[0_2px_8px_rgba(0,0,0,0.5)] select-none pointer-events-none"
+                                    style={{
+                                        left: `${item.x * 100}%`,
+                                        top: `${item.y * 100}%`,
+                                        fontSize: `${sizeCqw}cqw`,
+                                        lineHeight: 1,
+                                        opacity: item.opacity ?? 1,
+                                        transform: `translate(-50%, -50%) rotate(${rotRad}rad) scale(${flipX}, ${flipY})`,
+                                        zIndex: item.zIndex,
+                                    }}
+                                    aria-label={`Sticker preview ${sticker.name}`}
+                                >
+                                    {sticker.emoji}
+                                </div>
+                            );
+                        } else if (item.type === "text") {
+                            const isBranding = item.id === "setup-text-preset";
+                            const textScale = item.scale ?? 1;
+                            const sizeCqw = (((item.fontSize || 48) * textScale) / 1000) * 100;
+                            const rotRad = item.rotationRadians ?? 0;
+                            
+                            // Align styles mapping
+                            const textAlignStyle: React.CSSProperties = {
+                                textAlign: item.align || "center",
+                            };
+
+                            const letterSpacingCqw = (((item.letterSpacing || 0) * textScale) / 1000) * 100;
+
+                            const fontMap: Record<string, string> = {
+                                "sans-serif": 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                                "serif": 'Georgia, "Times New Roman", serif',
+                                "cursive": '"Brush Script MT", "Snell Roundhand", cursive',
+                                "monospace": 'Monaco, "Courier New", monospace',
+                            };
+                            const fontStack = fontMap[item.fontFamily || "sans-serif"] || item.fontFamily || "system-ui, sans-serif";
+
+                            // Outlines & Shadows Presets implementation
+                            let textShadow = "";
+                            const outlineColor = item.outlineColor || "#000000";
+                            const outlineWidth = item.outlineWidth !== undefined ? item.outlineWidth : 2;
+                            if (outlineWidth > 0) {
+                                textShadow = `0 0 4px rgba(0,0,0,0.8), -1px -1px 0 ${outlineColor}, 1px -1px 0 ${outlineColor}, -1px 1px 0 ${outlineColor}, 1px 1px 0 ${outlineColor}`;
+                            }
+
+                            if (item.shadowPreset === "soft") {
+                                textShadow = (textShadow ? textShadow + ", " : "") + "0 4px 8px rgba(0,0,0,0.3)";
+                            } else if (item.shadowPreset === "hard") {
+                                textShadow = (textShadow ? textShadow + ", " : "") + "4px 4px 0px rgba(0,0,0,0.8)";
+                            } else if (item.shadowPreset === "neon") {
+                                textShadow = (textShadow ? textShadow + ", " : "") + `0 0 5px #fff, 0 0 10px ${item.color || "#ffffff"}, 0 0 20px ${item.color || "#ffffff"}`;
+                            } else if (!textShadow) {
+                                textShadow = "0 2px 4px rgba(0,0,0,0.5)";
+                            }
+
+                            if (isBranding) {
+                                const frameBg = frame.id !== "none" ? frame.borderColor : theme.backgroundColor;
+                                const textColor = getContrastColor(frameBg);
+                                return (
+                                    <div
+                                        key={item.id}
+                                        className="absolute w-full text-center font-black tracking-widest uppercase transition-all duration-300 select-none pointer-events-none"
+                                        style={{
+                                            left: "50%",
+                                            top: `${item.y * 100}%`,
+                                            color: textColor,
+                                            fontSize: `${sizeCqw}cqw`,
+                                            transform: `translate(-50%, -50%) rotate(${rotRad}rad)`,
+                                            fontFamily: theme.id === "party" ? "Georgia, serif" : "system-ui, sans-serif",
+                                            opacity: item.opacity ?? 1,
+                                            zIndex: item.zIndex,
+                                        }}
+                                    >
+                                        {item.content}
+                                    </div>
+                                );
+                            }
+
+                            return (
+                                <div
+                                    key={item.id}
+                                    className="absolute max-w-[95%] whitespace-nowrap font-black uppercase select-none pointer-events-none"
+                                    style={{
+                                        left: `${item.x * 100}%`,
+                                        top: `${item.y * 100}%`,
+                                        color: item.color || "#ffffff",
+                                        fontSize: `${sizeCqw}cqw`,
+                                        fontFamily: fontStack,
+                                        letterSpacing: `${letterSpacingCqw}cqw`,
+                                        transform: `translate(-50%, -50%) rotate(${rotRad}rad)`,
+                                        textShadow,
+                                        opacity: item.opacity ?? 1,
+                                        zIndex: item.zIndex,
+                                        ...textAlignStyle,
+                                    }}
+                                >
+                                    {item.content}
+                                </div>
+                            );
+                        }
+                        return null;
+                    })}
 
                 {/* Style preview badge */}
                 {style.mode !== "none" && (
@@ -387,6 +307,7 @@ export function PreviewRenderer({
                         Style preview: {style.name}
                     </div>
                 )}
+                {children}
             </div>
         </section>
     );

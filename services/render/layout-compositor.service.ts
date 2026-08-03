@@ -1,7 +1,13 @@
 import { resolveBoothLayoutConfig } from "@/config/layout.config";
-import { getLayoutGeometry } from "@/services/layout/layout-engine";
-import { createImageFromBlob } from "@/services/render/render-photo-output";
 import type { BoothLayoutConfig } from "@/types/customization";
+import type { RenderConfig } from "@/types/render-config";
+import type { RenderSurface } from "@/types/render-config";
+import { resolveLayoutGeometry } from "./layout-geometry.service";
+import { TextLayoutEngine } from "./text-layout.service";
+import { RenderAssetLoaderService } from "./render-asset-loader.service";
+import { CanvasRenderer } from "./canvas-renderer.service";
+import { resolveRenderPlan } from "./render-plan.service";
+import { resolvePhotoSlots } from "./photo-slot-resolver.service";
 
 export interface LayoutCompositorSource {
     photoId: string;
@@ -36,181 +42,140 @@ export interface CanvasLike {
     ): void;
 }
 
+interface PartialPhotoLoadError extends Error {
+    partialPhotos?: Map<string, HTMLImageElement>;
+}
+
 export interface ComposeLayoutOptions {
-    layoutId: string;
     sources: readonly LayoutCompositorSource[];
     createImage?: (blob: Blob) => Promise<HTMLImageElement>;
     createCanvas?: () => CanvasLike;
+    renderConfig?: RenderConfig;
+    layoutId?: string;
     borderColor?: string;
+    patternUrl?: string;
+    textLabel?: string;
+    textColor?: string;
 }
 
-function defaultCreateCanvas(): CanvasLike {
-    return document.createElement("canvas");
-}
+export async function composePhotoLayout(
+    options: ComposeLayoutOptions,
+): Promise<ComposeLayoutResult> {
+    const { sources, renderConfig, layoutId = "2x2", createCanvas } = options;
+    const resolvedLayout = renderConfig
+        ? renderConfig.layout
+        : resolveBoothLayoutConfig(layoutId);
 
-function assertSourceCount(
-    layout: BoothLayoutConfig,
-    sources: readonly LayoutCompositorSource[],
-): void {
-    if (sources.length !== layout.shotCount) {
+    if (sources.length !== resolvedLayout.shotCount) {
         throw new Error(
-            `Layout ${layout.name} cần ${layout.shotCount} ảnh, hiện có ${sources.length} ảnh.`,
+            `Layout ${resolvedLayout.name} cần ${resolvedLayout.shotCount} ảnh, hiện có ${sources.length} ảnh.`,
         );
     }
-}
 
-function clearCanvasPixels(
-    canvas: CanvasLike,
-    context: CanvasRenderingContext2D,
-): void {
-    context.clearRect(0, 0, canvas.width, canvas.height);
-}
-
-function drawImageCover(
-    context: CanvasRenderingContext2D,
-    image: HTMLImageElement,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-): void {
-    const sourceWidth = image.naturalWidth || image.width;
-    const sourceHeight = image.naturalHeight || image.height;
-
-    if (sourceWidth <= 0 || sourceHeight <= 0) {
-        throw new Error("Ảnh nguồn không có kích thước hợp lệ.");
-    }
-
-    const scale = Math.max(
-        width / sourceWidth,
-        height / sourceHeight,
-    );
-    const scaledWidth = sourceWidth * scale;
-    const scaledHeight = sourceHeight * scale;
-    const sourceX = Math.max(
-        0,
-        (scaledWidth - width) / 2 / scale,
-    );
-    const sourceY = Math.max(
-        0,
-        (scaledHeight - height) / 2 / scale,
-    );
-    const croppedSourceWidth = Math.min(
-        sourceWidth,
-        width / scale,
-    );
-    const croppedSourceHeight = Math.min(
-        sourceHeight,
-        height / scale,
-    );
-
-    context.drawImage(
-        image,
-        sourceX,
-        sourceY,
-        croppedSourceWidth,
-        croppedSourceHeight,
-        x,
-        y,
-        width,
-        height,
-    );
-}
-
-export async function composePhotoLayout({
-    layoutId,
-    sources,
-    createImage = createImageFromBlob,
-    createCanvas = defaultCreateCanvas,
-    borderColor,
-}: ComposeLayoutOptions): Promise<ComposeLayoutResult> {
-    const layout = resolveBoothLayoutConfig(layoutId);
-    assertSourceCount(layout, sources);
-
-    const canvas = createCanvas();
-    canvas.width = layout.outputWidth;
-    canvas.height = layout.outputHeight;
-
-    const context = canvas.getContext("2d");
-
-    if (!context) {
-        throw new Error("Không thể tạo canvas ghép layout.");
-    }
-
-    const cells: LayoutCompositorCell[] = [];
-
-    try {
-        context.fillStyle = borderColor || "#ffffff";
-        context.fillRect(0, 0, canvas.width, canvas.height);
-
-        const gap = Math.round(
-            Math.min(canvas.width, canvas.height) * 0.025,
-        );
-        const geometry = getLayoutGeometry(layout.id);
-        const cellWidth =
-            (canvas.width - gap * (layout.columns + 1)) /
-            layout.columns;
-        const gridHeight = canvas.height * (1 - geometry.brandingZoneRatio);
-        const cellHeight =
-            (gridHeight - gap * (layout.rows + 1)) /
-            layout.rows;
-
-        for (let index = 0; index < sources.length; index += 1) {
-            const source = sources[index];
-            const image = await createImage(source.blob);
-            const column = index % layout.columns;
-            const row = Math.floor(index / layout.columns);
-            const x = Math.round(gap + column * (cellWidth + gap));
-            const y = Math.round(gap + row * (cellHeight + gap));
-            const width = Math.round(cellWidth);
-            const height = Math.round(cellHeight);
-
-            drawImageCover(
-                context,
-                image,
-                x,
-                y,
-                width,
-                height,
-            );
-
-            cells.push({
-                photoId: source.photoId,
-                x,
-                y,
-                width,
-                height,
-            });
+    const sourceBlobs = sources.map((source) => source.blob);
+    const config: RenderConfig = renderConfig
+        ? {
+            ...renderConfig,
+            assetManifest: {
+                ...renderConfig.assetManifest,
+                capturedPhotoBlobs: sourceBlobs,
+            },
         }
-
-        const blob = await new Promise<Blob>((resolve, reject) => {
-            canvas.toBlob(
-                (outputBlob) => {
-                    if (!outputBlob) {
-                        reject(
-                            new Error(
-                                "Không thể tạo ảnh layout output.",
-                            ),
-                        );
-                        return;
-                    }
-
-                    resolve(outputBlob);
-                },
-                "image/jpeg",
-                0.94,
-            );
-        });
-
-        return {
-            blob,
-            layoutId: layout.id,
-            width: canvas.width,
-            height: canvas.height,
-            sourcePhotoIds: sources.map((source) => source.photoId),
-            cells,
+        : {
+            layout: resolvedLayout,
+            theme: { id: "classic", name: "Classic", description: "", backgroundColor: "#ffffff", textColor: "#000000", accentColor: "#0000ff" },
+            frame: { id: "none", name: "None", description: "", borderColor: options.borderColor || "transparent", borderWidth: 0, kind: "none" },
+            style: { id: "none", name: "None", description: "", mode: "none" },
+            overlays: [],
+            assetManifest: { stickerUrls: [], capturedPhotoBlobs: sourceBlobs, fontDescriptors: [] },
+            outputWidth: resolvedLayout.outputWidth,
+            outputHeight: resolvedLayout.outputHeight,
         };
-    } finally {
-        clearCanvasPixels(canvas, context);
+
+    const canvas = createCanvas ? createCanvas() : undefined;
+    if (canvas) {
+        canvas.width = config.outputWidth;
+        canvas.height = config.outputHeight;
     }
+
+    const resolvedPhotoSlots = resolvePhotoSlots({
+        layout: config.layout,
+        frame: config.frame,
+    });
+    const configWithResolvedSlots: RenderConfig = {
+        ...config,
+        photoSlots: resolvedPhotoSlots,
+    };
+
+    const geometry = resolveLayoutGeometry(configWithResolvedSlots.layout, configWithResolvedSlots.frame);
+    let preparedAssets;
+    try {
+        preparedAssets = await RenderAssetLoaderService.loadAssets(config.assetManifest, { createImage: options.createImage });
+    } catch (err) {
+        if (canvas) {
+            const ctx = canvas.getContext("2d");
+            if (ctx) {
+                const partialMap = err instanceof Error
+                    ? (err as PartialPhotoLoadError).partialPhotos
+                    : undefined;
+                if (partialMap && ctx.drawImage) {
+                    partialMap.forEach((img) => {
+                        ctx.drawImage(img, 0, 0);
+                    });
+                }
+                if (ctx.clearRect) ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+        throw err;
+    }
+    const textLayouts = TextLayoutEngine.prepareTextLayouts(configWithResolvedSlots.overlays);
+
+    const surface: RenderSurface = {
+        width: config.outputWidth,
+        height: config.outputHeight,
+        pixelRatio: 1,
+        type: "export",
+    };
+
+    let blob: Blob;
+    try {
+        const renderResult = await CanvasRenderer.render({
+            sources: Array.from(sources),
+            renderConfig: configWithResolvedSlots,
+            geometry,
+            assets: preparedAssets,
+            textLayouts,
+            surface,
+            createCanvas: canvas ? (() => canvas as unknown as HTMLCanvasElement) : undefined,
+        });
+        blob = renderResult.blob;
+        if (canvas) {
+            const ctx = canvas.getContext("2d");
+            if (ctx && ctx.clearRect) ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+    } catch (err) {
+        if (canvas) {
+            const ctx = canvas.getContext("2d");
+            if (ctx && ctx.clearRect) ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        throw err;
+    }
+
+    const resolvedPlan = resolveRenderPlan(configWithResolvedSlots, surface);
+    const cells: LayoutCompositorCell[] = resolvedPlan.grid.cells.slice(0, configWithResolvedSlots.layout.shotCount).map((slot, idx) => ({
+        photoId: sources[idx] ? sources[idx].photoId : `photo-${idx}`,
+        x: slot.x,
+        y: slot.y,
+        width: slot.width,
+        height: slot.height,
+    }));
+
+    return {
+        blob,
+        layoutId: config.layout.id,
+        width: config.outputWidth,
+        height: config.outputHeight,
+        sourcePhotoIds: sources.map((s) => s.photoId),
+        cells,
+    };
 }

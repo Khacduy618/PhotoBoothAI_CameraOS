@@ -1,11 +1,40 @@
 # PhotoBoothAI Phase 1 Delivery Plan
 
-Status: Current execution source of truth after PR1-PR6 baseline merges.
-Date: 2026-07-20.
+Status: Current Phase 1 execution source of truth after PR1-PR6 baseline merges and Phase 1 planning reset.
+Date: 2026-07-20. Updated: 2026-08-03.
 
 ## Purpose
 
-This document defines the current Phase 1 delivery track for PhotoBoothAI after the original Sprint 1 plan and the merged Phase 1 PR1-PR6 work. Use this file to sequence PR7+ work. Keep `docs/product/SPRINT_1_DELIVERY_PLAN.md` as historical traceability for the original Sprint 1 scope.
+This document defines the current Phase 1 delivery track for PhotoBoothAI after the original Sprint 1 plan and the merged Phase 1 PR1-PR6 work. Use this file to sequence Phase 1 task execution. Keep `docs/product/SPRINT_1_DELIVERY_PLAN.md` as historical traceability for the original Sprint 1 scope.
+
+## Phase 1 execution authority
+
+This file is the current Phase 1 execution source of truth.
+
+Source hierarchy:
+
+1. PM-approved scope and current user instruction
+2. `docs/product/PHASE_1_DELIVERY_PLAN.md`
+3. `docs/product/phase-tasks/*.md`
+4. `docs/product/ROLE_TASK_MATRIX.md`
+5. `docs/testing/ACCEPTANCE_EVIDENCE_MATRIX.md`
+6. `docs/product/PRODUCT_BACKLOG.md`
+7. `docs/product/SPRINT_1_DELIVERY_PLAN.md` for historical traceability only
+
+`SPRINT_1_DELIVERY_PLAN.md` remains historical and must not be used alone to sequence current Phase 1 work.
+
+## Phase 1 reset definition
+
+“Restart Phase 1” means:
+
+- revalidate existing PR1–PR6 baseline,
+- preserve merged work unless evidence shows acceptance gaps,
+- create task-file execution breakdown,
+- rework only failed or incomplete acceptance gaps,
+- keep media-safety invariants,
+- keep hardware evidence honest.
+
+It does not mean deleting or rewriting completed implementation without QA/Verifier evidence and PM approval.
 
 ## Phase 1 product goal
 
@@ -43,7 +72,22 @@ Open booth
 
 ## Relationship to legacy Sprint 1
 
-The legacy Sprint 1 plan remains preserved for traceability. It should not be used alone to sequence PR7+ work. Current execution follows this Phase 1 plan plus the product backlog and evidence matrix updates.
+The legacy Sprint 1 plan remains preserved for traceability. It should not be used alone to sequence current Phase 1 work. Current execution follows this Phase 1 plan, the Phase 1 task files, the product backlog and the evidence matrix updates.
+
+## Phase 1 task-file execution order
+
+Required path:
+
+1. `docs/product/phase-tasks/PHASE_1_TASK_00_BASELINE_REVALIDATION.md`
+2. `docs/product/phase-tasks/PHASE_1_TASK_01_SETUP_READINESS.md`
+3. `docs/product/phase-tasks/PHASE_1_TASK_02_REALTIME_SETUP_PREVIEW.md`
+4. `docs/product/phase-tasks/PHASE_1_TASK_03_CAPTURE_COMPOSE_CUSTOMIZE_REGRESSION.md`
+5. `docs/product/phase-tasks/PHASE_1_TASK_04_MANUAL_BROWSER_AND_OFFLINE_EVIDENCE.md`
+6. `docs/product/phase-tasks/PHASE_1_TASK_05_HARDWARE_LABELING_AND_RELEASE_REPORT.md`
+
+Optional / PM-gated:
+
+7. `docs/product/phase-tasks/PHASE_1_TASK_06_ASSET_SYSTEM_INVESTIGATION_ONLY.md`
 
 ## Already merged Phase 1 baseline
 
@@ -56,9 +100,11 @@ The legacy Sprint 1 plan remains preserved for traceability. It should not be us
 | PR5 | Merged | Composed layout result preview | Software evidence in merged PR history; browser/runtime PARTIAL unless manually tested |
 | PR6 | Merged | Output customizer sticker/text/canvas/download | QA PASS, Reviewer PASS, Verifier PARTIAL due missing manual browser/touch evidence |
 
-## Active Phase 1 PR7+ sequencing
+## Active Phase 1 task sequencing
 
-### PR7: Realtime setup preview UX
+The PR7+ grouping remains useful historical delivery shorthand, but current execution must follow the task files above. PR1–PR6 are revalidated through Task 00 before new implementation continues.
+
+### PR7 / Task 02: Realtime setup preview UX
 
 Goal: make the setup page visually reflect user selections immediately before capture.
 
@@ -124,6 +170,8 @@ Theme, frame and sticker packs are allowed as investigation first. Production im
 
 ## Explicit Phase 1 exclusions
 
+- Canon EDSDK native implementation
+- native Camera Worker
 - printing integration
 - print queue
 - printer hardware validation
@@ -159,7 +207,7 @@ Candidate libraries:
 | `polotno` | Design editor framework | Custom license | Avoid for Phase 1 |
 | `@pqina/pintura` | Commercial image editor | Commercial | Avoid unless product buys SDK |
 
-## Acceptance gates for every PR7+ change
+## Acceptance gates for every Phase 1 task or PR change
 
 1. Scope maps to explicit PB IDs.
 2. Exclusions are listed.

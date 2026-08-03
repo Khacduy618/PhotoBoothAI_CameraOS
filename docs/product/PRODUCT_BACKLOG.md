@@ -579,6 +579,24 @@ PR1-PR6 are the merged Phase 1 baseline. PR7+ work must map to the Phase 1 backl
 - Evidence tasks still required: PB-129 Phase 1 manual browser smoke, PB-130 offline/no-cloud verification, PB-131 hardware evidence labeling and PB-132 final Phase 1 release report.
 - Theme/frame/sticker asset libraries are investigation-only until PM and Architect approve implementation.
 
+### Phase 1 task-file execution mapping
+
+Current Phase 1 execution is broken down into task files under `docs/product/phase-tasks/`.
+
+The task files are execution checklists and evidence gates. They do not replace backlog acceptance criteria.
+
+| Task file | Backlog IDs | Purpose |
+|---|---|---|
+| `PHASE_1_TASK_00_BASELINE_REVALIDATION.md` | PB-101 to PB-107, PB-116 to PB-128 | Revalidate merged baseline and identify gaps |
+| `PHASE_1_TASK_01_SETUP_READINESS.md` | PB-108 | Setup/readiness and camera fallback |
+| `PHASE_1_TASK_02_REALTIME_SETUP_PREVIEW.md` | PB-109 to PB-115 | Realtime layout/countdown/theme/frame/style/sticker/text preview |
+| `PHASE_1_TASK_03_CAPTURE_COMPOSE_CUSTOMIZE_REGRESSION.md` | PB-120 to PB-128 | Capture, preserve originals, compose, customize, download regression |
+| `PHASE_1_TASK_04_MANUAL_BROWSER_AND_OFFLINE_EVIDENCE.md` | PB-129, PB-130 | Manual browser smoke and offline/no-cloud verification |
+| `PHASE_1_TASK_05_HARDWARE_LABELING_AND_RELEASE_REPORT.md` | PB-131, PB-132 | Hardware evidence labeling and final Phase 1 report |
+| `PHASE_1_TASK_06_ASSET_SYSTEM_INVESTIGATION_ONLY.md` | PB-133 to PB-136 | Optional/gated asset investigation and future asset system |
+
+PR1–PR6 merged baseline must not be automatically reimplemented. Rework is required only when Task 00 or later QA/Verifier evidence identifies a failed or incomplete acceptance criterion.
+
 ### Phase 1 backlog mapping
 
 #### E1 — Project baseline and delivery gates

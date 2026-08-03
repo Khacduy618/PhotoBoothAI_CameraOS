@@ -86,6 +86,20 @@ Use this section for current post-PR1-PR6 Phase 1 execution. The Sprint 1 matrix
 | PB-135 Curated local sticker pack | Frontend | BA, PM, Reviewer | Local sticker assets only after approval | Visual and local/offline behavior | License, bundle size, no cloud fetch | Asset/license/manual evidence |
 | PB-136 Curated local frame/theme pack | Frontend | BA, Architect, PM | Local frame/theme pack only after approval | Visual preview and fallback | Final renderer consistency, asset safety | Config/manual/render evidence |
 
+## Phase 1 task-file ownership
+
+Use this section for the Phase 1 planning reset and task-file execution. The story ownership above remains valid; task ownership groups related stories into larger implementation/evidence slices.
+
+| Task file | Primary owner | Supporting roles | Reviewer focus | Verifier evidence |
+|---|---|---|---|---|
+| `PHASE_1_TASK_00_BASELINE_REVALIDATION.md` | QA | Backend, Frontend, Verifier, PM | Preserve merged evidence, no unnecessary rewrite | PASS/PARTIAL/FAIL by PB |
+| `PHASE_1_TASK_01_SETUP_READINESS.md` | Frontend | BA, QA, Reviewer, Verifier | Recovery clarity, preview not blocked, no print/cloud creep | Browser/manual evidence, hardware label |
+| `PHASE_1_TASK_02_REALTIME_SETUP_PREVIEW.md` | Frontend | Architect, BA, QA, Reviewer, Verifier | Lightweight preview, no heavy canvas loop, no unapproved dependency | Component/helper/manual evidence |
+| `PHASE_1_TASK_03_CAPTURE_COMPOSE_CUSTOMIZE_REGRESSION.md` | QA first, then Backend/Frontend by gap | Architect, Reviewer, Verifier | Original preservation, derivative separation, retake safety | Regression evidence by flow |
+| `PHASE_1_TASK_04_MANUAL_BROWSER_AND_OFFLINE_EVIDENCE.md` | QA | Reviewer, Verifier, PM | No cloud/print UI, privacy/log safety | Manual checklist, offline evidence |
+| `PHASE_1_TASK_05_HARDWARE_LABELING_AND_RELEASE_REPORT.md` | Verifier | QA, Reviewer, PM | Evidence honesty, no unsupported hardware claims | Final PASS/PARTIAL/FAIL package |
+| `PHASE_1_TASK_06_ASSET_SYSTEM_INVESTIGATION_ONLY.md` | BA or Frontend research | Architect, PM, Reviewer | License/offline/bundle risk, no production dependency | Research note only |
+
 ## Ownership rules
 
 - One primary owner per story.

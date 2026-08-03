@@ -318,7 +318,7 @@ function InnerBoothSessionProvider({
     const [selection, rawSetSelection] = useState<BoothSelection>(() => {
         const initialWithCustom = initialSelection || {
             themeId: "",
-            frameId: "white-border",
+            frameId: "white-border-portrait",
             styleId: "none",
             layoutId: defaultBoothLayoutId,
             countdownSeconds: defaultCountdownSeconds,

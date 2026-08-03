@@ -68,7 +68,7 @@ describe("simplified booth selection config", () => {
         expect(themeConfigs.length).toBeGreaterThanOrEqual(2);
         expect(frameConfigs.length).toBeGreaterThanOrEqual(2);
         expect(styleConfigs[0].id).toBe("none");
-        expect(defaultBoothSelection.layoutId).toBe("four-landscape-2x2");
+        expect(defaultBoothSelection.layoutId).toBe("four-portrait-2x2");
         expect(defaultBoothSelection.countdownSeconds).toBe(8);
         expect(isBoothSelectionComplete(defaultBoothSelection)).toBe(true);
     });
@@ -92,7 +92,7 @@ describe("simplified booth selection config", () => {
                 themeId: "party",
                 frameId: "gold",
                 styleId: "warm",
-                layoutId: "four-landscape-2x2",
+                layoutId: "four-portrait-2x2",
                 countdownSeconds: 8,
                 frameColor: undefined,
                 customization: {
@@ -112,18 +112,18 @@ describe("simplified booth selection config", () => {
             countdownSeconds: 12,
         } as unknown as Partial<BoothSelection>);
 
-        expect(normalized.layoutId).toBe("four-landscape-2x2");
+        expect(normalized.layoutId).toBe("four-portrait-2x2");
         expect(normalized.countdownSeconds).toBe(8);
     });
 
-    it("maps approved shot counts to default landscape layouts", () => {
+    it("maps approved shot counts to default portrait layouts", () => {
         expect(supportedShotCounts).toEqual([1, 2, 4, 6, 8]);
-        expect(resolveDefaultLayoutIdForShotCount(1)).toBe("single-landscape-1800x1200");
-        expect(resolveDefaultLayoutIdForShotCount(2)).toBe("two-landscape-1x2");
-        expect(resolveDefaultLayoutIdForShotCount(4)).toBe("four-landscape-2x2");
-        expect(resolveDefaultLayoutIdForShotCount(6)).toBe("six-landscape-2x3");
-        expect(resolveDefaultLayoutIdForShotCount(8)).toBe("eight-landscape-2x4");
-        expect(resolveDefaultLayoutIdForShotCount(12)).toBe("four-landscape-2x2");
+        expect(resolveDefaultLayoutIdForShotCount(1)).toBe("single-portrait-1200x1800");
+        expect(resolveDefaultLayoutIdForShotCount(2)).toBe("two-portrait-1x2");
+        expect(resolveDefaultLayoutIdForShotCount(4)).toBe("four-portrait-2x2");
+        expect(resolveDefaultLayoutIdForShotCount(6)).toBe("six-portrait-2x3");
+        expect(resolveDefaultLayoutIdForShotCount(8)).toBe("eight-portrait-2x4");
+        expect(resolveDefaultLayoutIdForShotCount(12)).toBe("four-portrait-2x2");
     });
 
     it("maps approved shot-count layouts to requested output surfaces", () => {
@@ -185,9 +185,9 @@ describe("BoothSelectionFlow", () => {
         fireEvent.click(screen.getByRole("button", { name: /2 shots/i }));
         expect(onSelectionChange).toHaveBeenCalledWith({
             ...defaultBoothSelection,
-            layoutId: "two-landscape-1x2",
+            layoutId: "two-portrait-1x2",
             countdownSeconds: 8,
-            frameId: "white-border",
+            frameId: "white-border-2shot-portrait",
             frameColor: undefined,
             styleId: "none",
             customization: {

@@ -68,7 +68,7 @@ export const defaultBoothCustomization = {
 
 export const defaultBoothSelection: BoothSelection = Object.freeze({
     themeId: "classic",
-    frameId: "white-border",
+    frameId: "white-border-portrait",
     styleId: "none",
     layoutId: defaultBoothLayoutId,
     countdownSeconds: 8,

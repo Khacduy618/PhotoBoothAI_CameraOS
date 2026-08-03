@@ -9,14 +9,14 @@ import {
 import { getPhotoCellRects } from "@/services/layout/layout-engine";
 
 describe("layout engine target variants", () => {
-    it("maps supported shot counts to approved default landscape layouts", () => {
+    it("maps supported shot counts to approved default portrait layouts", () => {
         expect(supportedShotCounts).toEqual([1, 2, 4, 6, 8]);
-        expect(resolveDefaultLayoutIdForShotCount(1)).toBe("single-landscape-1800x1200");
-        expect(resolveDefaultLayoutIdForShotCount(2)).toBe("two-landscape-1x2");
-        expect(resolveDefaultLayoutIdForShotCount(4)).toBe("four-landscape-2x2");
-        expect(resolveDefaultLayoutIdForShotCount(6)).toBe("six-landscape-2x3");
-        expect(resolveDefaultLayoutIdForShotCount(8)).toBe("eight-landscape-2x4");
-        expect(resolveDefaultLayoutIdForShotCount(999)).toBe("four-landscape-2x2");
+        expect(resolveDefaultLayoutIdForShotCount(1)).toBe("single-portrait-1200x1800");
+        expect(resolveDefaultLayoutIdForShotCount(2)).toBe("two-portrait-1x2");
+        expect(resolveDefaultLayoutIdForShotCount(4)).toBe("four-portrait-2x2");
+        expect(resolveDefaultLayoutIdForShotCount(6)).toBe("six-portrait-2x3");
+        expect(resolveDefaultLayoutIdForShotCount(8)).toBe("eight-portrait-2x4");
+        expect(resolveDefaultLayoutIdForShotCount(999)).toBe("four-portrait-2x2");
     });
 
     it("resolves every target layout id", () => {

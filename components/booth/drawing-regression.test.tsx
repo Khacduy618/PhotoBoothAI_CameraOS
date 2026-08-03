@@ -103,7 +103,7 @@ describe("Drawing & Typography Parity Regression Lock", () => {
         const path = document.querySelector("svg path");
         expect(path).toBeTruthy();
         expect(path?.getAttribute("stroke")).toBe("#00ff00");
-        expect(path?.getAttribute("d")).toBe("M 180 120 L 360 240");
+        expect(path?.getAttribute("d")).toBe("M 120 180 L 240 360");
     });
 
     it("renders text overlays with outlined text-shadow styling and no black background pills", () => {

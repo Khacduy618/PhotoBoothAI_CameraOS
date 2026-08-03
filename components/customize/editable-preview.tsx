@@ -37,7 +37,7 @@ export function EditablePreview({
     const context = useContext(BoothSessionContext);
     const selection = propSelection || context?.selection || {
         themeId: "classic",
-        frameId: "white-border",
+        frameId: "white-border-portrait",
         styleId: "none",
         layoutId: "2x2",
         countdownSeconds: 3,

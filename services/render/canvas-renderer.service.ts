@@ -214,6 +214,19 @@ export class CanvasRenderer {
                 context.lineCap = "round";
                 context.lineJoin = "round";
 
+                // Keep print/export layers deterministic:
+                // background → photos clipped to frame slots → frame overlay → attendee drawing.
+                // Drawing is clipped to the non-photo area so pen strokes decorate the frame layer
+                // without covering captured originals in the printed/exported output.
+                if (context.beginPath && context.rect && context.clip) {
+                    context.beginPath();
+                    context.rect(0, 0, canvas.width, canvas.height);
+                    plan.grid.cells.slice(0, renderConfig.layout.shotCount).forEach((slot) => {
+                        context.rect(slot.x, slot.y, slot.width, slot.height);
+                    });
+                    context.clip("evenodd");
+                }
+
                 if (context.beginPath) context.beginPath();
                 if (context.moveTo) context.moveTo(item.points[0].x * canvas.width, item.points[0].y * canvas.height);
                 for (let i = 1; i < item.points.length; i++) {

@@ -72,4 +72,35 @@ describe("render plan", () => {
         expect(plan.overlays).toHaveLength(1);
         expect(plan.overlays[0].id).toBe("sticker-1");
     });
+
+    it("uses compatible frame metadata slots before default layout slots", () => {
+        const config = createRenderConfig(createSelection("four-portrait-2x2"));
+        const plan = resolveRenderPlan({
+            ...config,
+            frame: {
+                ...config.frame,
+                shotCount: 4,
+                orientation: "portrait",
+                layoutFamily: "2x2",
+                outputWidth: 1200,
+                outputHeight: 1800,
+                slots: [
+                    { id: "frame-slot-1", index: 0, x: 100, y: 120, width: 300, height: 320 },
+                    { id: "frame-slot-2", index: 1, x: 500, y: 120, width: 300, height: 320 },
+                    { id: "frame-slot-3", index: 2, x: 100, y: 520, width: 300, height: 320 },
+                    { id: "frame-slot-4", index: 3, x: 500, y: 520, width: 300, height: 320 },
+                ],
+            },
+            photoSlots: [
+                { id: "frame-slot-1", index: 0, x: 100, y: 120, width: 300, height: 320 },
+                { id: "frame-slot-2", index: 1, x: 500, y: 120, width: 300, height: 320 },
+                { id: "frame-slot-3", index: 2, x: 100, y: 520, width: 300, height: 320 },
+                { id: "frame-slot-4", index: 3, x: 500, y: 520, width: 300, height: 320 },
+            ],
+        });
+
+        expect(plan.grid.cells[0]).toEqual(
+            expect.objectContaining({ id: "frame-slot-1", x: 100, y: 120, width: 300, height: 320 }),
+        );
+    });
 });

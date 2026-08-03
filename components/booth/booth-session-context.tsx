@@ -105,14 +105,14 @@ function syncCustomization(
                     rotationRadians: rotRad,
                     rotationDegrees: Math.round((rotRad * 180) / Math.PI),
                     opacity,
-                    flipX: (item as any).flipX ?? false,
-                    flipY: (item as any).flipY ?? false,
+                    flipX: item.flipX ?? false,
+                    flipY: item.flipY ?? false,
                 };
             } else if (item.type === "text") {
-                const fontFamily = (item as any).fontFamily || "sans-serif";
-                const fontSize = (item as any).fontSize || 48;
-                const letterSpacing = (item as any).letterSpacing || 0;
-                const outlineWidth = (item as any).outlineWidth || 0;
+                const fontFamily = item.fontFamily || "sans-serif";
+                const fontSize = item.fontSize || 48;
+                const letterSpacing = item.letterSpacing || 0;
+                const outlineWidth = item.outlineWidth || 0;
                 const measured = measureTextOverlay(
                     item.content,
                     fontFamily,
@@ -127,14 +127,14 @@ function syncCustomization(
                     rotationRadians: rotRad,
                     rotationDegrees: Math.round((rotRad * 180) / Math.PI),
                     opacity,
-                    color: (item as any).color || "#ffffff",
+                    color: item.color || "#ffffff",
                     fontFamily,
                     fontSize,
-                    align: (item as any).align || "center",
+                    align: item.align || "center",
                     letterSpacing,
-                    outlineColor: (item as any).outlineColor || "#000000",
+                    outlineColor: item.outlineColor || "#000000",
                     outlineWidth,
-                    shadowPreset: (item as any).shadowPreset || "none",
+                    shadowPreset: item.shadowPreset || "none",
                 };
             } else if (item.type === "drawing") {
                 return {
@@ -148,9 +148,9 @@ function syncCustomization(
                     opacity,
                     scale: item.scale ?? 1,
                     points: item.points || [],
-                    color: (item as any).color || "#ffffff",
-                    brushType: (item as any).brushType || "pen",
-                    strokeWidth: (item as any).strokeWidth || 9,
+                    color: item.color || "#ffffff",
+                    brushType: item.brushType || "pen",
+                    strokeWidth: item.strokeWidth || 9,
                 };
             }
             return item;
@@ -318,7 +318,7 @@ function InnerBoothSessionProvider({
     const [selection, rawSetSelection] = useState<BoothSelection>(() => {
         const initialWithCustom = initialSelection || {
             themeId: "",
-            frameId: "none",
+            frameId: "white-border",
             styleId: "none",
             layoutId: defaultBoothLayoutId,
             countdownSeconds: defaultCountdownSeconds,

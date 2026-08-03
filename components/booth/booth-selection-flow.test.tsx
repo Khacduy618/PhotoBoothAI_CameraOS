@@ -21,6 +21,8 @@ import {
     boothLayoutConfigs,
     countdownSecondOptions,
     resolveBoothLayoutConfig,
+    resolveDefaultLayoutIdForShotCount,
+    supportedShotCounts,
 } from "@/config/layout.config";
 import {
     defaultBoothSelection,
@@ -34,25 +36,31 @@ import {
     themeConfigs,
 } from "@/config/theme.config";
 
-const cameraControllerMock = {
-    adapter: {
+function createCameraControllerMock(
+    overrides: Partial<CameraController> = {},
+): CameraController {
+    return {
+        adapter: {
+            connect: vi.fn(),
+            disconnect: vi.fn(),
+            getStream: vi.fn(() => null),
+            capture: vi.fn(),
+        },
+        stream: null,
+        devices: [],
+        error: null,
+        status: "idle" as const,
+        isConnecting: false,
         connect: vi.fn(),
         disconnect: vi.fn(),
-        getStream: vi.fn(() => null),
-        capture: vi.fn(),
-    },
-    stream: null,
-    devices: [],
-    error: null,
-    status: "idle" as const,
-    isConnecting: false,
-    connect: vi.fn(),
-    disconnect: vi.fn(),
-    loadDevices: vi.fn(),
-} as unknown as CameraController;
+        loadDevices: vi.fn(),
+        ...overrides,
+    } as unknown as CameraController;
+}
 
 afterEach(() => {
     cleanup();
+    vi.clearAllMocks();
 });
 
 describe("simplified booth selection config", () => {
@@ -60,7 +68,7 @@ describe("simplified booth selection config", () => {
         expect(themeConfigs.length).toBeGreaterThanOrEqual(2);
         expect(frameConfigs.length).toBeGreaterThanOrEqual(2);
         expect(styleConfigs[0].id).toBe("none");
-        expect(defaultBoothSelection.layoutId).toBe("single-4x6-landscape");
+        expect(defaultBoothSelection.layoutId).toBe("four-landscape-2x2");
         expect(defaultBoothSelection.countdownSeconds).toBe(8);
         expect(isBoothSelectionComplete(defaultBoothSelection)).toBe(true);
     });
@@ -84,7 +92,7 @@ describe("simplified booth selection config", () => {
                 themeId: "party",
                 frameId: "gold",
                 styleId: "warm",
-                layoutId: "single-4x6-landscape",
+                layoutId: "four-landscape-2x2",
                 countdownSeconds: 8,
                 frameColor: undefined,
                 customization: {
@@ -104,17 +112,27 @@ describe("simplified booth selection config", () => {
             countdownSeconds: 12,
         } as unknown as Partial<BoothSelection>);
 
-        expect(normalized.layoutId).toBe("single-4x6-landscape");
+        expect(normalized.layoutId).toBe("four-landscape-2x2");
         expect(normalized.countdownSeconds).toBe(8);
     });
 
+    it("maps approved shot counts to default landscape layouts", () => {
+        expect(supportedShotCounts).toEqual([1, 2, 4, 6, 8]);
+        expect(resolveDefaultLayoutIdForShotCount(1)).toBe("single-landscape-1800x1200");
+        expect(resolveDefaultLayoutIdForShotCount(2)).toBe("two-landscape-1x2");
+        expect(resolveDefaultLayoutIdForShotCount(4)).toBe("four-landscape-2x2");
+        expect(resolveDefaultLayoutIdForShotCount(6)).toBe("six-landscape-2x3");
+        expect(resolveDefaultLayoutIdForShotCount(8)).toBe("eight-landscape-2x4");
+        expect(resolveDefaultLayoutIdForShotCount(12)).toBe("four-landscape-2x2");
+    });
+
     it("maps approved shot-count layouts to requested output surfaces", () => {
-        expect(boothLayoutConfigs.map((layout) => layout.shotCount)).toEqual([1, 2, 4, 4, 6, 8]);
+        expect(boothLayoutConfigs.map((layout) => layout.shotCount)).toEqual([1, 1, 2, 2, 4, 4, 4, 4, 6, 6, 8, 8]);
         expect(countdownSecondOptions).toEqual([8]);
-        expect(resolveBoothLayoutConfig("single-4x6-landscape")).toEqual(
-            expect.objectContaining({ shotCount: 1, outputWidth: 1800, outputHeight: 1200, orientation: "landscape" }),
+        expect(resolveBoothLayoutConfig("single-portrait-1200x1800")).toEqual(
+            expect.objectContaining({ shotCount: 1, outputWidth: 1200, outputHeight: 1800, orientation: "portrait", layoutFamily: "single" }),
         );
-        expect(resolveBoothLayoutConfig("stacked-2-4x6-portrait")).toEqual(
+        expect(resolveBoothLayoutConfig("two-portrait-1x2")).toEqual(
             expect.objectContaining({ shotCount: 2, columns: 1, rows: 2, outputWidth: 1200, outputHeight: 1800 }),
         );
         expect(resolveBoothLayoutConfig("grid-2x2-4x6-portrait")).toEqual(
@@ -133,52 +151,80 @@ describe("simplified booth selection config", () => {
 });
 
 describe("BoothSelectionFlow", () => {
-    it("starts at shot selection, hides sticker/text setup, and continues with fixed 8s", () => {
+    it("shows shot-count-only setup, hides pre-capture customization, and starts capture", () => {
         const onSelectionChange = vi.fn();
         const onComplete = vi.fn();
 
-        const { rerender } = render(
+        const readyCamera = createCameraControllerMock({
+            stream: {} as MediaStream,
+            status: "ready",
+        });
+
+        render(
             <BoothSelectionFlow
                 selection={defaultBoothSelection}
-                camera={cameraControllerMock}
+                camera={readyCamera}
                 onSelectionChange={onSelectionChange}
                 onComplete={onComplete}
             />,
         );
 
-        expect(screen.getByText("Live preview single-4x6-landscape/8/stickers:0/text:0")).toBeTruthy();
+        expect(screen.getByText("Camera sẵn sàng")).toBeTruthy();
+        expect(screen.getByRole("button", { name: /2 shots/i })).toBeTruthy();
+        expect(screen.queryByText("Chọn Layout")).toBeNull();
         expect(screen.queryByText("Chọn Nhãn dán Sticker")).toBeNull();
         expect(screen.queryByText("Thêm Text")).toBeNull();
+        expect(screen.queryByText("Frame viền")).toBeNull();
+        expect(screen.queryByText("Style Filter")).toBeNull();
         expect(screen.queryByText("3s")).toBeNull();
         expect(screen.queryByText("6s")).toBeNull();
         expect(screen.queryByText("10s")).toBeNull();
+        expect(liveSelectionPreviewMock).not.toHaveBeenCalled();
+        expect(readyCamera.connect).not.toHaveBeenCalled();
 
-        fireEvent.click(screen.getByText("2 ảnh stacked"));
+        fireEvent.click(screen.getByRole("button", { name: /2 shots/i }));
         expect(onSelectionChange).toHaveBeenCalledWith({
             ...defaultBoothSelection,
-            layoutId: "stacked-2-4x6-portrait",
+            layoutId: "two-landscape-1x2",
             countdownSeconds: 8,
+            frameId: "white-border",
+            frameColor: undefined,
+            styleId: "none",
             customization: {
-                ...defaultBoothSelection.customization,
                 stickerItems: [],
                 textLabels: [],
+                drawingStrokes: [],
                 overlays: [],
             },
         });
 
-        rerender(
+        fireEvent.click(screen.getByRole("button", { name: /Bắt đầu chụp/i }));
+        expect(onComplete).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows recoverable camera readiness and blocks capture while preview is unavailable", () => {
+        const onComplete = vi.fn();
+        const errorCamera = createCameraControllerMock({
+            status: "error",
+            error: "Camera bị trình duyệt chặn.",
+        });
+
+        render(
             <BoothSelectionFlow
-                selection={{ ...defaultBoothSelection, layoutId: "stacked-2-4x6-portrait" }}
-                camera={cameraControllerMock}
-                onSelectionChange={onSelectionChange}
+                selection={defaultBoothSelection}
+                camera={errorCamera}
                 onComplete={onComplete}
             />,
         );
 
-        fireEvent.click(screen.getByRole("button", { name: /Tiếp/i }));
-        expect(screen.getByText(/2 ảnh · Đếm ngược 8 giây/i)).toBeTruthy();
+        expect(screen.getByText("Không mở được camera")).toBeTruthy();
+        expect(screen.getByText("Camera bị trình duyệt chặn.")).toBeTruthy();
+        expect(screen.getByText(/Touch capture fallback/i)).toBeTruthy();
+        expect(screen.getByRole("button", { name: /Thử lại camera/i })).toBeTruthy();
 
-        fireEvent.click(screen.getByRole("button", { name: /Tiếp tục vào camera/i }));
-        expect(onComplete).toHaveBeenCalledTimes(1);
+        const startButton = screen.getByRole("button", { name: /Bắt đầu chụp/i });
+        expect(startButton.hasAttribute("disabled")).toBe(true);
+        fireEvent.click(startButton);
+        expect(onComplete).not.toHaveBeenCalled();
     });
 });

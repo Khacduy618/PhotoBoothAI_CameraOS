@@ -1,4 +1,4 @@
-import type { ThemeConfig, StyleConfig, FrameConfig, CapturedPhoto, BoothSelection } from "@/types/theme";
+import type { ThemeConfig, StyleConfig, FrameConfig, CapturedPhoto, BoothSelection, FrameSlot } from "@/types/theme";
 import type { BoothLayoutConfig, OverlayItem, DrawingStroke } from "@/types/customization";
 
 export interface RenderFontSpec {
@@ -50,6 +50,8 @@ export interface RenderConfig {
     style: StyleConfig;
     /** Ordered overlay items to composite above photos */
     overlays: readonly OverlayItem[];
+    /** Optional resolved photo slots from compatible frame metadata. */
+    photoSlots?: readonly FrameSlot[];
     /** Asset manifest for preloading */
     assetManifest: AssetManifest;
     /** Target output pixel width (legacy fallback) */

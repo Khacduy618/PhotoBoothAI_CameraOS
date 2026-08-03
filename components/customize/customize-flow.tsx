@@ -10,6 +10,7 @@ import { TextSelector } from "@/components/selectors/text-selector";
 import { EditablePreview } from "@/components/customize/editable-preview";
 import { resolveBoothLayoutConfig } from "@/config/layout.config";
 import { resolveThemeConfig, resolveFrameConfig, styleConfigs } from "@/config/theme.config";
+import type { TextOverlay } from "@/types/customization";
 
 export interface CustomizeStepConfig {
     id: string;
@@ -259,7 +260,7 @@ export function CustomizeFlow({
                                     <label className="font-bold text-pink-900/80 block">Bóng đổ (Shadow)</label>
                                     <select
                                         value={selectedOverlay.shadowPreset || "none"}
-                                        onChange={(e) => updateOverlay(selectedOverlayId, { shadowPreset: e.target.value as any })}
+                                        onChange={(e) => updateOverlay(selectedOverlayId, { shadowPreset: e.target.value as TextOverlay["shadowPreset"] })}
                                         className="w-full rounded-xl border border-pink-300 bg-white px-2.5 py-1.5 font-bold text-pink-950 focus:outline-none focus:ring-2 focus:ring-pink-400"
                                     >
                                         <option value="none">Không bóng</option>
@@ -493,7 +494,7 @@ export function CustomizeFlow({
                 </div>
 
                 <p className="text-xs text-pink-900/70 leading-relaxed font-medium">
-                    Nhấn <strong className="text-pink-950">"Hoàn tất & Xuất ảnh"</strong> để chuyển sang màn hình In ảnh & Tải về.
+                    Nhấn <strong className="text-pink-950">&quot;Hoàn tất & Xuất ảnh&quot;</strong> để chuyển sang màn hình In ảnh & Tải về.
                 </p>
             </div>
         </WizardShell>

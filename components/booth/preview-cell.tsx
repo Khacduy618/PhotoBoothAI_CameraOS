@@ -79,7 +79,7 @@ export function LiveVideoLayer({
     return (
         <video
             ref={videoRef}
-            className={`w-full h-full -scale-x-100 object-cover transition-opacity duration-500 ${
+            className={`w-full h-full object-cover -scale-x-100 transition-opacity duration-500 ${
                 stream && cameraStatus === "ready" ? "opacity-100" : "opacity-0"
             }`}
             style={{ filter: styleFilter }}
@@ -100,6 +100,12 @@ export function LoadingLayer({ cameraStatus, onRetry }: { cameraStatus: string; 
         return () => clearTimeout(timer);
     }, [cameraStatus]);
 
+    const isCameraRelated =
+        cameraStatus === "requesting-permission" ||
+        cameraStatus === "connecting" ||
+        cameraStatus === "initializing" ||
+        cameraStatus === "error";
+
     return (
         <div className="absolute inset-0 bg-neutral-900 flex flex-col items-center justify-center text-center p-4 z-10">
             <div className="w-5 h-5 border-2 border-neutral-700 border-t-emerald-400 rounded-full animate-spin mb-2" />
@@ -107,13 +113,13 @@ export function LoadingLayer({ cameraStatus, onRetry }: { cameraStatus: string; 
                 {cameraStatus === "requesting-permission" ? "Vui lòng bấm 'Cho phép' Camera..." :
                  cameraStatus === "connecting" ? "Đang kết nối Camera..." :
                  cameraStatus === "initializing" ? "Đang khởi tạo Stream..." :
-                 cameraStatus === "error" ? "Lỗi kết nối Camera" : "Đang tải..."}
+                 cameraStatus === "error" ? "Lỗi kết nối Camera" : "Đang tải ảnh..."}
             </span>
             
-            {showTip && (
+            {showTip && isCameraRelated && (
                 <div className="mt-3 space-y-2 max-w-[220px]">
                     <p className="text-[11px] text-neutral-400 leading-relaxed select-none">
-                        Nhớ nhấn <strong>"Cho phép" (Allow)</strong> trên trình duyệt và kiểm tra xem có ứng dụng khác (Zoom, FaceTime) đang dùng camera không.
+                        Nhớ nhấn <strong>&quot;Cho phép&quot; (Allow)</strong> trên trình duyệt và kiểm tra xem có ứng dụng khác (Zoom, FaceTime) đang dùng camera không.
                     </p>
                     {onRetry && (
                         <button
@@ -151,42 +157,39 @@ export function PreviewCell({
     stream,
     cameraStatus,
     photoUrl,
-    theme,
-    frame,
     style,
     onRetry,
     showDemoFallback = true,
 }: PreviewCellProps) {
-    const hasBorder = frame.id !== "none";
-    const cellPaddingPercent = hasBorder ? (frame.borderWidth / 1280) * 100 : 0;
     const styleFilter = getStyleFilter(style.mode);
+    const [failedPhotoUrl, setFailedPhotoUrl] = useState<string | null>(null);
 
-    const displayPhoto = photoUrl || (showDemoFallback && (!stream || cameraStatus !== "ready") ? DEFAULT_SAMPLE_PHOTO : null);
+    const isLiveCameraMode = !!stream || cameraStatus === "connecting" || cameraStatus === "requesting-permission";
+    const capturedPhotoFailed = !!photoUrl && failedPhotoUrl === photoUrl;
+    const displayPhoto =
+        (!capturedPhotoFailed && photoUrl)
+            ? photoUrl
+            : (!isLiveCameraMode && showDemoFallback && !capturedPhotoFailed ? DEFAULT_SAMPLE_PHOTO : null);
 
     return (
         <div
             className="relative overflow-hidden w-full h-full flex flex-col rounded-none transition-all duration-300"
-            style={{
-                backgroundColor: hasBorder ? frame.borderColor : theme.backgroundColor,
-                padding: `${cellPaddingPercent}%`,
-                boxSizing: "border-box",
-            }}
             aria-label={`Grid cell ${index + 1}`}
         >
             {/* Main content slot */}
-            <div
-                className="relative flex-1 overflow-hidden rounded-none"
-                style={{
-                    backgroundColor: theme.backgroundColor,
-                }}
-            >
+            <div className="relative flex-1 w-full h-full overflow-hidden rounded-none">
                 {displayPhoto ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                         src={displayPhoto}
                         alt={`Captured cell ${index + 1}`}
                         className="w-full h-full object-cover transition-all duration-300"
-                        style={{ filter: photoUrl ? "none" : styleFilter }}
+                        style={{ filter: photoUrl && !capturedPhotoFailed ? "none" : styleFilter }}
+                        onError={() => {
+                            if (photoUrl) {
+                                setFailedPhotoUrl(photoUrl);
+                            }
+                        }}
                         draggable={false}
                     />
                 ) : (

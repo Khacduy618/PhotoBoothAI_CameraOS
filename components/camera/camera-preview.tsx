@@ -280,10 +280,12 @@ export async function createCapturedPhotoOutput({
         );
     }
 
+    const persistentDataUrl = await createShareDataUrl(outputBlob);
+
     if (saveSharePhotoRecord) {
         saveSharePhotoRecord({
             photoId,
-            dataUrl: await createShareDataUrl(outputBlob),
+            dataUrl: persistentDataUrl,
             mimeType:
                 outputBlob.type ||
                 savedOriginal.value.metadata.mimeType,

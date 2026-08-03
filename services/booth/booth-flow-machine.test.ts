@@ -50,14 +50,14 @@ function captureShot(
 }
 
 describe("booth flow machine", () => {
-    it("starts at attract with simplified single-shot defaults", () => {
+    it("starts at attract with default booth selection defaults", () => {
         const state = createBoothFlowState();
 
         expect(state.value).toBe("attract");
         expect(state.context).toEqual(
             expect.objectContaining({
-                layoutId: "single-4x6-landscape",
-                totalShots: 1,
+                layoutId: "four-landscape-2x2",
+                totalShots: 4,
                 countdownSeconds: 8,
                 currentShotIndex: 0,
                 savedPhotoIds: [],
@@ -73,7 +73,7 @@ describe("booth flow machine", () => {
         expect(state.value).toBe("preview-ready");
         expect(state.context).toEqual(
             expect.objectContaining({
-                layoutId: "stacked-4-4x6-portrait",
+                layoutId: "four-portrait-1x4",
                 totalShots: 4,
                 countdownSeconds: 8,
             }),
@@ -302,7 +302,7 @@ describe("booth flow machine", () => {
         state = reduceBoothFlow(state, { type: "RETAKE_ALL" });
 
         expect(state.value).toBe("preview-ready");
-        expect(state.context.layoutId).toBe("stacked-4-4x6-portrait");
+        expect(state.context.layoutId).toBe("four-portrait-1x4");
         expect(state.context.savedPhotoIds).toEqual([]);
         expect(state.context.currentShotIndex).toBe(0);
     });

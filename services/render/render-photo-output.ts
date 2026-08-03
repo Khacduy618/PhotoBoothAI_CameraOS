@@ -58,26 +58,16 @@ export function createImageFromBlob(blob: Blob): Promise<HTMLImageElement> {
 
 export async function renderPhotoOutput({
     original,
-    theme: propTheme,
-    frame: propFrame,
     style: propStyle,
     renderConfig,
 }: RenderPhotoOutputInput): Promise<Blob> {
-    const theme = renderConfig?.theme || propTheme;
-    const frame = renderConfig?.frame || propFrame;
-    const style = renderConfig?.style || propStyle;
+    const style = renderConfig?.style || propStyle || { id: "none", name: "None", description: "", mode: "none" };
 
-    if (!theme || !frame || !style) {
-        throw new Error("Thiếu cấu hình theme, frame hoặc style để render.");
-    }
     const image = await createImageFromBlob(original);
 
-    const padding = Math.max(frame.borderWidth, 0);
-    const captionHeight = 0;
     const canvas = document.createElement("canvas");
-
-    canvas.width = image.naturalWidth + padding * 2;
-    canvas.height = image.naturalHeight + padding * 2 + captionHeight;
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
 
     const context = canvas.getContext("2d");
 
@@ -85,33 +75,18 @@ export async function renderPhotoOutput({
         throw new Error("Không thể tạo canvas render output.");
     }
 
-    context.fillStyle = theme.backgroundColor;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-
-    if (frame.borderWidth > 0) {
-        context.fillStyle = frame.borderColor;
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        context.fillStyle = theme.backgroundColor;
-        context.fillRect(
-            padding,
-            padding,
-            image.naturalWidth,
-            image.naturalHeight,
-        );
-    }
-
     context.save();
     context.filter = getCanvasFilter(style);
     context.drawImage(
         image,
-        padding,
-        padding,
-        image.naturalWidth,
-        image.naturalHeight,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
     );
     context.restore();
 
-    // Individual cells are clean photos without cell captions
+    // Individual cells are clean photos without white borders or cell captions
     const mimeType = getOutputMimeType(original.type);
 
     return new Promise<Blob>((resolve, reject) => {

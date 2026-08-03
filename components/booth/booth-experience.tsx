@@ -5,10 +5,13 @@ import { useEffect, useRef, useState } from "react";
 import { BoothSelectionFlow } from "@/components/booth/booth-selection-flow";
 import { BoothSessionProvider, useBoothSession } from "@/components/booth/booth-session-context";
 import { CameraPreview } from "@/components/camera/camera-preview";
+import { frameConfigs, resolveFrameConfig } from "@/config/frame.config";
+import { resolveBoothLayoutConfig } from "@/config/layout.config";
 import {
     defaultBoothSelection,
     normalizeBoothSelection,
 } from "@/config/theme.config";
+import { getFrameCompatibility } from "@/services/frame/frame-compatibility.service";
 import { SessionService } from "@/services/session/session.service";
 import {
     createSessionStorageService,
@@ -21,6 +24,34 @@ import type { BoothSession } from "@/types/session";
 import type { BoothSelection } from "@/types/theme";
 
 type RestoreStatus = "loading" | "ready";
+
+export function resolvePostCaptureDefaultFramePatch(
+    selection: BoothSelection,
+    capturedPhotoCount: number,
+): Pick<BoothSelection, "frameId" | "frameColor"> | null {
+    const layout = resolveBoothLayoutConfig(selection.layoutId);
+    if (capturedPhotoCount < layout.shotCount) {
+        return null;
+    }
+
+    const currentFrameConfig = resolveFrameConfig(selection.frameId);
+    if (currentFrameConfig.shotCount === layout.shotCount) {
+        return null;
+    }
+
+    const matchingFrame = frameConfigs.find(
+        (frame) => frame.shotCount === layout.shotCount,
+    );
+
+    if (!matchingFrame) {
+        return null;
+    }
+
+    return {
+        frameId: matchingFrame.id,
+        frameColor: matchingFrame.borderColor || "#ffffff",
+    };
+}
 
 export function BoothExperience() {
     const [initialSelection, setInitialSelection] =
@@ -38,8 +69,10 @@ export function BoothExperience() {
         const storageResult = createSessionStorageService();
 
         if (!storageResult.ok) {
-            setInitialSelection(defaultBoothSelection);
-            setRestoreStatus("ready");
+            void Promise.resolve().then(() => {
+                setInitialSelection(defaultBoothSelection);
+                setRestoreStatus("ready");
+            });
             return;
         }
 
@@ -104,7 +137,6 @@ export function BoothExperience() {
             <BoothInnerExperience
                 restoredSession={restoredSession}
                 onAbandonSession={abandonSession}
-                sessionService={sessionServiceRef.current}
             />
         </BoothSessionProvider>
     );
@@ -113,11 +145,9 @@ export function BoothExperience() {
 function BoothInnerExperience({
     restoredSession,
     onAbandonSession,
-    sessionService,
 }: {
     restoredSession: BoothSession | null;
     onAbandonSession: () => Promise<void>;
-    sessionService: SessionService | null;
 }) {
     const {
         selection,
@@ -134,6 +164,30 @@ function BoothInnerExperience({
 
     const [showRecovery, setShowRecovery] = useState(Boolean(restoredSession));
     const [isExporting, setIsExporting] = useState(false);
+    const postCaptureDefaultFrameAppliedRef = useRef(false);
+
+    useEffect(() => {
+        if (phase === "setup" || phase === "capture") {
+            postCaptureDefaultFrameAppliedRef.current = false;
+            return;
+        }
+
+        if (postCaptureDefaultFrameAppliedRef.current || capturedPhotos.length === 0) {
+            return;
+        }
+
+        const defaultFramePatch = resolvePostCaptureDefaultFramePatch(
+            selection,
+            capturedPhotos.length,
+        );
+        if (!defaultFramePatch) {
+            postCaptureDefaultFrameAppliedRef.current = true;
+            return;
+        }
+
+        postCaptureDefaultFrameAppliedRef.current = true;
+        updateSelection(defaultFramePatch);
+    }, [capturedPhotos.length, phase, selection, updateSelection]);
 
     const handleStartNew = async () => {
         await onAbandonSession();
@@ -237,18 +291,20 @@ function BoothInnerExperience({
 
     return (
         <div className="relative w-full h-full min-h-screen">
-            {/* Persistent EditingWorkspace Shell */}
-            <EditingWorkspace
-                selection={selection}
-                updateSelection={updateSelection}
-                capturedPhotos={capturedPhotos}
-                onStartCapture={handleStartCapture}
-                onExportPhoto={() => {
-                    void handleExportPhoto();
-                }}
-                onRetake={handleRetake}
-                isExporting={isExporting}
-            />
+            {/* Post-capture EditingWorkspace Shell. Hidden during active capture so frame tools appear only after capture. */}
+            {phase !== "capture" && (
+                <EditingWorkspace
+                    selection={selection}
+                    updateSelection={updateSelection}
+                    capturedPhotos={capturedPhotos}
+                    onStartCapture={handleStartCapture}
+                    onExportPhoto={() => {
+                        void handleExportPhoto();
+                    }}
+                    onRetake={handleRetake}
+                    isExporting={isExporting}
+                />
+            )}
 
             {/* Temporary Sibling CaptureOverlay during active camera capture */}
             {phase === "capture" && (

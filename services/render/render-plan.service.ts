@@ -67,13 +67,18 @@ export function resolveRenderPlan(
     );
     const scale = surface.width / geometry.sheet.width;
 
-    const cells = geometry.photoSlots.map((slot) => ({
-        ...scaleRect(slot, scale),
-        id: slot.id,
-        index: slot.index,
-        column: slot.column,
-        row: slot.row,
-    }));
+    const sourceSlots = renderConfig.photoSlots ?? geometry.photoSlots;
+    const slotScale = renderConfig.photoSlots ? surface.width / renderConfig.outputWidth : scale;
+    const cells = sourceSlots.map((slot) => {
+        const positionedSlot = slot as typeof slot & { column?: number; row?: number };
+        return {
+            ...scaleRect(slot, slotScale),
+            id: slot.id,
+            index: slot.index,
+            column: positionedSlot.column ?? slot.index % renderConfig.layout.columns,
+            row: positionedSlot.row ?? Math.floor(slot.index / renderConfig.layout.columns),
+        };
+    });
 
     const gridTop = cells.length > 0
         ? Math.min(...cells.map((cell) => cell.y))

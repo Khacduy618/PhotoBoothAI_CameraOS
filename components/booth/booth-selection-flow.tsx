@@ -1,110 +1,186 @@
 "use client";
 
-import React, { useState, useContext, useEffect } from "react";
-import { LiveSelectionPreview } from "@/components/booth/live-selection-preview";
-import { SetupStepShell } from "@/components/wizard/setup-step-shell";
+import React, { useContext, useEffect, useRef, useState } from "react";
+
 import { BoothSessionContext } from "@/components/booth/booth-session-context";
+import { SetupStepShell } from "@/components/wizard/setup-step-shell";
 import {
-    boothLayoutConfigs,
-    countdownSecondOptions,
     resolveBoothLayoutConfig,
+    resolveDefaultLayoutIdForShotCount,
+    supportedShotCounts,
+    type BoothShotCount,
 } from "@/config/layout.config";
 import {
     defaultBoothSelection,
     isBoothSelectionComplete,
 } from "@/config/theme.config";
-import { AssetManager } from "@/services/platform/asset-manager";
-import { stickerConfigs } from "@/config/sticker.config";
 import type { CameraController } from "@/hooks/use-camera";
-import type {
-    BoothCountdownSeconds,
-    BoothOutputCustomization,
-} from "@/types/customization";
+import type { CameraStatus } from "@/types/camera";
 import type { BoothSelection } from "@/types/theme";
 
-const setupStickerId = "setup-sticker-preset";
-const setupTextLabelId = "setup-text-preset";
-
-// --- Data-driven wizard step config ---
-
-interface WizardStepConfig {
-    id: string;
-    title: string;
-    shortLabel: string;
-}
-
-const WIZARD_STEPS: WizardStepConfig[] = [
-    { id: "layout", title: "📸 Chọn số ảnh", shortLabel: "Shots" },
-    { id: "review", title: "⏱️ Xác nhận đếm ngược 8 giây", shortLabel: "Ready" },
+const SETUP_STEPS = [
+    { id: "shots", title: "📸 Chọn số lượng shots", shortLabel: "Shots" },
 ];
-
-// --- Helpers ---
-
-function replaceSetupSticker(
-    customization: BoothOutputCustomization,
-    stickerId: string | null,
-): BoothOutputCustomization {
-    const stickerItems = customization.stickerItems.filter(
-        (item) => item.id !== setupStickerId,
-    );
-
-    if (!stickerId) {
-        return { ...customization, stickerItems };
-    }
-
-    return {
-        ...customization,
-        stickerItems: [
-            ...stickerItems,
-            {
-                id: setupStickerId,
-                stickerId,
-                x: 0.78,
-                y: 0.2,
-                scale: 1,
-                rotationDegrees: -8,
-            },
-        ],
-    };
-}
-
-function replaceSetupTextLabel(
-    customization: BoothOutputCustomization,
-    text: string | null,
-): BoothOutputCustomization {
-    const textLabels = customization.textLabels.filter(
-        (label) => label.id !== setupTextLabelId,
-    );
-    const trimmedText = text?.trim() ?? "";
-
-    if (!trimmedText) {
-        return { ...customization, textLabels };
-    }
-
-    return {
-        ...customization,
-        textLabels: [
-            ...textLabels,
-            {
-                id: setupTextLabelId,
-                text: trimmedText.slice(0, 32),
-                x: 0.5,
-                y: 0.95,
-                color: "#ffffff",
-                fontSize: 42,
-                rotationDegrees: 0,
-            },
-        ],
-    };
-}
-
-// --- Main Component ---
 
 interface BoothSelectionFlowProps {
     selection?: BoothSelection;
     camera?: CameraController;
     onSelectionChange?: (selection: BoothSelection) => void;
     onComplete: () => void;
+}
+
+function getShotCountFromSelection(selection: BoothSelection): BoothShotCount {
+    const layout = resolveBoothLayoutConfig(selection.layoutId);
+    return supportedShotCounts.includes(layout.shotCount as BoothShotCount)
+        ? layout.shotCount as BoothShotCount
+        : 1;
+}
+
+function buildShotCountSelection(
+    selection: BoothSelection,
+    shotCount: BoothShotCount,
+): BoothSelection {
+    return {
+        ...selection,
+        layoutId: resolveDefaultLayoutIdForShotCount(shotCount),
+        countdownSeconds: 8,
+        frameId: "white-border",
+        frameColor: undefined,
+        styleId: "none",
+        customization: {
+            stickerItems: [],
+            textLabels: [],
+            drawingStrokes: selection.customization.drawingStrokes ?? [],
+            overlays: selection.customization.overlays?.filter((item) => item.type === "drawing") ?? [],
+        },
+    };
+}
+
+const cameraStatusCopy: Record<CameraStatus, { label: string; detail: string; tone: string }> = {
+    idle: {
+        label: "Cần bật camera",
+        detail: "Nhấn thử lại để trình duyệt hỏi quyền camera trước khi bắt đầu.",
+        tone: "bg-amber-400 text-amber-950",
+    },
+    "requesting-permission": {
+        label: "Đang xin quyền camera",
+        detail: "Chọn Allow/Cho phép trên trình duyệt để hiện live preview.",
+        tone: "bg-sky-400 text-sky-950",
+    },
+    connecting: {
+        label: "Đang kết nối camera",
+        detail: "CameraOS đang mở thiết bị preview. Vui lòng chờ trong giây lát.",
+        tone: "bg-sky-400 text-sky-950",
+    },
+    initializing: {
+        label: "Đang khởi tạo preview",
+        detail: "Đang kiểm tra luồng hình ảnh và chuẩn bị capture.",
+        tone: "bg-violet-400 text-violet-950",
+    },
+    ready: {
+        label: "Camera sẵn sàng",
+        detail: "Live preview đang hoạt động. Có thể bắt đầu phiên chụp.",
+        tone: "bg-emerald-400 text-emerald-950",
+    },
+    disconnected: {
+        label: "Camera bị ngắt",
+        detail: "Kiểm tra cáp/capture card, đóng app đang dùng camera rồi thử lại.",
+        tone: "bg-orange-400 text-orange-950",
+    },
+    error: {
+        label: "Không mở được camera",
+        detail: "Cho phép camera trong trình duyệt hoặc kiểm tra thiết bị đang bị app khác chiếm dụng.",
+        tone: "bg-rose-400 text-rose-950",
+    },
+};
+
+function SetupCameraViewport({
+    camera,
+}: {
+    camera?: CameraController;
+}) {
+    const videoRef = useRef<HTMLVideoElement | null>(null);
+    const stream = camera?.stream ?? null;
+    const status = camera?.status ?? "idle";
+    const error = camera?.error ?? null;
+    const isCameraReady = status === "ready" && !!stream;
+    const isRecoverableCameraState = status === "idle" || status === "error" || status === "disconnected";
+    const statusCopy = cameraStatusCopy[status];
+
+    useEffect(() => {
+        if (!stream && camera?.connect && status === "idle") {
+            void camera.connect();
+        }
+    }, [camera, status, stream]);
+
+    useEffect(() => {
+        if (videoRef.current && stream) {
+            videoRef.current.srcObject = stream;
+            void videoRef.current.play?.();
+        }
+    }, [stream]);
+
+    return (
+        <section
+            className="relative h-full w-full overflow-hidden rounded-[1.75rem] bg-neutral-950 text-white shadow-2xl shadow-pink-950/30"
+            aria-label="Camera setup viewport"
+        >
+            {stream ? (
+                <video
+                    ref={videoRef}
+                    autoPlay
+                    muted
+                    playsInline
+                    className="h-full w-full object-cover -scale-x-100"
+                    aria-label="Live camera preview"
+                />
+            ) : (
+                <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_30%_20%,rgba(244,114,182,0.25),transparent_34%),linear-gradient(145deg,#111827_0%,#2e1065_58%,#0f172a_100%)]">
+                    <div className="grid place-items-center gap-4 text-center px-8">
+                        <div className="grid h-24 w-24 place-items-center rounded-full bg-white/12 text-5xl ring-1 ring-white/20">
+                            📷
+                        </div>
+                        <p className="text-2xl font-black">
+                            Static setup preview
+                        </p>
+                        <p className="max-w-md text-sm font-semibold leading-relaxed text-white/70">
+                            Không có live preview nhưng vẫn có thể chọn số ảnh. Capture sẽ bị khóa cho tới khi camera sẵn sàng.
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            <div className="absolute inset-x-4 bottom-4 rounded-[1.35rem] border border-white/15 bg-black/62 p-4 shadow-2xl backdrop-blur-xl">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="space-y-2">
+                        <span className={`inline-flex rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] ${statusCopy.tone}`}>
+                            {statusCopy.label}
+                        </span>
+                        <p className="max-w-xl text-sm font-semibold leading-relaxed text-white/82">
+                            {error || statusCopy.detail}
+                        </p>
+                        <p className="text-xs font-bold uppercase tracking-[0.2em] text-emerald-200/90">
+                            Touch capture fallback luôn sẵn sàng khi camera ready · AI gesture bật ở màn capture, không chạy inference trong setup
+                        </p>
+                    </div>
+                    {isRecoverableCameraState && camera?.connect && (
+                        <button
+                            type="button"
+                            onClick={() => void camera.connect()}
+                            className="min-h-12 rounded-2xl border border-white/20 bg-white px-5 py-3 text-sm font-black text-neutral-950 shadow-lg shadow-white/10 transition active:scale-95"
+                        >
+                            Thử lại camera
+                        </button>
+                    )}
+                </div>
+                {!isCameraReady && (
+                    <div className="mt-3 rounded-2xl border border-amber-300/30 bg-amber-300/12 px-4 py-3 text-sm font-bold text-amber-100">
+                        Bắt đầu chụp đang khóa để tránh phiên lỗi. Hãy cho phép camera hoặc thử kết nối lại.
+                    </div>
+                )}
+            </div>
+        </section>
+    );
 }
 
 export function BoothSelectionFlow({
@@ -117,383 +193,99 @@ export function BoothSelectionFlow({
     const selection = propSelection || context?.selection || defaultBoothSelection;
     const setSelection = propOnSelectionChange || context?.setSelection || (() => {});
     const camera = propCamera || context?.camera;
-
-    const [localActiveStep, setLocalActiveStep] = useState("layout");
+    const [localActiveStep, setLocalActiveStep] = useState("shots");
     const activeStep = context?.activeStep || localActiveStep;
-    const safeActiveStep = WIZARD_STEPS.some((step) => step.id === activeStep)
+    const safeActiveStep = SETUP_STEPS.some((step) => step.id === activeStep)
         ? activeStep
-        : "layout";
+        : "shots";
     const setActiveStep = context?.setActiveStep || setLocalActiveStep;
-    const canContinue = isBoothSelectionComplete(selection);
-
-    const selectedSetupSticker = selection.customization.stickerItems.find(
-        (item) => item.id === setupStickerId,
-    );
-    const selectedSetupText = selection.customization.textLabels.find(
-        (label) => label.id === setupTextLabelId,
-    );
-
-    const [customTextVal, setCustomTextVal] = useState(selectedSetupText?.text || "");
-    const [extraTextVal, setExtraTextVal] = useState("");
-
-    // Sync input value with external changes (e.g., preset selection or clear)
-    React.useEffect(() => {
-        setCustomTextVal(selectedSetupText?.text || "");
-    }, [selectedSetupText?.text]);
-
-    const currentIndex = WIZARD_STEPS.findIndex(s => s.id === safeActiveStep);
-    const safeIndex = currentIndex >= 0 ? currentIndex : 0;
-    const hasBack = safeIndex > 0;
-    const isLastStep = safeIndex === WIZARD_STEPS.length - 1;
-    const currentStepConfig = WIZARD_STEPS[safeIndex];
-
-    const handleBack = () => {
-        if (hasBack) {
-            setActiveStep(WIZARD_STEPS[safeIndex - 1].id);
-        }
-    };
-
-    const handleNext = () => {
-        if (isLastStep) {
-            onComplete();
-        } else {
-            setActiveStep(WIZARD_STEPS[safeIndex + 1].id);
-        }
-    };
-
-    const handleSelectText = (text: string | null) => {
-        setSelection({
-            ...selection,
-            customization: replaceSetupTextLabel(selection.customization, text),
-        });
-    };
-
-    // --- Frame packages from Asset Manager ---
-    const framePackages = AssetManager.getFramePackages();
-
-    const [systemWallpaper, setSystemWallpaper] = useState<string>("/backgrounds/system-bg.jpg");
-
-    const WALLPAPERS = [
-        { id: "pink-bokeh", name: "💖 Pink Bokeh", url: "/backgrounds/system-bg.jpg" },
-        { id: "korean-sunset", name: "🌸 Sunset Cloud", url: "/backgrounds/korean-sunset.jpg" },
-        { id: "starry-night", name: "🌌 Starry Sky", url: "/backgrounds/starry-night.jpg" },
-    ];
-
-    useEffect(() => {
-        if (typeof document !== "undefined") {
-            document.body.style.backgroundImage = `radial-gradient(circle at center, rgba(13, 9, 20, 0.45), rgba(13, 9, 20, 0.88)), url('${systemWallpaper}')`;
-        }
-    }, [systemWallpaper]);
+    const selectedShotCount = getShotCountFromSelection(selection);
+    const selectedLayout = resolveBoothLayoutConfig(selection.layoutId);
+    const cameraReady = camera?.status === "ready" && !!camera.stream;
 
     return (
-        <>
-            {/* Simplified attendee flow starts directly at shot selection. */}
-
-            <SetupStepShell
-                steps={WIZARD_STEPS}
-                activeStep={safeActiveStep}
-                onStepChange={setActiveStep}
-                onComplete={onComplete}
-                completeLabel="Tiếp tục vào camera"
-                canContinue={canContinue}
+        <SetupStepShell
+            steps={SETUP_STEPS}
+            activeStep={safeActiveStep}
+            onStepChange={setActiveStep}
+            onComplete={onComplete}
+            completeLabel="Bắt đầu chụp"
+            canContinue={isBoothSelectionComplete(selection) && cameraReady}
             headerSlot={
                 <div className="flex flex-wrap items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-purple-500 flex items-center justify-center text-white text-lg shadow-md shadow-pink-300/50 font-bold">
+                        <div className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-tr from-pink-500 to-purple-500 text-xl font-black text-white shadow-lg shadow-pink-300/50">
                             📸
                         </div>
                         <div className="space-y-0.5">
-                            <p className="text-[10px] font-extrabold uppercase tracking-[0.25em] text-pink-600 flex items-center gap-1.5">
-                                <span className="animate-sparkle-shine">✨</span> PhotoBoothAI Studio <span className="animate-sparkle-shine">💖</span>
+                            <p className="text-[10px] font-extrabold uppercase tracking-[0.25em] text-pink-600">
+                                PhotoBoothAI · Shot setup
                             </p>
-                            <h1 className="text-lg font-black tracking-tight text-pink-950">
-                                Chọn số ảnh, khung có lề vẽ 60px
+                            <h1 className="text-xl font-black tracking-tight text-pink-950">
+                                Chọn số ảnh, chọn frame sau khi chụp
                             </h1>
                         </div>
                     </div>
-
-                    {/* Compact Wallpaper Picker Pills */}
-                    <div className="flex items-center gap-1.5 bg-white/70 backdrop-blur-md border border-pink-200/80 p-1 rounded-full text-[10px] shadow-sm">
-                        <span className="text-pink-900/70 pl-2 font-bold">🖼️ Nền 4K:</span>
-                        {WALLPAPERS.map((wp) => (
-                            <button
-                                key={wp.id}
-                                type="button"
-                                onClick={() => setSystemWallpaper(wp.url)}
-                                className={`px-2.5 py-1 rounded-full font-extrabold transition-all ${
-                                    systemWallpaper === wp.url
-                                        ? "bg-gradient-to-r from-pink-500 to-purple-500 text-white shadow-sm"
-                                        : "text-pink-950 hover:bg-pink-100/60"
-                                }`}
-                            >
-                                {wp.name}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            }
-            previewSlot={
-                <LiveSelectionPreview
-                    selection={selection}
-                    camera={camera}
-                    onSelectionChange={setSelection}
-                />
-            }
-        >
-            {/* Step: Layout */}
-            <div className={safeActiveStep === "layout" ? "space-y-4" : "hidden"}>
-                <SelectionGroup
-                    label="Chọn Layout"
-                    value={selection.layoutId}
-                    options={boothLayoutConfigs}
-                    onChange={(layoutId) => {
-                        setSelection({
-                            ...selection,
-                            layoutId: layoutId as BoothSelection["layoutId"],
-                            countdownSeconds: 8,
-                            customization: {
-                                ...selection.customization,
-                                stickerItems: [],
-                                textLabels: [],
-                                overlays: selection.customization.overlays?.filter((item) => item.type === "drawing") ?? [],
-                            },
-                        });
-                    }}
-                />
-            </div>
-
-            {/* Step: Countdown */}
-            <div className={safeActiveStep === "countdown" ? "space-y-4" : "hidden"}>
-                <CountdownSelectionGroup
-                    value={selection.countdownSeconds}
-                    onChange={(countdownSeconds) => {
-                        setSelection({
-                            ...selection,
-                            countdownSeconds,
-                        });
-                    }}
-                />
-            </div>
-
-            {/* Step: Review — fixed 8s countdown summary */}
-            <div className={safeActiveStep === "review" ? "space-y-4" : "hidden"}>
-                <div className="rounded-3xl border border-pink-200/70 bg-white/75 p-5 shadow-sm backdrop-blur-md">
-                    <p className="text-[10px] font-extrabold uppercase tracking-[0.28em] text-pink-600">
-                        Capture plan
+                    <p className="rounded-full border border-pink-200/80 bg-white/75 px-4 py-2 text-xs font-extrabold text-pink-900 shadow-sm">
+                        Countdown cố định 8s / ảnh
                     </p>
-                    <h3 className="mt-2 text-2xl font-black text-pink-950">
-                        {resolveBoothLayoutConfig(selection.layoutId).shotCount} ảnh · Đếm ngược 8 giây
-                    </h3>
-                    <ul className="mt-4 space-y-2 text-sm text-neutral-800">
-                        <li className="flex justify-between border-b border-pink-100 pb-2">
-                            <span className="font-medium text-neutral-500">Layout 4x6:</span>
-                            <span className="font-bold text-pink-950">{resolveBoothLayoutConfig(selection.layoutId).name}</span>
-                        </li>
-                        <li className="flex justify-between border-b border-pink-100 pb-2">
-                            <span className="font-medium text-neutral-500">Countdown:</span>
-                            <span className="font-bold text-pink-950">8 giây / ảnh</span>
-                        </li>
-                        <li className="flex justify-between">
-                            <span className="font-medium text-neutral-500">Customize sau capture:</span>
-                            <span className="font-bold text-pink-950">Khung Canva PNG + bút vẽ</span>
-                        </li>
-                    </ul>
                 </div>
+            }
+            previewSlot={<SetupCameraViewport camera={camera} />}
+        >
+            <div className={safeActiveStep === "shots" ? "space-y-5" : "hidden"}>
+                <fieldset className="space-y-3">
+                    <legend className="text-base font-extrabold text-pink-950">
+                        Số lượng shots
+                    </legend>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        {supportedShotCounts.map((shotCount) => {
+                            const selected = selectedShotCount === shotCount;
+                            const layoutId = resolveDefaultLayoutIdForShotCount(shotCount);
+                            const layout = resolveBoothLayoutConfig(layoutId);
 
-                <p className="text-[12px] font-medium leading-relaxed text-pink-900/80">
-                    Nhãn dán và chữ trang trí đã được tắt trong flow mới. Khung sẽ chọn sau khi lưu đủ ảnh gốc, rồi ảnh cuối được render từ derivative đã lưu.
-                </p>
+                            return (
+                                <button
+                                    key={shotCount}
+                                    type="button"
+                                    aria-label={`${shotCount} shots`}
+                                    aria-pressed={selected}
+                                    onClick={() => {
+                                        setSelection(buildShotCountSelection(selection, shotCount));
+                                    }}
+                                    className={`min-h-28 rounded-3xl border p-4 text-left transition duration-300 active:scale-[0.98] ${
+                                        selected
+                                            ? "border-pink-500 bg-pink-500/15 text-pink-950 shadow-lg shadow-pink-200/60 ring-2 ring-pink-400/40"
+                                            : "border-pink-200/70 bg-white/75 text-neutral-800 shadow-sm hover:border-pink-300 hover:bg-white"
+                                    }`}
+                                >
+                                    <span className="block text-4xl font-black leading-none text-pink-950">
+                                        {shotCount}
+                                    </span>
+                                    <span className="mt-2 block text-xs font-black uppercase tracking-[0.18em] text-pink-600">
+                                        shots
+                                    </span>
+                                    <span className="mt-2 block text-xs font-semibold leading-snug text-pink-900/70">
+                                        {layout.name}
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </fieldset>
+
+                <div className="rounded-3xl border border-pink-200/70 bg-white/75 p-4 shadow-sm backdrop-blur-md">
+                    <p className="text-[10px] font-extrabold uppercase tracking-[0.28em] text-pink-600">
+                        Sau khi chụp
+                    </p>
+                    <h3 className="mt-2 text-xl font-black text-pink-950">
+                        {selectedLayout.shotCount} ảnh · {selectedLayout.name}
+                    </h3>
+                    <p className="mt-2 text-sm font-medium leading-relaxed text-pink-900/75">
+                        Frame chọn sau khi chụp.
+                    </p>
+                </div>
             </div>
         </SetupStepShell>
-        </>
-    );
-}
-
-// --- Sub-components (unchanged API) ---
-
-interface CountdownSelectionGroupProps {
-    value: BoothCountdownSeconds;
-    onChange: (value: BoothCountdownSeconds) => void;
-}
-
-function CountdownSelectionGroup({
-    value,
-    onChange,
-}: CountdownSelectionGroupProps) {
-    return (
-        <fieldset className="space-y-3">
-            <legend className="text-lg font-extrabold text-pink-950">
-                Thời gian đếm ngược
-            </legend>
-            <div className="grid gap-3 md:grid-cols-4">
-                {countdownSecondOptions.map((option) => {
-                    const selected = value === option;
-
-                    return (
-                        <label
-                            key={option}
-                            className={`cursor-pointer rounded-2xl border p-4 text-center transition duration-300 ${
-                                selected
-                                    ? "border-pink-500 bg-pink-500/15 ring-2 ring-pink-400/40 text-pink-950 font-bold shadow-md shadow-pink-200/50"
-                                    : "border-pink-200/60 bg-white/70 hover:bg-white hover:border-pink-300 text-neutral-800 shadow-sm"
-                            }`}
-                        >
-                            <input
-                                type="radio"
-                                name="countdown-seconds"
-                                value={option}
-                                checked={selected}
-                                className="sr-only"
-                                onChange={() => {
-                                    onChange(option);
-                                }}
-                            />
-                            <span className="block text-2xl font-black text-pink-950">
-                                {option}s
-                            </span>
-                            <span className="mt-1 block text-xs font-medium text-pink-900/70">
-                                Đếm {option} giây trước mỗi ảnh
-                            </span>
-                        </label>
-                    );
-                })}
-            </div>
-        </fieldset>
-    );
-}
-
-interface SelectionOption {
-    id: string;
-    name: string;
-    description: string;
-}
-
-interface SelectionGroupProps<TOption extends SelectionOption> {
-    label: string;
-    value: string;
-    options: readonly TOption[];
-    onChange: (value: string) => void;
-}
-
-function SelectionGroup<TOption extends SelectionOption>({
-    label,
-    value,
-    options,
-    onChange,
-}: SelectionGroupProps<TOption>) {
-    return (
-        <fieldset className="space-y-3">
-            <legend className="text-lg font-extrabold text-pink-950">
-                {label}
-            </legend>
-            <div className="grid gap-3 md:grid-cols-3">
-                {options.map((option) => {
-                    const selected = value === option.id;
-
-                    return (
-                        <label
-                            key={option.id}
-                            className={`cursor-pointer rounded-2xl border p-4 transition duration-300 ${
-                                selected
-                                    ? "border-pink-500 bg-pink-500/15 ring-2 ring-pink-400/40 text-pink-950 font-bold shadow-md shadow-pink-200/50"
-                                    : "border-pink-200/60 bg-white/70 hover:bg-white hover:border-pink-300 text-neutral-800 shadow-sm"
-                            }`}
-                        >
-                            <input
-                                type="radio"
-                                name={label}
-                                value={option.id}
-                                checked={selected}
-                                className="sr-only"
-                                onChange={() => {
-                                    onChange(option.id);
-                                }}
-                            />
-                            <span className="block font-black text-pink-950">
-                                {option.name}
-                            </span>
-                            <span className="mt-1 block text-xs font-medium text-pink-900/70">
-                                {option.description}
-                            </span>
-                        </label>
-                    );
-                })}
-            </div>
-        </fieldset>
-    );
-}
-
-interface PresetButtonProps {
-    selected: boolean;
-    title: string;
-    description: string;
-    onClick: () => void;
-}
-
-function PresetButton({
-    selected,
-    title,
-    description,
-    onClick,
-}: PresetButtonProps) {
-    return (
-        <button
-            type="button"
-            className={`rounded-2xl border p-4 text-left transition duration-300 ${
-                selected
-                    ? "border-pink-500 bg-pink-500/15 ring-2 ring-pink-400/40 text-pink-950 font-bold shadow-md shadow-pink-200/50"
-                    : "border-pink-200/60 bg-white/70 hover:bg-white hover:border-pink-300 text-neutral-800 shadow-sm"
-            }`}
-            onClick={onClick}
-        >
-            <span className="block font-semibold">
-                {title}
-            </span>
-            <span className="mt-1 block text-sm text-neutral-300">
-                {description}
-            </span>
-        </button>
-    );
-}
-
-interface AddStickerControlProps {
-    stickerCount: number;
-    onAdd: (stickerId: string) => void;
-}
-
-function AddStickerControl({ stickerCount, onAdd }: AddStickerControlProps) {
-    const [selectedId, setSelectedId] = useState<string>(stickerConfigs[0]?.id ?? "");
-
-    if (stickerCount >= 4) {
-        return (
-            <p className="text-xs text-neutral-500 italic">
-                Đã đạt giới hạn 4 sticker. Xóa sticker hiện có để thêm mới.
-            </p>
-        );
-    }
-
-    return (
-        <div className="flex gap-2 items-center pt-2 border-t border-white/5">
-            <select
-                value={selectedId}
-                onChange={(e) => setSelectedId(e.target.value)}
-                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white font-semibold focus:outline-none focus:border-emerald-400 appearance-none"
-            >
-                {stickerConfigs.map((s) => (
-                    <option key={s.id} value={s.id} className="bg-neutral-900 text-white">
-                        {s.emoji} {s.name}
-                    </option>
-                ))}
-            </select>
-            <button
-                type="button"
-                onClick={() => {
-                    if (selectedId) onAdd(selectedId);
-                }}
-                className="px-4 py-2.5 bg-emerald-400 text-black font-bold rounded-xl text-sm hover:bg-emerald-300 active:scale-95 transition shrink-0"
-            >
-                + Thêm sticker
-            </button>
-        </div>
     );
 }

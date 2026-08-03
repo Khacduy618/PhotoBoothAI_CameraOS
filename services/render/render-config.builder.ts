@@ -2,8 +2,10 @@ import type { BoothSelection } from "@/types/theme";
 import type { RenderConfig, AssetManifest, CreateRenderConfigInput } from "@/types/render-config";
 import type { OverlayItem, StickerOverlay, TextOverlay } from "@/types/customization";
 import { resolveBoothLayoutConfig } from "@/config/layout.config";
-import { resolveThemeConfig, resolveStyleConfig, resolveFrameConfig } from "@/config/theme.config";
+import { resolveFrameConfig } from "@/config/frame.config";
+import { resolveThemeConfig, resolveStyleConfig } from "@/config/theme.config";
 import { AssetManager } from "@/services/platform/asset-manager";
+import { resolvePhotoSlots } from "@/services/render/photo-slot-resolver.service";
 
 /**
  * Converts legacy StickerCustomization + TextLabelCustomization from BoothOutputCustomization
@@ -52,20 +54,20 @@ function buildOverlaysFromCustomization(
             y: label.y,
             baseWidth: 200,
             baseHeight: 50,
-            scale: ext.scale ?? (label as any).scale ?? 1,
+            scale: ext.scale ?? 1,
             rotationRadians: rotRad,
             rotationDegrees: label.rotationDegrees,
             color: label.color,
             fontSize: label.fontSize,
-            fontFamily: ext.fontFamily ?? (label as any).fontFamily,
-            fontWeight: ext.fontWeight ?? (label as any).fontWeight,
-            outlineColor: ext.outlineColor ?? (label as any).outlineColor,
-            outlineWidth: ext.outlineWidth ?? (label as any).outlineWidth,
-            shadowPreset: ext.shadowPreset ?? (label as any).shadowPreset,
-            letterSpacing: ext.letterSpacing ?? (label as any).letterSpacing,
-            align: ext.align ?? (label as any).align,
+            fontFamily: ext.fontFamily,
+            fontWeight: ext.fontWeight,
+            outlineColor: ext.outlineColor,
+            outlineWidth: ext.outlineWidth,
+            shadowPreset: ext.shadowPreset,
+            letterSpacing: ext.letterSpacing,
+            align: ext.align,
             zIndex: ext.zIndex ?? (20 + idx),
-            opacity: ext.opacity ?? (label as any).opacity ?? 1,
+            opacity: ext.opacity ?? 1,
         });
     });
 
@@ -116,6 +118,7 @@ export function createRenderConfig(
         : resolvedFrame;
 
     const overlays = buildOverlaysFromCustomization(selection.customization);
+    const photoSlots = resolvePhotoSlots({ layout, frame });
 
     // Build AssetManifest
     const stickerUrls: string[] = [];
@@ -141,6 +144,9 @@ export function createRenderConfig(
         fontDescriptors,
     };
 
+    const outputWidth = frame.outputWidth || layout.outputWidth;
+    const outputHeight = frame.outputHeight || layout.outputHeight;
+
     return {
         layout,
         theme,
@@ -148,8 +154,9 @@ export function createRenderConfig(
         frameColor: selection.frameColor ?? frame.borderColor,
         style,
         overlays,
+        photoSlots,
         assetManifest,
-        outputWidth: layout.outputWidth,
-        outputHeight: layout.outputHeight,
+        outputWidth,
+        outputHeight,
     };
 }

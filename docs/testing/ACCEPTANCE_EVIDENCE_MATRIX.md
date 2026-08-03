@@ -73,6 +73,31 @@ This section is the current evidence source for post-PR1-PR6 Phase 1 work. Mock/
 | PB-135 | Curated sticker pack | config tests when implemented | preview/customizer integration | visual/license/offline check | Not applicable | PM-approved asset evidence |
 | PB-136 | Curated frame/theme pack | config tests when implemented | preview/final renderer integration | visual/license/offline check | Not applicable | PM-approved asset evidence |
 
+## Phase 1 task-file evidence gates
+
+| Task file | Commands | Unit/integration evidence | Browser/manual evidence | Hardware evidence | Minimum status |
+|---|---|---|---|---|---|
+| `PHASE_1_TASK_00_BASELINE_REVALIDATION.md` | `pnpm lint`, `pnpm build`, `pnpm test` where feasible | Existing tests and gap report | Optional, only where evidence missing | PASS only with named real device | Gap report completed |
+| `PHASE_1_TASK_01_SETUP_READINESS.md` | lint/build/test | component/state tests where feasible | setup opens, camera unavailable/permission states | PARTIAL unless named camera tested | Browser/manual PASS with honest label |
+| `PHASE_1_TASK_02_REALTIME_SETUP_PREVIEW.md` | lint/build/test/tsc when touched | selector/helper/component tests | layout/countdown/theme/frame/style/sticker/text preview changes | Not applicable unless camera claim | Component/manual PASS |
+| `PHASE_1_TASK_03_CAPTURE_COMPOSE_CUSTOMIZE_REGRESSION.md` | lint/build/test | capture/storage/composition/customizer regression tests | capture → compose → customize → download | PARTIAL unless target camera/kiosk tested | Media safety PASS |
+| `PHASE_1_TASK_04_MANUAL_BROWSER_AND_OFFLINE_EVIDENCE.md` | record latest command evidence | Not required unless gaps found | full `/booth` smoke + offline/no-cloud | PASS only with named real device | Checklist complete |
+| `PHASE_1_TASK_05_HARDWARE_LABELING_AND_RELEASE_REPORT.md` | record final command evidence | Evidence mapping only | report review | PASS/PARTIAL/FAIL labels | Verifier package complete |
+| `PHASE_1_TASK_06_ASSET_SYSTEM_INVESTIGATION_ONLY.md` | not required for research unless docs lint exists | not required | research/manual review | Not applicable | PM/Architect review |
+
+Phase 1 cannot be accepted unless:
+
+- command evidence is recorded,
+- browser/manual evidence is recorded,
+- original-preservation evidence exists,
+- offline/no-cloud behavior is verified,
+- no print/cloud UI appears,
+- hardware status is labeled honestly,
+- QA PASS,
+- Reviewer PASS,
+- Verifier PASS or acceptable PARTIAL,
+- PM final approval.
+
 ### Flow F0: Phase 1 setup/capture/customize/download
 
 Required evidence:

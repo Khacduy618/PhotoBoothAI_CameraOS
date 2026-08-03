@@ -1,6 +1,8 @@
 import type { FrameConfig, ThemeConfig, StyleConfig, StickerConfig, TextLabelPresetConfig } from "@/types/theme";
-import { themeConfigs, frameConfigs, styleConfigs } from "@/config/theme.config";
+import { frameConfigs, resolveFrameConfig as resolveBundledFrameConfig } from "@/config/frame.config";
+import { themeConfigs, styleConfigs } from "@/config/theme.config";
 import { stickerConfigs, textLabelPresetConfigs } from "@/config/sticker.config";
+import { LocalFrameRegistry } from "@/services/frame/local-frame-registry";
 
 export interface FramePackage {
     id: string;
@@ -18,102 +20,29 @@ export interface FramePackage {
     };
 }
 
-const framePackages: FramePackage[] = [
-    {
-        id: "none",
-        metadata: {
-            name: "Không khung",
-            category: "Classic",
-            description: "Giữ ảnh sạch, không thêm viền.",
-        },
-        thumbnailUrl: "bg-neutral-900 border border-white/10",
-        config: { borderColor: "transparent", borderWidthRatio: 0, kind: "none" },
-    },
-    {
-        id: "white-border",
-        metadata: {
-            name: "Khung trắng",
-            category: "Classic",
-            description: "Khung trắng photobooth tối giản.",
-        },
-        thumbnailUrl: "bg-[#ffffff] border border-neutral-300",
-        config: { borderColor: "#ffffff", borderWidthRatio: 0.025, kind: "solid" },
-    },
-    {
-        id: "gold",
-        metadata: {
-            name: "Viền vàng",
-            category: "Party",
-            description: "Khung vàng sang trọng cho sự kiện.",
-        },
-        thumbnailUrl: "bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500",
-        config: { borderColor: "#facc15", borderWidthRatio: 0.022, kind: "solid" },
-    },
-    {
-        id: "canva-placeholder",
-        metadata: {
-            name: "Canva PNG",
-            category: "Canva",
-            description: "Khung PNG 4x6 local export từ Canva. Thay placeholder bằng asset đã duyệt.",
-        },
-        thumbnailUrl: "bg-gradient-to-br from-pink-100 via-white to-amber-100 border border-pink-300",
-        config: {
-            borderColor: "#ffffff",
-            borderWidthRatio: 0,
-            kind: "png-overlay",
-        },
-    },
-    {
-        id: "girly",
-        metadata: {
-            name: "Girly Pink",
-            category: "Pastel",
-            description: "Khung hồng phấn ngọt ngào dễ thương.",
-        },
-        thumbnailUrl: "bg-pink-200 border border-pink-300",
-        config: { borderColor: "#fbcfe8", borderWidthRatio: 0.028, kind: "solid" },
-    },
-    {
-        id: "conan",
-        metadata: {
-            name: "Conan Detective",
-            category: "Anime",
-            description: "Khung phong cách phá án kỳ bí màu xanh đen.",
-        },
-        thumbnailUrl: "bg-slate-800 border border-slate-900",
-        config: { borderColor: "#1e293b", borderWidthRatio: 0.028, kind: "solid" },
-    },
-    {
-        id: "steven-universe",
-        metadata: {
-            name: "Steven Universe",
-            category: "Cartoon",
-            description: "Khung vũ trụ lấp lánh rực rỡ sắc màu.",
-        },
-        thumbnailUrl: "bg-gradient-to-tr from-sky-400 via-pink-400 to-yellow-200",
-        config: { borderColor: "#38bdf8", borderWidthRatio: 0.025, kind: "solid" },
-    },
-    {
-        id: "tinder",
-        metadata: {
-            name: "Tinder Match",
-            category: "Social",
-            description: "Khung đỏ Tinder nóng bỏng cho cặp đôi.",
-        },
-        thumbnailUrl: "bg-gradient-to-r from-rose-500 to-orange-500",
-        config: { borderColor: "#f43f5e", borderWidthRatio: 0.025, kind: "solid" },
-    },
-    {
-        id: "matcha",
-        metadata: {
-            name: "Matcha Tea",
-            category: "Nature",
-            description: "Khung xanh matcha nhẹ nhàng tự nhiên.",
-        },
-        thumbnailUrl: "bg-emerald-100 border border-emerald-200",
-        config: { borderColor: "#d1fae5", borderWidthRatio: 0.028, kind: "solid" },
-    },
-];
+const frameThumbnailById: Record<string, string> = {
+    none: "bg-neutral-900 border border-white/10",
+    "white-border": "bg-[#ffffff] border border-neutral-300",
+    gold: "bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500",
+    "canva-placeholder": "bg-gradient-to-br from-pink-100 via-white to-amber-100 border border-pink-300",
+    girly: "bg-pink-200 border border-pink-300",
+    conan: "bg-slate-800 border border-slate-900",
+    "steven-universe": "bg-gradient-to-tr from-sky-400 via-pink-400 to-yellow-200",
+    tinder: "bg-gradient-to-r from-rose-500 to-orange-500",
+    matcha: "bg-emerald-100 border border-emerald-200",
+};
+
+const frameCategoryById: Record<string, string> = {
+    none: "Classic",
+    "white-border": "Classic",
+    gold: "Party",
+    "canva-placeholder": "Canva",
+    girly: "Pastel",
+    conan: "Anime",
+    "steven-universe": "Cartoon",
+    tinder: "Social",
+    matcha: "Nature",
+};
 
 export class AssetManager {
     static getThemes(): ThemeConfig[] {
@@ -121,11 +50,44 @@ export class AssetManager {
     }
 
     static getFramePackages(): FramePackage[] {
-        return framePackages;
+        const bundledPackages: FramePackage[] = frameConfigs.map((frame) => ({
+            id: frame.id,
+            metadata: {
+                name: frame.name,
+                category: frameCategoryById[frame.id] ?? "Local",
+                description: frame.description,
+            },
+            thumbnailUrl: frameThumbnailById[frame.id] ?? "bg-white border border-neutral-200",
+            config: {
+                borderColor: frame.borderColor,
+                borderWidthRatio: frame.borderWidth / 1200,
+                kind: frame.kind ?? "solid",
+                assetUrl: "assetUrl" in frame ? (frame.assetUrl as string | undefined) : undefined,
+            },
+        }));
+
+        const importedRuntimeFrames = LocalFrameRegistry.getPublishedRuntimeFrames();
+        const importedPackages: FramePackage[] = importedRuntimeFrames.map((frame) => ({
+            id: frame.id,
+            metadata: {
+                name: frame.name,
+                category: "Imported Canva",
+                description: frame.description || "Khung PNG import từ Canva",
+            },
+            thumbnailUrl: "bg-gradient-to-br from-emerald-100 via-white to-pink-100 border border-emerald-300",
+            config: {
+                borderColor: frame.borderColor,
+                borderWidthRatio: (frame.borderWidth || 0) / 1200,
+                kind: frame.kind ?? "png-overlay",
+                assetUrl: frame.assetUrl,
+            },
+        }));
+
+        return [...bundledPackages, ...importedPackages];
     }
 
     static getFramePackageById(id: string): FramePackage | undefined {
-        return framePackages.find((p) => p.id === id);
+        return this.getFramePackages().find((p) => p.id === id);
     }
 
     static getStyleConfigs(): StyleConfig[] {
@@ -149,20 +111,10 @@ export class AssetManager {
     }
 
     static resolveFrameConfig(frameId: string): FrameConfig {
-        const pkg = this.getFramePackageById(frameId);
-        if (pkg) {
-            return {
-                id: pkg.id,
-                name: pkg.metadata.name,
-                description: pkg.metadata.description,
-                borderColor: pkg.config.borderColor,
-                borderWidth: Math.round(pkg.config.borderWidthRatio * 1200),
-                kind: pkg.config.kind,
-                assetUrl: pkg.config.assetUrl,
-                source: pkg.config.kind === "png-overlay" ? "canva" : "bundled",
-            };
+        const imported = LocalFrameRegistry.getPublishedRuntimeFrames().find((f) => f.id === frameId);
+        if (imported) {
+            return imported;
         }
-        const config = frameConfigs.find((f) => f.id === frameId);
-        return config ?? frameConfigs[0];
+        return resolveBundledFrameConfig(frameId);
     }
 }

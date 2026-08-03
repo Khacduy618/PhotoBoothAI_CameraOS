@@ -10,6 +10,8 @@ import { FrameSelector } from "@/components/selectors/frame-selector";
 import { StyleSelector } from "@/components/selectors/style-selector";
 import { StickerSelector } from "@/components/selectors/sticker-selector";
 import { TextSelector } from "@/components/selectors/text-selector";
+import { resolveBoothLayoutConfig } from "@/config/layout.config";
+import { resolveFrameConfig } from "@/config/frame.config";
 
 export interface ToolRenderProps {
     selection: BoothSelection;
@@ -37,12 +39,27 @@ export const TOOL_RENDERERS: Record<EditorToolId, ToolRenderer> = {
         <FrameSelector
             frameId={props.selection.frameId}
             frameColor={props.selection.frameColor}
-            onChangeFrame={(frameId, defaultColor) =>
-                props.updateSelection({ frameId, frameColor: defaultColor })
-            }
+            onChangeFrame={(frameId, defaultColor) => {
+                const frameConfig = resolveFrameConfig(frameId);
+                const patch: Partial<BoothSelection> = { frameId, frameColor: defaultColor };
+
+                const isLandscape = frameConfig.photoViewportOrientation ? frameConfig.photoViewportOrientation === "landscape" : ((frameConfig.outputWidth || 1800) >= (frameConfig.outputHeight || 1200));
+                const shotCount = frameConfig.shotCount || 4;
+
+                let layoutId = props.selection.layoutId;
+                if (shotCount === 1) layoutId = isLandscape ? "single-landscape-1800x1200" : "single-portrait-1200x1800";
+                else if (shotCount === 2) layoutId = isLandscape ? "two-landscape-1x2" : "two-portrait-1x2";
+                else if (shotCount === 4) layoutId = isLandscape ? "four-landscape-2x2" : "four-portrait-2x2";
+                else if (shotCount === 6) layoutId = isLandscape ? "six-landscape-2x3" : "six-portrait-2x3";
+                else if (shotCount === 8) layoutId = isLandscape ? "eight-landscape-2x4" : "eight-portrait-2x4";
+
+                patch.layoutId = layoutId;
+                props.updateSelection(patch);
+            }}
             onChangeFrameColor={(frameColor) =>
                 props.updateSelection({ frameColor })
             }
+            compatibleLayout={resolveBoothLayoutConfig(props.selection.layoutId)}
         />
     ),
 

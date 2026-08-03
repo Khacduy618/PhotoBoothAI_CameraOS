@@ -1,5 +1,6 @@
 import type {
     BoothCountdownSeconds,
+    BoothLayoutFamily,
     BoothLayoutId,
     BoothOutputCustomization,
 } from "@/types/customization";
@@ -13,6 +14,16 @@ export interface ThemeConfig {
     accentColor: string;
 }
 
+export interface FrameSlot {
+    id: string;
+    index: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    photoViewportOrientation?: "portrait" | "landscape";
+}
+
 export interface FrameConfig {
     id: string;
     name: string;
@@ -22,7 +33,15 @@ export interface FrameConfig {
     kind?: "none" | "solid" | "template" | "png-overlay";
     patternUrl?: string;
     assetUrl?: string;
-    source?: "bundled" | "canva";
+    source?: "bundled" | "canva" | "operator-upload";
+    shotCount?: number;
+    /** Legacy-compatible photo viewport orientation; not fixed frame orientation. */
+    orientation?: "portrait" | "landscape";
+    photoViewportOrientation?: "portrait" | "landscape";
+    layoutFamily?: BoothLayoutFamily;
+    outputWidth?: number;
+    outputHeight?: number;
+    slots?: readonly FrameSlot[];
 }
 
 export interface StickerConfig {

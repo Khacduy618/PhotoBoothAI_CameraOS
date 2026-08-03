@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, act } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import React from "react";
 import { PreviewRenderer } from "./preview-renderer";
@@ -7,6 +7,19 @@ import { clampOverlayPosition, measureTextOverlay } from "@/types/customization"
 import { composePhotoLayout } from "@/services/render/layout-compositor.service";
 import { defaultBoothSelection } from "@/config/theme.config";
 import { BoothSessionProvider, BoothSessionContext } from "./booth-session-context";
+import type { BoothSelection } from "@/types/theme";
+import type { OverlayItem } from "@/types/customization";
+import type { CanvasLike } from "@/services/render/layout-compositor.service";
+
+type BoothSessionTestContext = NonNullable<React.ContextType<typeof BoothSessionContext>>;
+type CanvasBlobCallback = (blob: Blob | null) => void;
+
+function requireTestContext(context: BoothSessionTestContext | null): BoothSessionTestContext {
+    if (!context) {
+        throw new Error("Booth session context was not captured in test.");
+    }
+    return context;
+}
 
 describe("Drawing & Typography Parity Regression Lock", () => {
     afterEach(() => {
@@ -114,7 +127,7 @@ describe("Drawing & Typography Parity Regression Lock", () => {
     });
 
     it("captures pointer dragging on EditablePreview sheet background to record new drawing strokes", () => {
-        let contextVal: any = null;
+        let contextVal: BoothSessionTestContext | null = null;
         const TestComponent = () => {
             const ctx = React.useContext(BoothSessionContext);
             contextVal = ctx;
@@ -156,9 +169,12 @@ describe("Drawing & Typography Parity Regression Lock", () => {
             fireEvent.pointerUp(previewContainer, { clientX: 210, clientY: 220 });
 
             // Expect committed stroke in context
-            const overlays = contextVal.selection.customization.overlays;
-            const drawingOverlay = overlays.find((o: any) => o.type === "drawing");
+            const overlays = requireTestContext(contextVal).selection.customization.overlays ?? [];
+            const drawingOverlay = overlays.find((o: OverlayItem) => o.type === "drawing");
             expect(drawingOverlay).toBeTruthy();
+            if (!drawingOverlay || drawingOverlay.type !== "drawing") {
+                throw new Error("Expected drawing overlay");
+            }
             expect(drawingOverlay.color).toBe("#f59e0b");
             expect(drawingOverlay.points).toEqual([
                 { x: 0.1, y: 0.1 },
@@ -188,16 +204,16 @@ describe("Drawing & Typography Parity Regression Lock", () => {
             width: 1200,
             height: 1800,
             getContext: () => canvasCtxMock,
-            toBlob: (cb: any) => cb(new Blob()),
+            toBlob: (cb: CanvasBlobCallback) => cb(new Blob()),
         };
 
         const result = await composePhotoLayout({
             sources: [],
-            createImage: async () => ({ naturalWidth: 600, naturalHeight: 900 } as any),
-            createCanvas: () => canvasMock as any,
+            createImage: async () => ({ naturalWidth: 600, naturalHeight: 900 } as HTMLImageElement),
+            createCanvas: () => canvasMock as unknown as CanvasLike,
             layoutId: "2x2",
             renderConfig: {
-                layout: { id: "2x2", name: "2x2", columns: 2, rows: 2, shotCount: 0, outputWidth: 1200, outputHeight: 1800, description: "", orientation: "portrait" as const },
+                layout: { id: "2x2", name: "2x2", columns: 2, rows: 2, shotCount: 0, outputWidth: 1200, outputHeight: 1800, description: "", orientation: "portrait" as const, layoutFamily: "2x2" as const },
                 theme: { id: "classic", name: "Classic", description: "", backgroundColor: "#fff", textColor: "#000", accentColor: "#00f" },
                 frame: { id: "none", name: "None", description: "", borderColor: "transparent", borderWidth: 0, kind: "none" },
                 style: { id: "none", name: "None", description: "", mode: "none" },
@@ -256,7 +272,7 @@ describe("Drawing & Typography Parity Regression Lock", () => {
     });
 
     it("verifies overlay selection click triggers selectedOverlayId in context", () => {
-        let contextVal: any = null;
+        let contextVal: BoothSessionTestContext | null = null;
         const TestComponent = () => {
             const ctx = React.useContext(BoothSessionContext);
             contextVal = ctx;
@@ -298,12 +314,12 @@ describe("Drawing & Typography Parity Regression Lock", () => {
 
         if (stickerItem) {
             fireEvent.pointerDown(stickerItem);
-            expect(contextVal.selectedOverlayId).toBe("sticker-1");
+            expect(requireTestContext(contextVal).selectedOverlayId).toBe("sticker-1");
         }
     });
 
     it("verifies pointer dragging updates overlay coordinates in context", () => {
-        let contextVal: any = null;
+        let contextVal: BoothSessionTestContext | null = null;
         const TestComponent = () => {
             const ctx = React.useContext(BoothSessionContext);
             contextVal = ctx;
@@ -360,8 +376,6 @@ describe("Drawing & Typography Parity Regression Lock", () => {
         const stickerItem = container.querySelector('[data-overlay-id="sticker-1"]');
         expect(stickerItem).toBeTruthy();
 
-        const { act } = require("@testing-library/react");
-
         if (stickerItem) {
             act(() => {
                 // Pointer down to start drag
@@ -372,7 +386,10 @@ describe("Drawing & Typography Parity Regression Lock", () => {
                 window.dispatchEvent(moveEvent);
             });
 
-            const updatedSticker = contextVal.selection.customization.overlays.find((o: any) => o.id === "sticker-1");
+            const updatedSticker = (requireTestContext(contextVal).selection.customization.overlays ?? []).find((o: OverlayItem) => o.id === "sticker-1");
+            if (!updatedSticker) {
+                throw new Error("Expected updated sticker overlay");
+            }
             expect(updatedSticker.x).toBe(0.6);
             expect(updatedSticker.y).toBe(0.7);
 
@@ -385,7 +402,7 @@ describe("Drawing & Typography Parity Regression Lock", () => {
     });
 
     it("verifies mouse wheel scaling and shift-wheel rotation", () => {
-        let contextVal: any = null;
+        let contextVal: BoothSessionTestContext | null = null;
         const TestComponent = () => {
             const ctx = React.useContext(BoothSessionContext);
             contextVal = ctx;
@@ -428,18 +445,24 @@ describe("Drawing & Typography Parity Regression Lock", () => {
         if (stickerItem) {
             // Scale down (scroll down)
             fireEvent.wheel(stickerItem, { deltaY: 100, shiftKey: false });
-            let updatedSticker = contextVal.selection.customization.overlays.find((o: any) => o.id === "sticker-1");
+            let updatedSticker = (requireTestContext(contextVal).selection.customization.overlays ?? []).find((o: OverlayItem) => o.id === "sticker-1");
+            if (!updatedSticker || updatedSticker.type !== "sticker") {
+                throw new Error("Expected sticker overlay after scale");
+            }
             expect(updatedSticker.scale).toBeCloseTo(0.9);
 
             // Rotate clockwise (shift + scroll down)
             fireEvent.wheel(stickerItem, { deltaY: 100, shiftKey: true });
-            updatedSticker = contextVal.selection.customization.overlays.find((o: any) => o.id === "sticker-1");
+            updatedSticker = (requireTestContext(contextVal).selection.customization.overlays ?? []).find((o: OverlayItem) => o.id === "sticker-1");
+            if (!updatedSticker || updatedSticker.type !== "sticker") {
+                throw new Error("Expected sticker overlay after rotate");
+            }
             expect(updatedSticker.rotationRadians).toBeCloseTo(0.087266, 3); // ~5 deg in rad
         }
     });
 
     it("verifies duplicateOverlay and removeOverlay context action functions work correctly", () => {
-        let contextVal: any = null;
+        let contextVal: BoothSessionTestContext | null = null;
         const TestComponent = () => {
             const ctx = React.useContext(BoothSessionContext);
             contextVal = ctx;
@@ -463,8 +486,6 @@ describe("Drawing & Typography Parity Regression Lock", () => {
             }
         };
 
-        const { act } = require("@testing-library/react");
-
         render(
             <BoothSessionProvider initialSelection={selection}>
                 <TestComponent />
@@ -472,25 +493,28 @@ describe("Drawing & Typography Parity Regression Lock", () => {
         );
 
         expect(contextVal).toBeTruthy();
-        expect(contextVal.selection.customization.overlays).toHaveLength(1);
+        expect(requireTestContext(contextVal).selection.customization.overlays ?? []).toHaveLength(1);
 
         // Perform duplicate
         act(() => {
-            contextVal.duplicateOverlay("item-to-dup");
+            requireTestContext(contextVal).duplicateOverlay("item-to-dup");
         });
 
-        expect(contextVal.selection.customization.overlays).toHaveLength(2);
-        const duplicated = contextVal.selection.customization.overlays.find((o: any) => o.id !== "item-to-dup");
+        expect(requireTestContext(contextVal).selection.customization.overlays ?? []).toHaveLength(2);
+        const duplicated = (requireTestContext(contextVal).selection.customization.overlays ?? []).find((o: OverlayItem) => o.id !== "item-to-dup");
         expect(duplicated).toBeTruthy();
+        if (!duplicated || duplicated.type !== "sticker") {
+            throw new Error("Expected duplicated sticker overlay");
+        }
         expect(duplicated.content).toBe("party-popper");
         expect(duplicated.x).toBeCloseTo(0.23);
         expect(duplicated.y).toBeCloseTo(0.23);
 
         // Perform delete on the duplicate
         act(() => {
-            contextVal.removeOverlay(duplicated.id);
+            requireTestContext(contextVal).removeOverlay(duplicated.id);
         });
-        expect(contextVal.selection.customization.overlays).toHaveLength(1);
+        expect(requireTestContext(contextVal).selection.customization.overlays ?? []).toHaveLength(1);
     });
 
     it("verifies boundary clamping handles oversized rotated overlays safely", () => {

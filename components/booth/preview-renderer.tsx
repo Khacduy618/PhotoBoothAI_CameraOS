@@ -104,6 +104,10 @@ export function PreviewRenderer({
                          const hasPhoto = index < chronological.length;
                          const cellPhoto = hasPhoto ? chronological[index] : null;
 
+                         const resolvedPhotoUrl = cellPhoto
+                             ? cellPhoto.outputUrl || cellPhoto.originalUrl
+                             : null;
+
                          return (
                              <div
                                  key={cell.id}
@@ -119,7 +123,7 @@ export function PreviewRenderer({
                                      index={index}
                                      stream={stream}
                                      cameraStatus={cameraStatus}
-                                     photoUrl={cellPhoto ? cellPhoto.outputUrl : null}
+                                     photoUrl={resolvedPhotoUrl}
                                      theme={theme}
                                      frame={cellFrame}
                                      style={style}
@@ -130,6 +134,23 @@ export function PreviewRenderer({
                          );
                     })}
                 </div>
+
+                {/* Frame Overlay Layer - Always lays ON TOP of all photo viewports */}
+                {frame.assetUrl ? (
+                    <img
+                        src={frame.assetUrl}
+                        alt={frame.name}
+                        className="absolute inset-0 w-full h-full object-fill pointer-events-none select-none z-10"
+                    />
+                ) : frame.borderWidth > 0 && frame.borderColor !== "transparent" ? (
+                    <div
+                        className="absolute inset-0 pointer-events-none select-none z-10 border-solid"
+                        style={{
+                            borderColor: frame.borderColor,
+                            borderWidth: `${(frame.borderWidth / renderPlan.sheet.width) * 100}cqw`,
+                        }}
+                    />
+                ) : null}
 
                 {/* SVG Drawing Strokes Overlay */}
                 <svg

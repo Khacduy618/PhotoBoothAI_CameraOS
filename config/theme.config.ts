@@ -3,9 +3,10 @@ import {
     defaultCountdownSeconds,
     isBoothLayoutId,
 } from "@/config/layout.config";
+import { frameConfigs } from "@/config/frame.config";
+export { frameConfigs, resolveFrameConfig } from "@/config/frame.config";
 import type {
     BoothSelection,
-    FrameConfig,
     StyleConfig,
     ThemeConfig,
 } from "@/types/theme";
@@ -37,42 +38,6 @@ export const themeConfigs = [
     },
 ] as const satisfies readonly ThemeConfig[];
 
-export const frameConfigs = [
-    {
-        id: "none",
-        name: "Không khung",
-        description: "Giữ ảnh sạch, không thêm viền.",
-        borderColor: "transparent",
-        borderWidth: 0,
-        kind: "none",
-    },
-    {
-        id: "white-border",
-        name: "Khung trắng",
-        description: "Khung trắng photobooth để thêm nhãn, sticker và nét vẽ custom.",
-        borderColor: "#ffffff",
-        borderWidth: 32,
-        kind: "solid",
-    },
-    {
-        id: "canva-placeholder",
-        name: "Canva PNG Placeholder",
-        description: "Slot metadata cho khung Canva PNG 4x6 portrait. Chưa gắn file cho tới khi asset PNG được duyệt.",
-        borderColor: "#fce7f3",
-        borderWidth: 0,
-        kind: "png-overlay",
-        source: "canva",
-    },
-    {
-        id: "gold",
-        name: "Viền vàng",
-        description: "Khung viền vàng nổi bật cho khoảnh khắc kỷ niệm.",
-        borderColor: "#facc15",
-        borderWidth: 32,
-        kind: "solid",
-    },
-] as const satisfies readonly FrameConfig[];
-
 export const styleConfigs = [
     {
         id: "none",
@@ -101,14 +66,19 @@ export const defaultBoothCustomization = {
     overlays: [],
 } as const;
 
-export const defaultBoothSelection: BoothSelection = {
-    themeId: themeConfigs[0].id,
-    frameId: frameConfigs[0].id,
-    styleId: styleConfigs[0].id,
+export const defaultBoothSelection: BoothSelection = Object.freeze({
+    themeId: "classic",
+    frameId: "white-border",
+    styleId: "none",
     layoutId: defaultBoothLayoutId,
-    countdownSeconds: defaultCountdownSeconds,
-    customization: defaultBoothCustomization,
-};
+    countdownSeconds: 8,
+    customization: {
+        stickerItems: [],
+        textLabels: [],
+        drawingStrokes: [],
+        overlays: [],
+    },
+});
 
 export function resolveThemeConfig(
     themeId: string,
@@ -116,15 +86,6 @@ export function resolveThemeConfig(
     return (
         themeConfigs.find((theme) => theme.id === themeId) ??
         themeConfigs[0]
-    );
-}
-
-export function resolveFrameConfig(
-    frameId: string,
-): FrameConfig {
-    return (
-        frameConfigs.find((frame) => frame.id === frameId) ??
-        frameConfigs[0]
     );
 }
 

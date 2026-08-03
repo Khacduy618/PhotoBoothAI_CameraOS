@@ -1,11 +1,16 @@
 import React from "react";
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import { ThemeSelector } from "./theme-selector";
 import { FrameSelector } from "./frame-selector";
 import { StyleSelector } from "./style-selector";
 import { StickerSelector } from "./sticker-selector";
 import { TextSelector } from "./text-selector";
+import { resolveBoothLayoutConfig } from "@/config/layout.config";
+
+afterEach(() => {
+    cleanup();
+});
 
 describe("Controlled Selectors Unit Tests", () => {
     describe("ThemeSelector", () => {
@@ -24,6 +29,22 @@ describe("Controlled Selectors Unit Tests", () => {
     });
 
     describe("FrameSelector", () => {
+        it("displays all available attendee frame options for the layout", () => {
+            const handleFrameChange = vi.fn();
+            const handleColorChange = vi.fn();
+
+            render(
+                <FrameSelector
+                    frameId="white-border"
+                    onChangeFrame={handleFrameChange}
+                    onChangeFrameColor={handleColorChange}
+                    compatibleLayout={resolveBoothLayoutConfig("four-landscape-2x2")}
+                />,
+            );
+
+            expect(screen.getAllByText(/Ngang 1800x1200/i).length).toBeGreaterThan(0);
+        });
+
         it("renders frame options and handles frame & color selection", () => {
             const handleFrameChange = vi.fn();
             const handleColorChange = vi.fn();
@@ -37,7 +58,7 @@ describe("Controlled Selectors Unit Tests", () => {
                 />,
             );
 
-            expect(screen.getByText("Khung trắng")).toBeTruthy();
+            expect(screen.getAllByText(/Ngang 1800x1200/i).length).toBeGreaterThan(0);
 
             const whiteSwatch = screen.getByTitle("Trắng");
             fireEvent.click(whiteSwatch);

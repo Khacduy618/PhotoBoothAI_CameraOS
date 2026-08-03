@@ -1,4 +1,19 @@
 export type BoothLayoutId =
+    | "single-portrait-1200x1800"
+    | "single-landscape-1800x1200"
+    | "two-portrait-1x2"
+    | "two-landscape-1x2"
+    | "two-landscape-2x1"
+    | "four-portrait-2x2"
+    | "four-landscape-2x2"
+    | "four-portrait-1x4"
+    | "four-landscape-1x4"
+    | "six-portrait-2x3"
+    | "six-landscape-2x3"
+    | "six-landscape-3x2"
+    | "eight-portrait-2x4"
+    | "eight-landscape-2x4"
+    | "eight-landscape-4x2"
     | "single-4x6-landscape"
     | "stacked-2-4x6-portrait"
     | "grid-2x2-4x6-portrait"
@@ -8,6 +23,14 @@ export type BoothLayoutId =
     | "2x2"
     | "1x4-vertical"
     | "2x3";
+
+export type BoothLayoutFamily =
+    | "single"
+    | "1x2"
+    | "2x2"
+    | "1x4"
+    | "2x3"
+    | "2x4";
 
 export interface BoothLayoutConfig {
     id: BoothLayoutId;
@@ -19,6 +42,7 @@ export interface BoothLayoutConfig {
     outputWidth: number;
     outputHeight: number;
     orientation: "square" | "portrait" | "landscape";
+    layoutFamily: BoothLayoutFamily;
 }
 
 export type BoothCountdownSeconds = 3 | 6 | 8 | 10;

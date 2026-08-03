@@ -6,6 +6,8 @@ import { resolveLayoutGeometry } from "./layout-geometry.service";
 import { TextLayoutEngine } from "./text-layout.service";
 import { RenderAssetLoaderService } from "./render-asset-loader.service";
 import { CanvasRenderer } from "./canvas-renderer.service";
+import { resolveRenderPlan } from "./render-plan.service";
+import { resolvePhotoSlots } from "./photo-slot-resolver.service";
 
 export interface LayoutCompositorSource {
     photoId: string;
@@ -96,7 +98,16 @@ export async function composePhotoLayout(
         canvas.height = config.outputHeight;
     }
 
-    const geometry = resolveLayoutGeometry(config.layout, config.frame);
+    const resolvedPhotoSlots = resolvePhotoSlots({
+        layout: config.layout,
+        frame: config.frame,
+    });
+    const configWithResolvedSlots: RenderConfig = {
+        ...config,
+        photoSlots: resolvedPhotoSlots,
+    };
+
+    const geometry = resolveLayoutGeometry(configWithResolvedSlots.layout, configWithResolvedSlots.frame);
     let preparedAssets;
     try {
         preparedAssets = await RenderAssetLoaderService.loadAssets(config.assetManifest, { createImage: options.createImage });
@@ -117,7 +128,7 @@ export async function composePhotoLayout(
         }
         throw err;
     }
-    const textLayouts = TextLayoutEngine.prepareTextLayouts(config.overlays);
+    const textLayouts = TextLayoutEngine.prepareTextLayouts(configWithResolvedSlots.overlays);
 
     const surface: RenderSurface = {
         width: config.outputWidth,
@@ -130,7 +141,7 @@ export async function composePhotoLayout(
     try {
         const renderResult = await CanvasRenderer.render({
             sources: Array.from(sources),
-            renderConfig: config,
+            renderConfig: configWithResolvedSlots,
             geometry,
             assets: preparedAssets,
             textLayouts,
@@ -150,7 +161,8 @@ export async function composePhotoLayout(
         throw err;
     }
 
-    const cells: LayoutCompositorCell[] = geometry.photoSlots.slice(0, config.layout.shotCount).map((slot, idx) => ({
+    const resolvedPlan = resolveRenderPlan(configWithResolvedSlots, surface);
+    const cells: LayoutCompositorCell[] = resolvedPlan.grid.cells.slice(0, configWithResolvedSlots.layout.shotCount).map((slot, idx) => ({
         photoId: sources[idx] ? sources[idx].photoId : `photo-${idx}`,
         x: slot.x,
         y: slot.y,

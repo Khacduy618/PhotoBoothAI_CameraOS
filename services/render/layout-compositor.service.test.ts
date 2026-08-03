@@ -6,7 +6,7 @@ import {
 } from "@/services/render/layout-compositor.service";
 import { createRenderConfig } from "@/services/render/render-config.builder";
 import { RenderAssetLoaderService } from "@/services/render/render-asset-loader.service";
-import type { BoothSelection } from "@/types/theme";
+import type { BoothSelection, FrameConfig } from "@/types/theme";
 
 function createSource(photoId: string): { photoId: string; blob: Blob } {
     return {
@@ -117,6 +117,52 @@ describe("layout compositor", () => {
         });
 
         expect(drawImage).toHaveBeenCalledTimes(4);
+    });
+
+    it("returns compositor cell metadata from compatible frame slots", async () => {
+        const { canvas } = createCanvasStub();
+        const renderConfig = createRenderConfig(createRenderSelection("four-portrait-2x2"));
+        const metadataFrame: FrameConfig = {
+            ...renderConfig.frame,
+            id: "metadata-frame",
+            kind: "png-overlay",
+            source: "canva",
+            shotCount: 4,
+            photoViewportOrientation: "portrait",
+            layoutFamily: "2x2",
+            outputWidth: 1200,
+            outputHeight: 1800,
+            slots: [
+                { id: "frame-slot-1", index: 0, x: 101, y: 121, width: 301, height: 321 },
+                { id: "frame-slot-2", index: 1, x: 501, y: 121, width: 301, height: 321 },
+                { id: "frame-slot-3", index: 2, x: 101, y: 521, width: 301, height: 321 },
+                { id: "frame-slot-4", index: 3, x: 501, y: 521, width: 301, height: 321 },
+            ],
+        };
+
+        const result = await composePhotoLayout({
+            renderConfig: {
+                ...renderConfig,
+                frame: metadataFrame,
+                photoSlots: undefined,
+            },
+            sources: [
+                createSource("photo-1"),
+                createSource("photo-2"),
+                createSource("photo-3"),
+                createSource("photo-4"),
+            ],
+            createImage: async () => createImage(),
+            createCanvas: () => canvas,
+        });
+
+        expect(result.cells[0]).toEqual({
+            photoId: "photo-1",
+            x: 101,
+            y: 121,
+            width: 301,
+            height: 321,
+        });
     });
 
     it("fails instead of exporting placeholders when default photo loading fails", async () => {

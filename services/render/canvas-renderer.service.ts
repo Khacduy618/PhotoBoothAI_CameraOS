@@ -109,9 +109,15 @@ export class CanvasRenderer {
             }
         }
 
-        // 3. Draw the selected Canva PNG frame overlay once, after photos and before pen strokes.
+        // 3. Draw the selected frame overlay once (Canva PNG overlay or code-designed solid border), after photos and before pen strokes.
         if (assets.frame && context.drawImage) {
             context.drawImage(assets.frame, 0, 0, canvas.width, canvas.height);
+        } else if (renderConfig.frame.borderWidth > 0 && renderConfig.frame.borderColor !== "transparent" && context.strokeRect) {
+            context.save();
+            context.strokeStyle = renderConfig.frame.borderColor;
+            context.lineWidth = renderConfig.frame.borderWidth * 2;
+            context.strokeRect(0, 0, canvas.width, canvas.height);
+            context.restore();
         }
 
         // 4. Draw Overlays (currently drawing-only in the simplified attendee flow; legacy sticker/text rendering remains for stored sessions)

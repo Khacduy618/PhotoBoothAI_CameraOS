@@ -51,9 +51,17 @@ export function resolveLayoutGeometry(
     const safePadding = Math.round(outputPadding * scale);
     const gap = Math.round(60 * scale);
     
-    const cellWidth = (logicalSheet.width - safePadding * 2 - gap * (layout.columns - 1)) / layout.columns;
-    const gridHeight = logicalSheet.height * (1 - geometry.brandingZoneRatio) - safePadding * 2;
-    const cellHeight = (gridHeight - gap * (layout.rows - 1)) / layout.rows;
+    const availableWidth = logicalSheet.width - safePadding * 2;
+    const availableHeight = logicalSheet.height * (1 - geometry.brandingZoneRatio) - safePadding * 2;
+    const maxCellWidth = (availableWidth - gap * (layout.columns - 1)) / layout.columns;
+    const maxCellHeight = (availableHeight - gap * (layout.rows - 1)) / layout.rows;
+    const aspectCellHeight = maxCellWidth / geometry.cellAspectRatio;
+    const cellHeight = Math.min(maxCellHeight, aspectCellHeight);
+    const cellWidth = cellHeight * geometry.cellAspectRatio;
+    const gridWidth = cellWidth * layout.columns + gap * (layout.columns - 1);
+    const gridHeight = cellHeight * layout.rows + gap * (layout.rows - 1);
+    const startX = safePadding + Math.max(0, (availableWidth - gridWidth) / 2);
+    const startY = safePadding + Math.max(0, (availableHeight - gridHeight) / 2);
     
     const photoSlots: PhotoSlotGeometry[] = [];
     const totalCount = layout.columns * layout.rows;
@@ -61,8 +69,8 @@ export function resolveLayoutGeometry(
     for (let index = 0; index < totalCount; index++) {
         const column = index % layout.columns;
         const row = Math.floor(index / layout.columns);
-        const x = Math.round(safePadding + column * (cellWidth + gap));
-        const y = Math.round(safePadding + row * (cellHeight + gap));
+        const x = Math.round(startX + column * (cellWidth + gap));
+        const y = Math.round(startY + row * (cellHeight + gap));
         
         photoSlots.push({
             id: `slot-${index}`,

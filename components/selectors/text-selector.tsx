@@ -157,7 +157,7 @@ export function TextSelector({
                                     }`}
                                 >
                                     <span className="truncate max-w-[80%]">
-                                        {idx + 1}. "{item.text}"
+                                        {`${idx + 1}. "${item.text}"`}
                                     </span>
                                     <button
                                         type="button"
@@ -263,7 +263,7 @@ export function TextSelector({
                             <label className="font-bold text-pink-900/80 block text-[11px]">Bóng đổ (Shadow)</label>
                             <select
                                 value={selectedTextOverlay.shadowPreset || "none"}
-                                onChange={(e) => updateOverlay(selectedTextOverlay.id, { shadowPreset: e.target.value as any })}
+                                onChange={(e) => updateOverlay(selectedTextOverlay.id, { shadowPreset: e.target.value as TextOverlay["shadowPreset"] })}
                                 className="w-full rounded-xl border border-pink-300 bg-white px-2.5 py-1.5 font-bold text-pink-950 focus:outline-none focus:ring-2 focus:ring-pink-400"
                             >
                                 <option value="none">Không bóng</option>

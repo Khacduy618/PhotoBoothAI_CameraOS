@@ -36,6 +36,14 @@ function getShotCountFromSelection(selection: BoothSelection): BoothShotCount {
         : 1;
 }
 
+const defaultPortraitFrameIdByShotCount = Object.freeze({
+    1: "white-border-1shot-portrait",
+    2: "white-border-2shot-portrait",
+    4: "white-border-portrait",
+    6: "white-border-6shot-portrait",
+    8: "eight-portrait-grid",
+} satisfies Record<BoothShotCount, string>);
+
 function buildShotCountSelection(
     selection: BoothSelection,
     shotCount: BoothShotCount,
@@ -44,7 +52,7 @@ function buildShotCountSelection(
         ...selection,
         layoutId: resolveDefaultLayoutIdForShotCount(shotCount),
         countdownSeconds: 8,
-        frameId: "white-border",
+        frameId: defaultPortraitFrameIdByShotCount[shotCount],
         frameColor: undefined,
         styleId: "none",
         customization: {

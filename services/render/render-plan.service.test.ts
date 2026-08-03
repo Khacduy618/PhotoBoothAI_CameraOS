@@ -7,7 +7,7 @@ import type { BoothSelection } from "@/types/theme";
 function createSelection(layoutId: BoothSelection["layoutId"] = "2x2"): BoothSelection {
     return {
         themeId: "classic",
-        frameId: "white-border",
+        frameId: "white-border-portrait",
         styleId: "none",
         layoutId,
         countdownSeconds: 3,

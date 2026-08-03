@@ -18,7 +18,7 @@ function createSource(photoId: string): { photoId: string; blob: Blob } {
 function createRenderSelection(layoutId: BoothSelection["layoutId"] = "2x2"): BoothSelection {
     return {
         themeId: "classic",
-        frameId: "white-border",
+        frameId: "white-border-portrait",
         styleId: "none",
         layoutId,
         countdownSeconds: 8,
@@ -44,11 +44,32 @@ function createCanvasStub() {
     const drawImage = vi.fn();
     const fillRect = vi.fn();
     const clearRect = vi.fn();
+    const beginPath = vi.fn();
+    const rect = vi.fn();
+    const clip = vi.fn();
+    const save = vi.fn();
+    const restore = vi.fn();
+    const moveTo = vi.fn();
+    const lineTo = vi.fn();
+    const stroke = vi.fn();
     const context = {
         fillStyle: "#000000",
+        strokeStyle: "#000000",
+        lineWidth: 1,
+        lineCap: "round",
+        lineJoin: "round",
+        globalAlpha: 1,
         fillRect,
         clearRect,
         drawImage,
+        beginPath,
+        rect,
+        clip,
+        save,
+        restore,
+        moveTo,
+        lineTo,
+        stroke,
     } as unknown as CanvasRenderingContext2D;
     const canvas: CanvasLike = {
         width: 0,
@@ -69,6 +90,14 @@ function createCanvasStub() {
         drawImage,
         fillRect,
         clearRect,
+        beginPath,
+        rect,
+        clip,
+        save,
+        restore,
+        moveTo,
+        lineTo,
+        stroke,
     };
 }
 
@@ -291,6 +320,57 @@ describe("layout compositor", () => {
                 createCanvas: () => createCanvasStub().canvas,
             }),
         ).rejects.toThrow("cần 4 ảnh");
+    });
+
+    it("clips drawing overlays to the frame layer so printed output does not cover photo slots", async () => {
+        const { canvas, rect, clip, stroke } = createCanvasStub();
+        const renderConfig = createRenderConfig({
+            ...createRenderSelection("four-portrait-2x2"),
+            customization: {
+                stickerItems: [],
+                textLabels: [],
+                drawingStrokes: [],
+                overlays: [
+                    {
+                        id: "frame-drawing",
+                        type: "drawing",
+                        x: 0,
+                        y: 0,
+                        baseWidth: 1000,
+                        baseHeight: 1500,
+                        scale: 1,
+                        rotationRadians: 0,
+                        rotationDegrees: 0,
+                        color: "#ffffff",
+                        points: [
+                            { x: 0.1, y: 0.1 },
+                            { x: 0.9, y: 0.9 },
+                        ],
+                        zIndex: 30,
+                        opacity: 1,
+                        brushType: "pen",
+                        strokeWidth: 9,
+                    },
+                ],
+            },
+        });
+
+        await composePhotoLayout({
+            renderConfig,
+            sources: [
+                createSource("photo-1"),
+                createSource("photo-2"),
+                createSource("photo-3"),
+                createSource("photo-4"),
+            ],
+            createImage: async () => createImage(),
+            createCanvas: () => canvas,
+        });
+
+        expect(rect).toHaveBeenCalledWith(0, 0, 1200, 1800);
+        expect(rect).toHaveBeenCalledTimes(9);
+        expect(clip).toHaveBeenCalledWith("evenodd");
+        expect(stroke).toHaveBeenCalledTimes(1);
     });
 
     it("does not mutate source blobs while composing derivatives", async () => {

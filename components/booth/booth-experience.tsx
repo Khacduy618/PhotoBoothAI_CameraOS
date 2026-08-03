@@ -40,7 +40,7 @@ export function resolvePostCaptureDefaultFramePatch(
     }
 
     const matchingFrame = frameConfigs.find(
-        (frame) => frame.shotCount === layout.shotCount,
+        (frame) => getFrameCompatibility(frame, layout).compatible,
     );
 
     if (!matchingFrame) {

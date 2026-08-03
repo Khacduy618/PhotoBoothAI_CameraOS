@@ -27,11 +27,11 @@ export const countdownSecondOptions = [
 export type BoothShotCount = 1 | 2 | 4 | 6 | 8;
 
 export const defaultLayoutIdByShotCount = Object.freeze({
-    1: "single-landscape-1800x1200",
-    2: "two-landscape-1x2",
-    4: "four-landscape-2x2",
-    6: "six-landscape-2x3",
-    8: "eight-landscape-2x4",
+    1: "single-portrait-1200x1800",
+    2: "two-portrait-1x2",
+    4: "four-portrait-2x2",
+    6: "six-portrait-2x3",
+    8: "eight-portrait-2x4",
 } satisfies Record<BoothShotCount, BoothLayoutId>);
 
 export const supportedShotCounts = Object.freeze(

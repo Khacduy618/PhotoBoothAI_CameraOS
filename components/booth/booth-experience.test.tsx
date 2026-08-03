@@ -71,12 +71,12 @@ describe("BoothExperience", () => {
     it("waits for the selected shot count before applying the default review frame", () => {
         const twoShotSelection = {
             ...defaultBoothSelection,
-            layoutId: "two-landscape-1x2" as const,
+            layoutId: "two-portrait-1x2" as const,
         };
 
         expect(resolvePostCaptureDefaultFramePatch(twoShotSelection, 1)).toBeNull();
         expect(resolvePostCaptureDefaultFramePatch(twoShotSelection, 2)).toEqual({
-            frameId: "white-border-2shot-landscape",
+            frameId: "white-border-2shot-portrait",
             frameColor: "#ffffff",
         });
     });
@@ -111,9 +111,9 @@ describe("BoothExperience", () => {
         expect(cameraPreviewMock).toHaveBeenCalledWith(
             expect.objectContaining({
                 selection: expect.objectContaining({
-                    layoutId: "two-landscape-1x2",
+                    layoutId: "two-portrait-1x2",
                     countdownSeconds: 8,
-                    frameId: "white-border",
+                    frameId: "white-border-2shot-portrait",
                     styleId: "none",
                 }),
                 camera: cameraControllerMock,

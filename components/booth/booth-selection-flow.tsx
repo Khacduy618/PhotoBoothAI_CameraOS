@@ -124,7 +124,18 @@ function SetupCameraViewport({
     useEffect(() => {
         if (videoRef.current && stream) {
             videoRef.current.srcObject = stream;
-            void videoRef.current.play?.();
+            const playPromise = videoRef.current.play?.();
+            if (playPromise && typeof playPromise.catch === "function") {
+                void playPromise.catch((cause) => {
+                    const wasInterrupted =
+                        cause instanceof DOMException &&
+                        cause.name === "AbortError";
+
+                    if (!wasInterrupted) {
+                        console.warn("Không thể phát setup camera preview:", cause);
+                    }
+                });
+            }
         }
     }, [stream]);
 

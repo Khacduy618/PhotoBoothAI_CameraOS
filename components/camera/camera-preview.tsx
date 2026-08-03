@@ -852,14 +852,6 @@ export function CameraPreview({
         void video.play().catch(() => {});
     }, [stream, boothState, photoUrl]);
 
-    useEffect(() => {
-        if (boothState === "result") {
-            if (onBackToSetup) {
-                onBackToSetup();
-            }
-        }
-    }, [boothState, onBackToSetup]);
-
     const requiredHoldMs =
         gesture.result.name === "Closed_Fist"
             ? boothConfig.gesture.closedFistHoldMs
@@ -1106,6 +1098,24 @@ export function CameraPreview({
         capturedPhotos,
         selectedLayout.id,
         selection,
+        totalShots,
+    ]);
+
+    useEffect(() => {
+        if (
+            boothState !== "result" ||
+            !finalLayoutUrl ||
+            capturedPhotos.length < totalShots
+        ) {
+            return;
+        }
+
+        onBackToSetup?.();
+    }, [
+        boothState,
+        capturedPhotos.length,
+        finalLayoutUrl,
+        onBackToSetup,
         totalShots,
     ]);
 
@@ -1539,11 +1549,12 @@ export function CameraPreview({
                             boothState === "capturing" ||
                             boothState === "between-shots"
                         }
-                        className="rounded-xl border px-5 py-3 disabled:opacity-40"
+                        className="rounded-xl border px-5 py-3 font-semibold disabled:opacity-40"
                         onClick={
                             captureManually
                         }
                     >
+                        Chụp thủ công
                     </button>
 
                     {!stream ? (

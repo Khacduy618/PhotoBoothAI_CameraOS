@@ -68,6 +68,8 @@ export function useBoothMachine({
     }, [clearCountdownTimeout]);
 
     useEffect(() => {
+        mountedRef.current = true;
+
         return () => {
             mountedRef.current = false;
             cancelActiveCountdown();

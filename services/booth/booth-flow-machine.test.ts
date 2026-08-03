@@ -56,7 +56,7 @@ describe("booth flow machine", () => {
         expect(state.value).toBe("attract");
         expect(state.context).toEqual(
             expect.objectContaining({
-                layoutId: "four-landscape-2x2",
+                layoutId: "four-portrait-2x2",
                 totalShots: 4,
                 countdownSeconds: 8,
                 currentShotIndex: 0,

@@ -38,7 +38,7 @@ permission:
 
 Read relevant rules and docs.
 
-For implementation planning after backlog approval, preserve the approved backlog order and require role/evidence mapping through `docs/product/SPRINT_1_DELIVERY_PLAN.md`, `docs/product/ROLE_TASK_MATRIX.md` and `docs/testing/ACCEPTANCE_EVIDENCE_MATRIX.md`.
+For implementation planning after backlog approval, preserve the approved Guest Flow V3 backlog order and require role/evidence mapping through `docs/product/GUEST_FLOW_V3_DELIVERY_PLAN.md`, `docs/product/GUEST_FLOW_V3_ROLE_TASK_MATRIX.md`, `docs/testing/GUEST_FLOW_V3_ACCEPTANCE_EVIDENCE_MATRIX.md` and `docs/product/GUEST_FLOW_V3_BACKLOG.md`.
 
 Delegate:
 

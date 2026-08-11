@@ -6,7 +6,7 @@ compatibility: opencode
 
 # Backend Implementation
 
-Before coding, confirm the story ID and execution order from `docs/product/SPRINT_1_DELIVERY_PLAN.md`, `docs/product/ROLE_TASK_MATRIX.md` and `docs/testing/ACCEPTANCE_EVIDENCE_MATRIX.md`. Do not skip ahead to later-sprint services without PM approval.
+Before coding, confirm the story ID and execution order from `docs/product/GUEST_FLOW_V3_DELIVERY_PLAN.md`, `docs/product/GUEST_FLOW_V3_ROLE_TASK_MATRIX.md`, `docs/testing/GUEST_FLOW_V3_ACCEPTANCE_EVIDENCE_MATRIX.md` and `docs/product/GUEST_FLOW_V3_BACKLOG.md`. Do not skip ahead to later-milestone services without PM approval.
 
 Checklist:
 

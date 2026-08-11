@@ -41,6 +41,8 @@ Before acting, agents must read the relevant files:
 - `.opencode/rules/storage.md`
 - `.opencode/rules/performance.md`
 - `.opencode/rules/logging.md`
+- `.opencode/rules/mcp-integrations.md`
+- `.opencode/rules/hooks.md`
 
 ### Technical documentation
 
@@ -49,11 +51,12 @@ Currently required:
 - `docs/ai/WORKFLOW.md`
 - `docs/ai/GITFLOW.md`
 - `docs/ai/AGENT_TEAM.md`
-- `docs/product/PRODUCT_BACKLOG.md`
-- `docs/product/REQUIREMENTS_SPEC.md`
-- `docs/product/ROLE_TASK_MATRIX.md`
-- `docs/product/SPRINT_1_DELIVERY_PLAN.md`
-- `docs/testing/ACCEPTANCE_EVIDENCE_MATRIX.md`
+- `docs/architecture/MomentAI_Guest_Internal_System_Design.md`
+- `docs/product/GUEST_FLOW_V3_BACKLOG.md`
+- `docs/product/GUEST_FLOW_V3_DELIVERY_PLAN.md`
+- `docs/product/GUEST_FLOW_V3_ROLE_TASK_MATRIX.md`
+- `docs/product/GUEST_FLOW_V3_VIETNAMESE_SUMMARY.md`
+- `docs/testing/GUEST_FLOW_V3_ACCEPTANCE_EVIDENCE_MATRIX.md`
 
 Architecture-specific required reading will be added after the architecture documentation branch lands. When present, contributors should read:
 
@@ -66,14 +69,15 @@ Architecture-specific required reading will be added after the architecture docu
 
 ## Execution discipline
 
-After PM approval, agents must execute tasks in the order defined by the current sprint delivery plan and product backlog. For Sprint 1, use:
+After PM approval, agents must execute tasks in the order defined by the current Guest Flow V3 delivery plan and backlog. Use:
 
-1. `docs/product/SPRINT_1_DELIVERY_PLAN.md`
-2. `docs/product/ROLE_TASK_MATRIX.md`
-3. `docs/testing/ACCEPTANCE_EVIDENCE_MATRIX.md`
-4. `docs/product/PRODUCT_BACKLOG.md`
+1. `docs/architecture/MomentAI_Guest_Internal_System_Design.md`
+2. `docs/product/GUEST_FLOW_V3_DELIVERY_PLAN.md`
+3. `docs/product/GUEST_FLOW_V3_ROLE_TASK_MATRIX.md`
+4. `docs/testing/GUEST_FLOW_V3_ACCEPTANCE_EVIDENCE_MATRIX.md`
+5. `docs/product/GUEST_FLOW_V3_BACKLOG.md`
 
-Do not skip ahead to later-sprint features or alter role ownership without PM approval.
+Do not skip ahead to later-milestone features or alter role ownership without PM approval.
 
 Frontend implementation must apply the local Design Taste Frontend guidance (`.opencode/skills/design-taste-frontend/SKILL.md`) for UI/UX quality while preserving accessibility, preview performance and recovery clarity. This is a project guidance reference, not a runtime skill-tool requirement unless the current environment exposes it.
 
@@ -116,6 +120,8 @@ Planning
 | backend | subagent | `9router/Implementation` |
 | frontend | subagent | `9router/Implementation` |
 | qa | subagent | `9router/Quality` |
+| hardware-qa | subagent | `9router/Quality` |
+| performance-auditor | subagent | `9router/Quality` |
 | reviewer | subagent | `9router/Quality` |
 | verifier | subagent | `9router/Verification` |
 

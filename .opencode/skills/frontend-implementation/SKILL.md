@@ -8,7 +8,7 @@ compatibility: opencode
 
 Apply the local Design Taste Frontend guidance (`.opencode/skills/design-taste-frontend/SKILL.md`) for UI/UX direction before implementing attendee-facing or operator-facing screens. Treat it as project guidance; load it with the skill tool only when the current environment exposes it. Do not ship generic placeholder UI when a screen is part of the approved backlog.
 
-Before coding, confirm the story ID and execution order from `docs/product/SPRINT_1_DELIVERY_PLAN.md`, `docs/product/ROLE_TASK_MATRIX.md` and `docs/testing/ACCEPTANCE_EVIDENCE_MATRIX.md`. Do not skip ahead to later-sprint UI without PM approval.
+Before coding, confirm the story ID and execution order from `docs/product/GUEST_FLOW_V3_DELIVERY_PLAN.md`, `docs/product/GUEST_FLOW_V3_ROLE_TASK_MATRIX.md`, `docs/testing/GUEST_FLOW_V3_ACCEPTANCE_EVIDENCE_MATRIX.md` and `docs/product/GUEST_FLOW_V3_BACKLOG.md`. Do not skip ahead to later-milestone UI without PM approval.
 
 ## Required booth screens
 

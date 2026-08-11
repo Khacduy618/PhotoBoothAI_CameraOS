@@ -6,7 +6,7 @@ compatibility: opencode
 
 # Test Design
 
-Before designing tests, confirm the story ID, sprint order and evidence requirements from `docs/product/SPRINT_1_DELIVERY_PLAN.md`, `docs/product/ROLE_TASK_MATRIX.md` and `docs/testing/ACCEPTANCE_EVIDENCE_MATRIX.md`. Do not validate future-sprint features as Sprint 1 acceptance without PM approval.
+Before designing tests, confirm the story ID, milestone order and evidence requirements from `docs/product/GUEST_FLOW_V3_DELIVERY_PLAN.md`, `docs/product/GUEST_FLOW_V3_ROLE_TASK_MATRIX.md`, `docs/testing/GUEST_FLOW_V3_ACCEPTANCE_EVIDENCE_MATRIX.md` and `docs/product/GUEST_FLOW_V3_BACKLOG.md`. Do not validate future-milestone features as current milestone acceptance without PM approval.
 
 Always consider:
 

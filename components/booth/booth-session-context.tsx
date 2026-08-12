@@ -308,11 +308,13 @@ function normalizeBoothSelection(selection: BoothSelection): BoothSelection {
 
 interface BoothSessionProviderProps {
     initialSelection: BoothSelection;
+    initialCapturedPhotos?: CapturedPhoto[];
     children: React.ReactNode;
 }
 
 function InnerBoothSessionProvider({
     initialSelection,
+    initialCapturedPhotos = [],
     children,
 }: BoothSessionProviderProps) {
     const [selection, rawSetSelection] = useState<BoothSelection>(() => {
@@ -337,7 +339,7 @@ function InnerBoothSessionProvider({
     const [phase, setPhase] = useState<BoothPhase>("setup");
     const [activeStep, setActiveStep] = useState<SetupStep>("layout");
     const [selectionComplete, setSelectionComplete] = useState(false);
-    const [capturedPhotos, setCapturedPhotos] = useState<CapturedPhoto[]>([]);
+    const [capturedPhotos, setCapturedPhotos] = useState<CapturedPhoto[]>(initialCapturedPhotos);
     const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
 
     const camera = useCameraContext()!;
@@ -898,6 +900,7 @@ function InnerBoothSessionProvider({
 
 export function BoothSessionProvider({
     initialSelection,
+    initialCapturedPhotos = [],
     children,
 }: BoothSessionProviderProps) {
     const cameraContext = useCameraContext();
@@ -905,7 +908,10 @@ export function BoothSessionProvider({
     if (!cameraContext) {
         return (
             <CameraProvider>
-                <InnerBoothSessionProvider initialSelection={initialSelection}>
+                <InnerBoothSessionProvider
+                    initialSelection={initialSelection}
+                    initialCapturedPhotos={initialCapturedPhotos}
+                >
                     {children}
                 </InnerBoothSessionProvider>
             </CameraProvider>
@@ -913,7 +919,10 @@ export function BoothSessionProvider({
     }
 
     return (
-        <InnerBoothSessionProvider initialSelection={initialSelection}>
+        <InnerBoothSessionProvider
+            initialSelection={initialSelection}
+            initialCapturedPhotos={initialCapturedPhotos}
+        >
             {children}
         </InnerBoothSessionProvider>
     );

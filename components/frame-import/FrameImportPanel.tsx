@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { analyzeImportFrame } from "@/services/frame-import/frame-import-analyzer.service";
 import type { FrameImportResult, FrameDefinition } from "@/services/frame-import/frame-import.types";
 import { LocalFrameRegistry } from "@/services/frame/local-frame-registry";
+import { punchOutFrameSlots } from "@/services/frame-import/transparent-punchout.service";
 import { FrameImportResultCard } from "./FrameImportResultCard";
 
 interface ImageFileState {
@@ -14,22 +15,55 @@ interface ImageFileState {
     isPublished?: boolean;
 }
 
+interface AdminEventRecord {
+    eventId: string;
+    name: string;
+    status: "active" | "archived";
+}
+
+type AdminFrameDefinition = FrameDefinition & { eventId?: string };
+
+function buildAdminHeaders(includeJson = false): HeadersInit {
+    return includeJson ? { "Content-Type": "application/json" } : {};
+}
+
 export function FrameImportPanel() {
     const [fileStates, setFileStates] = useState<ImageFileState[]>([]);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [filterStatus, setFilterStatus] = useState<"all" | "auto-approved" | "needs-review" | "rejected">("all");
     const [activeTab, setActiveTab] = useState<"import" | "registry">("import");
-    const [allDefinitions, setAllDefinitions] = useState<readonly FrameDefinition[]>([]);
+    const [allDefinitions, setAllDefinitions] = useState<readonly AdminFrameDefinition[]>([]);
+    const [events, setEvents] = useState<readonly AdminEventRecord[]>([]);
+    const [selectedEventId, setSelectedEventId] = useState("event_hoi_an_heritage");
+    const [newEventName, setNewEventName] = useState("");
     const [registryFilter, setRegistryFilter] = useState<"all" | "published" | "private">("all");
 
+    const refreshAdminRegistry = async (eventId = selectedEventId) => {
+        const frameQuery = `/api/admin/frames?eventId=${encodeURIComponent(eventId)}`;
+        const [eventsResponse, framesResponse] = await Promise.all([
+            fetch("/api/admin/events"),
+            fetch(frameQuery),
+        ]);
+        const eventsPayload = await eventsResponse.json() as { events?: AdminEventRecord[] };
+        const framesPayload = await framesResponse.json() as { frames?: AdminFrameDefinition[] };
+        const nextEvents = eventsPayload.events ?? [];
+        setEvents(nextEvents);
+        setAllDefinitions(framesPayload.frames ?? []);
+        if (!nextEvents.some((event) => event.eventId === eventId) && nextEvents[0]) {
+            setSelectedEventId(nextEvents[0].eventId);
+        }
+    };
+
     useEffect(() => {
-        const updateRegistryState = () => {
-            setAllDefinitions(LocalFrameRegistry.getAllDefinitions());
-        };
-        updateRegistryState();
-        return LocalFrameRegistry.subscribe(updateRegistryState);
+        void refreshAdminRegistry();
+        void LocalFrameRegistry.migrateLocalStorageFramesToAdminDb("event_hoi_an_heritage").then(() => refreshAdminRegistry());
     }, []);
 
+    useEffect(() => {
+        void refreshAdminRegistry(selectedEventId);
+    }, [selectedEventId]);
+
+    const selectedEvent = events.find((event) => event.eventId === selectedEventId);
     const publishedCount = allDefinitions.filter((d) => d.status !== "private").length;
     const privateCount = allDefinitions.filter((d) => d.status === "private").length;
 
@@ -107,21 +141,108 @@ export function FrameImportPanel() {
         }
     };
 
-    const handlePublish = (definition: FrameDefinition, fileName: string) => {
-        LocalFrameRegistry.registerFrame({
-            ...definition,
-            status: "published",
+    const handleCreateEvent = async () => {
+        const headers = buildAdminHeaders(true);
+        const response = await fetch("/api/admin/events", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ name: newEventName }),
         });
-        setFileStates((prev) =>
-            prev.map((s) => (s.file.name === fileName ? { ...s, isPublished: true } : s)),
-        );
+        const payload = await response.json() as { ok?: boolean; event?: AdminEventRecord; error?: string };
+        if (!payload.ok || !payload.event) {
+            window.alert(payload.error || "Không tạo được event.");
+            return;
+        }
+        setNewEventName("");
+        setSelectedEventId(payload.event.eventId);
+        await refreshAdminRegistry(payload.event.eventId);
+    };
+
+    const saveFrameToSelectedEvent = async (definition: FrameDefinition) => {
+        const definitionWithEvent = {
+            ...definition,
+            eventId: selectedEventId,
+            status: "published" as const,
+        };
+        const headers = buildAdminHeaders(true);
+        const response = await fetch("/api/admin/frames", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ eventId: selectedEventId, frame: definitionWithEvent }),
+        });
+        const payload = await response.json() as { ok?: boolean; error?: string };
+        if (!payload.ok) {
+            throw new Error(payload.error || "Không lưu được khung vào database.");
+        }
+        LocalFrameRegistry.notifyExternalChange();
+        await refreshAdminRegistry(selectedEventId);
+    };
+
+    const handlePublish = async (definition: FrameDefinition, fileName: string) => {
+        try {
+            await saveFrameToSelectedEvent(definition);
+            setFileStates((prev) =>
+                prev.map((s) => (s.file.name === fileName ? { ...s, isPublished: true } : s)),
+            );
+        } catch (cause) {
+            window.alert(cause instanceof Error ? cause.message : "Không publish được khung.");
+        }
+    };
+
+    const handleToggleFrameStatus = async (frame: AdminFrameDefinition) => {
+        const nextStatus = frame.status === "private" ? "published" : "private";
+        const headers = buildAdminHeaders(true);
+        const response = await fetch("/api/admin/frames", {
+            method: "PATCH",
+            headers,
+            body: JSON.stringify({ eventId: selectedEventId, frameId: frame.id, status: nextStatus }),
+        });
+        const payload = await response.json() as { ok?: boolean; error?: string };
+        if (!payload.ok) {
+            window.alert(payload.error || "Không đổi được trạng thái khung.");
+            return;
+        }
+        LocalFrameRegistry.notifyExternalChange();
+        await refreshAdminRegistry(selectedEventId);
+    };
+
+    const handleDeleteFrame = async (frame: AdminFrameDefinition) => {
+        if (!window.confirm(`Bạn có muốn xoá khung "${frame.name}" khỏi SQLite Registry?`)) return;
+        const headers = buildAdminHeaders();
+        const response = await fetch(`/api/admin/frames?eventId=${encodeURIComponent(selectedEventId)}&frameId=${encodeURIComponent(frame.id)}`, {
+            method: "DELETE",
+            headers,
+        });
+        const payload = await response.json() as { ok?: boolean; error?: string };
+        if (!payload.ok) {
+            window.alert(payload.error || "Không xoá được khung.");
+            return;
+        }
+        LocalFrameRegistry.notifyExternalChange();
+        await refreshAdminRegistry(selectedEventId);
+    };
+
+    const handleClearSelectedEventFrames = async () => {
+        if (!window.confirm("Bạn có chắc chắn muốn xoá TOÀN BỘ khung trong event đang chọn khỏi SQLite Registry?")) return;
+        const headers = buildAdminHeaders();
+        const response = await fetch(`/api/admin/frames?eventId=${encodeURIComponent(selectedEventId)}`, {
+            method: "DELETE",
+            headers,
+        });
+        const payload = await response.json() as { ok?: boolean; error?: string };
+        if (!payload.ok) {
+            window.alert(payload.error || "Không xoá được danh sách khung.");
+            return;
+        }
+        LocalFrameRegistry.notifyExternalChange();
+        await refreshAdminRegistry(selectedEventId);
     };
 
     const handleReject = (importId: string) => {
         setFileStates((prev) => prev.filter((s) => s.result?.importId !== importId));
     };
 
-    const handlePublishAllApproved = () => {
+    const handlePublishAllApproved = async () => {
         for (const item of fileStates) {
             if (
                 item.result &&
@@ -135,6 +256,13 @@ export function FrameImportPanel() {
 
                 const photoViewportOrientation: "portrait" | "landscape" =
                     item.result.image.width > item.result.image.height ? "landscape" : "portrait";
+                const photoAspectRatio = photoViewportOrientation === "landscape" ? "3:2" : "2:3";
+
+                const supportedShotCounts = [1, 2, 4, 6, 8] as const;
+                const detectedShotCount = supportedShotCounts.find((count) => count === item.result!.slots.length);
+                if (!detectedShotCount) {
+                    continue;
+                }
 
                 const definitionSlots = item.result.slots.map((s) => ({
                     id: s.id,
@@ -144,7 +272,11 @@ export function FrameImportPanel() {
                     width: s.normalizedBounds.width,
                     height: s.normalizedBounds.height,
                     photoViewportOrientation,
+                    shape: s.shape ?? "rect",
+                    points: s.points,
                 }));
+
+                const transparentAssetUrl = await punchOutFrameSlots(item.objectUrl, definitionSlots);
 
                 const definition: FrameDefinition = {
                     id: `imported-${item.result.importId}`,
@@ -152,18 +284,18 @@ export function FrameImportPanel() {
                     description: "Canva imported frame overlay",
                     kind: "png-overlay",
                     source: "canva",
-                    assetUrl: item.objectUrl,
-                    borderColor: "#ffffff",
-                    borderWidth: 0,
-                    shotCount: item.result.analysis.detectedShotCount ?? 4,
+                    assetUrl: transparentAssetUrl,
+                    shotCount: detectedShotCount,
                     photoViewportOrientation,
+                    photoAspectRatio,
+                    photoFit: "contain",
                     outputWidth: item.result.image.width,
                     outputHeight: item.result.image.height,
                     slots: definitionSlots,
                     status: "published",
                 };
 
-                LocalFrameRegistry.registerFrame(definition);
+                await saveFrameToSelectedEvent(definition);
             }
         }
 
@@ -242,6 +374,56 @@ export function FrameImportPanel() {
                 </div>
             </header>
 
+            <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm space-y-3">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div>
+                        <h2 className="text-sm font-black uppercase tracking-wider text-amber-950">Event folders</h2>
+                        <p className="text-[11px] font-medium text-amber-900/75">
+                            Tạo event thủ công, chọn folder event trước khi publish khung. Khung sẽ được lưu SQLite theo event đã chọn.
+                        </p>
+                    </div>
+                    <div className="flex min-w-[280px] flex-1 items-center gap-2 sm:max-w-md">
+                        <input
+                            type="text"
+                            value={newEventName}
+                            onChange={(event) => setNewEventName(event.target.value)}
+                            placeholder="Tên event mới..."
+                            className="min-w-0 flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-950 focus:border-amber-600 focus:outline-none"
+                        />
+                        <button
+                            type="button"
+                            onClick={() => void handleCreateEvent()}
+                            className="rounded-lg bg-amber-700 px-3.5 py-2 text-xs font-black text-white shadow-sm hover:bg-amber-800 active:scale-95 cursor-pointer"
+                        >
+                            + Tạo event
+                        </button>
+                    </div>
+                </div>
+                <div className="flex flex-wrap gap-2" aria-label="Danh sách event folders">
+                    {events.map((event) => {
+                        const active = event.eventId === selectedEventId;
+                        return (
+                            <button
+                                key={event.eventId}
+                                type="button"
+                                onClick={() => setSelectedEventId(event.eventId)}
+                                className={`rounded-xl border px-3 py-2 text-left text-xs font-black transition-all cursor-pointer ${
+                                    active
+                                        ? "border-amber-800 bg-white text-amber-950 shadow-sm"
+                                        : "border-amber-200 bg-amber-100/70 text-amber-900 hover:border-amber-500"
+                                }`}
+                            >
+                                <span className="block">📁 {event.name}</span>
+                                <span className="block pt-0.5 font-mono text-[10px] opacity-65">{event.eventId}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+                <p className="text-[11px] font-bold text-amber-950">
+                    Đang chọn: {selectedEvent?.name ?? selectedEventId} • {allDefinitions.length} frame trong event này
+                </p>
+            </section>
+
             {/* TAB 1: IMPORT CANVA PNG */}
             {activeTab === "import" && (
                 <div className="space-y-6 animate-fade-in">
@@ -298,7 +480,9 @@ export function FrameImportPanel() {
                                 <div className="flex items-center gap-2">
                                     <button
                                         type="button"
-                                        onClick={handlePublishAllApproved}
+                                        onClick={() => {
+                                            void handlePublishAllApproved();
+                                        }}
                                         className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 text-xs font-extrabold shadow-sm active:scale-95 cursor-pointer"
                                     >
                                         Publish All Approved
@@ -393,11 +577,7 @@ export function FrameImportPanel() {
                         {allDefinitions.length > 0 && (
                             <button
                                 type="button"
-                                onClick={() => {
-                                    if (window.confirm("Bạn có chắc chắn muốn xoá TOÀN BỘ khung đã lưu trong Local Registry?")) {
-                                        LocalFrameRegistry.clear();
-                                    }
-                                }}
+                                onClick={() => void handleClearSelectedEventFrames()}
                                 className="rounded-lg border border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-800 px-3.5 py-1.5 text-xs font-bold cursor-pointer"
                             >
                                 🧹 Xoá Tất Cả Khung
@@ -497,7 +677,7 @@ export function FrameImportPanel() {
                                         <div className="flex items-center justify-between gap-2 pt-2 border-t border-neutral-100">
                                             <button
                                                 type="button"
-                                                onClick={() => LocalFrameRegistry.toggleFrameStatus(def.id)}
+                                                 onClick={() => void handleToggleFrameStatus(def)}
                                                 className={`flex-1 rounded-xl px-3 py-1.5 text-xs font-extrabold transition-all cursor-pointer ${
                                                     isPrivate
                                                         ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs"
@@ -509,11 +689,7 @@ export function FrameImportPanel() {
 
                                             <button
                                                 type="button"
-                                                onClick={() => {
-                                                    if (window.confirm(`Bạn có muốn xoá khung "${def.name}" khỏi Local Registry?`)) {
-                                                        LocalFrameRegistry.removeFrame(def.id);
-                                                    }
-                                                }}
+                                                 onClick={() => void handleDeleteFrame(def)}
                                                 className="rounded-xl border border-rose-300 bg-white hover:bg-rose-50 text-rose-700 px-3 py-1.5 text-xs font-bold cursor-pointer"
                                             >
                                                 🗑️ Xoá

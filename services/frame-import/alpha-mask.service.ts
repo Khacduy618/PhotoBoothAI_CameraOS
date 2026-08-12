@@ -1,4 +1,4 @@
-export function isCanvaPlaceholderPixel(
+export function isCanvaWhiteSlotPixel(
     r: number,
     g: number,
     b: number,
@@ -9,22 +9,27 @@ export function isCanvaPlaceholderPixel(
         return true;
     }
 
-    // 1. Canva Sky Blue Sky & Soft Cloud Blue Range
-    const isSkyBlue =
-        r >= 145 && r <= 245 &&
-        g >= 185 && g <= 255 &&
-        b >= 215 && b <= 255 &&
-        b >= r - 15;
+    const maxRGB = Math.max(r, g, b);
+    const minRGB = Math.min(r, g, b);
+    const saturation = maxRGB - minRGB;
 
-    // 2. Canva Green Hills (Both Light Green & Dark Green Hill shades)
-    // Green is the dominant color component (g > r and g > b + 25)
-    const isGreenHills =
-        g >= 95 && g <= 245 &&
-        r >= 40 && r <= 225 &&
-        b >= 0 && b <= 175 &&
-        g >= r - 15 && g >= b + 25;
+    // Canva often exports empty photo slots as opaque white/off-white rectangles.
+    // Keep this intentionally strict: only near-neutral bright pixels are treated
+    // as removable slot fill so colored/patterned frame backgrounds are preserved.
+    const isWhiteCanvasSlot = minRGB >= 244 && saturation <= 10;
+    const isOffWhiteCanvasSlot = minRGB >= 235 && saturation <= 8;
 
-    return isSkyBlue || isGreenHills;
+    return isWhiteCanvasSlot || isOffWhiteCanvasSlot;
+}
+
+export function isCanvaPlaceholderPixel(
+    r: number,
+    g: number,
+    b: number,
+    a: number,
+    alphaThreshold = 16,
+): boolean {
+    return isCanvaWhiteSlotPixel(r, g, b, a, alphaThreshold);
 }
 
 export function buildAlphaMask(

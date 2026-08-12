@@ -183,7 +183,7 @@ export function PreviewCell({
                     <img
                         src={displayPhoto}
                         alt={`Captured cell ${index + 1}`}
-                        className="w-full h-full object-cover transition-all duration-300"
+                        className="w-full h-full object-contain transition-all duration-300"
                         style={{ filter: photoUrl && !capturedPhotoFailed ? "none" : styleFilter }}
                         onError={() => {
                             if (photoUrl) {

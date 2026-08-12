@@ -42,7 +42,8 @@ describe("Controlled Selectors Unit Tests", () => {
                 />,
             );
 
-            expect(screen.getAllByText(/Ngang 1800x1200/i).length).toBeGreaterThan(0);
+            expect(screen.getByText(/Khung ngang \/ Landscape 3:2/i)).toBeTruthy();
+            expect(screen.getAllByText(/Ngang 3:2/i).length).toBeGreaterThan(0);
         });
 
         it("renders frame options and handles frame & color selection", () => {
@@ -58,7 +59,8 @@ describe("Controlled Selectors Unit Tests", () => {
                 />,
             );
 
-            expect(screen.getAllByText(/Ngang 1800x1200/i).length).toBeGreaterThan(0);
+            expect(screen.getByText(/Khung ngang \/ Landscape 3:2/i)).toBeTruthy();
+            expect(screen.getAllByText(/Ngang 3:2/i).length).toBeGreaterThan(0);
 
             const whiteSwatch = screen.getByTitle("Trắng");
             fireEvent.click(whiteSwatch);

@@ -1,13 +1,6 @@
-import { CameraProvider } from "@/components/camera/camera-provider";
-import { BoothExperience } from "@/components/booth/booth-experience";
+import { MomentAIGuestFlowController } from "@/components/momentai-guest-flow/momentai-guest-flow-controller";
 
 export default function BoothPage() {
-  return (
-    <main className="min-h-screen p-6">
-      <CameraProvider>
-        <BoothExperience />
-      </CameraProvider>
-    </main>
-  );
+  return <MomentAIGuestFlowController />;
 }
 

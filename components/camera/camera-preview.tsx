@@ -50,6 +50,7 @@ import {
     MemoryPhotoBlobStorage,
     PhotoStorageService,
 } from "@/services/storage/photo-storage.service";
+import { uploadLocalOriginalPhoto } from "@/services/storage/local-media-client.service";
 import type { BoothSelection, CapturedPhoto, FrameConfig } from "@/types/theme";
 
 function getContrastColor(hexColor: string): string {
@@ -152,6 +153,9 @@ interface CreateCapturedPhotoOutputOptions {
     createObjectUrl?: (blob: Blob) => string;
     createId?: () => string;
     now?: () => string;
+    uploadOriginalPhoto?: typeof uploadLocalOriginalPhoto;
+    width?: number;
+    height?: number;
     saveSharePhotoRecord?: (input: {
         photoId: string;
         dataUrl: string;
@@ -222,22 +226,39 @@ export async function createCapturedPhotoOutput({
     createObjectUrl = URL.createObjectURL,
     createId = () => crypto.randomUUID(),
     now = () => new Date().toISOString(),
+    uploadOriginalPhoto,
+    width,
+    height,
     saveSharePhotoRecord,
     createShareDataUrl = createBlobDataUrl,
 }: CreateCapturedPhotoOutputOptions): Promise<CapturedPhoto> {
     const photoId = createId();
+    const capturedAt = now();
     const savedOriginal =
         await photoStorage.saveOriginalPhoto({
             id: photoId,
             sessionId,
             originalBlob,
-            capturedAt: now(),
+            capturedAt,
             source: "webcam",
+            width,
+            height,
         });
 
     if (!savedOriginal.ok) {
         throw new Error(savedOriginal.error.message);
     }
+
+    const localUploadResult = uploadOriginalPhoto
+        ? await uploadOriginalPhoto({
+            sessionId,
+            photoId,
+            blob: savedOriginal.value.original.blob,
+            capturedAt,
+            width,
+            height,
+        })
+        : null;
 
     const originalUrlResult =
         photoStorage.createObjectUrl(
@@ -298,7 +319,12 @@ export async function createCapturedPhotoOutput({
         sessionId,
         originalBlob: savedOriginal.value.original.blob,
         originalUrl,
-        outputUrl,
+        outputUrl: localUploadResult?.ok ? localUploadResult.value.mediaUrl : outputUrl,
+        mediaUrl: localUploadResult?.ok ? localUploadResult.value.mediaUrl : undefined,
+        storageKey: localUploadResult?.ok ? localUploadResult.value.storageKey : undefined,
+        width,
+        height,
+        expiresAt: localUploadResult?.ok ? localUploadResult.value.expiresAt : undefined,
         usedFallback,
     };
 }
@@ -772,6 +798,9 @@ export function CameraPreview({
                     originalBlob,
                     sessionId: captureSessionId,
                     photoStorage,
+                    uploadOriginalPhoto: uploadLocalOriginalPhoto,
+                    width: video.videoWidth,
+                    height: video.videoHeight,
                     saveSharePhotoRecord:
                         typeof window !== "undefined"
                             ? (record) => {

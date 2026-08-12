@@ -83,7 +83,7 @@ export class AssetManager {
             },
         }));
 
-        return [...bundledPackages, ...importedPackages];
+        return [...importedPackages, ...bundledPackages];
     }
 
     static getFramePackageById(id: string): FramePackage | undefined {

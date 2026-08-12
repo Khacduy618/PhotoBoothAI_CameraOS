@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useRef, useState } from "react";
-import type { DetectedSlot, FrameImportResult, NormalizedBounds } from "@/services/frame-import/frame-import.types";
+import type { DetectedSlot, FrameImportResult, FramePoint, NormalizedBounds } from "@/services/frame-import/frame-import.types";
 
 interface FrameSlotDebugPreviewProps {
     result: FrameImportResult;
@@ -11,9 +11,12 @@ interface FrameSlotDebugPreviewProps {
     selectedSlotId?: string | null;
     onSelectSlot?: (slotId: string) => void;
     onUpdateSlotBounds?: (slotId: string, bounds: NormalizedBounds) => void;
+    onUpdateSlotPoints?: (slotId: string, points: readonly FramePoint[]) => void;
+    selectedPointIndex?: number | null;
+    onSelectPoint?: (pointIndex: number | null) => void;
 }
 
-type DragType = "move" | "top-left" | "top-right" | "bottom-left" | "bottom-right";
+type DragType = "move" | "top-left" | "top-right" | "bottom-left" | "bottom-right" | "point" | "in-handle" | "out-handle";
 
 export function FrameSlotDebugPreview({
     result,
@@ -23,6 +26,9 @@ export function FrameSlotDebugPreview({
     selectedSlotId,
     onSelectSlot,
     onUpdateSlotBounds,
+    onUpdateSlotPoints,
+    selectedPointIndex = null,
+    onSelectPoint,
 }: FrameSlotDebugPreviewProps) {
     const { image, status } = result;
     const slots = propSlots || result.slots;
@@ -35,12 +41,15 @@ export function FrameSlotDebugPreview({
         startX: number;
         startY: number;
         initialBounds: NormalizedBounds;
+        pointIndex?: number;
+        initialPoints?: readonly FramePoint[];
     } | null>(null);
 
     const handleMouseDown = (
         e: React.MouseEvent,
         slot: DetectedSlot,
         type: DragType,
+        pointIndex?: number,
     ) => {
         e.preventDefault();
         e.stopPropagation();
@@ -48,8 +57,14 @@ export function FrameSlotDebugPreview({
         if (onSelectSlot) {
             onSelectSlot(slot.id);
         }
+        if ((type === "point" || type === "in-handle" || type === "out-handle") && typeof pointIndex === "number") {
+            onSelectPoint?.(pointIndex);
+        } else if (type !== "point") {
+            onSelectPoint?.(null);
+        }
 
-        if (!onUpdateSlotBounds) return;
+        if (type !== "point" && !onUpdateSlotBounds) return;
+        if (type === "point" && !onUpdateSlotPoints) return;
 
         setActiveDrag({
             slotId: slot.id,
@@ -57,17 +72,51 @@ export function FrameSlotDebugPreview({
             startX: e.clientX,
             startY: e.clientY,
             initialBounds: { ...slot.normalizedBounds },
+            pointIndex,
+            initialPoints: slot.points ? [...slot.points] : undefined,
         });
     };
 
     const handleMouseMove = (e: React.MouseEvent) => {
-        if (!activeDrag || !containerRef.current || !onUpdateSlotBounds) return;
+        if (!activeDrag || !containerRef.current) return;
 
         const rect = containerRef.current.getBoundingClientRect();
         if (rect.width <= 0 || rect.height <= 0) return;
 
         const deltaX = (e.clientX - activeDrag.startX) / rect.width;
         const deltaY = (e.clientY - activeDrag.startY) / rect.height;
+
+        if (activeDrag.type === "point" || activeDrag.type === "in-handle" || activeDrag.type === "out-handle") {
+            if (!onUpdateSlotPoints || typeof activeDrag.pointIndex !== "number" || !activeDrag.initialPoints) return;
+            const nextPoints = activeDrag.initialPoints.map((point, index) => {
+                if (index !== activeDrag.pointIndex) return point;
+                if (activeDrag.type === "in-handle") {
+                    const base = point.inHandle ?? point;
+                    return { ...point, inHandle: { x: Number(Math.max(0, Math.min(1, base.x + deltaX)).toFixed(4)), y: Number(Math.max(0, Math.min(1, base.y + deltaY)).toFixed(4)) } };
+                }
+                if (activeDrag.type === "out-handle") {
+                    const base = point.outHandle ?? point;
+                    return { ...point, outHandle: { x: Number(Math.max(0, Math.min(1, base.x + deltaX)).toFixed(4)), y: Number(Math.max(0, Math.min(1, base.y + deltaY)).toFixed(4)) } };
+                }
+                return {
+                    ...point,
+                    x: Number(Math.max(0, Math.min(1, point.x + deltaX)).toFixed(4)),
+                    y: Number(Math.max(0, Math.min(1, point.y + deltaY)).toFixed(4)),
+                    inHandle: point.inHandle ? {
+                        x: Number(Math.max(0, Math.min(1, point.inHandle.x + deltaX)).toFixed(4)),
+                        y: Number(Math.max(0, Math.min(1, point.inHandle.y + deltaY)).toFixed(4)),
+                    } : undefined,
+                    outHandle: point.outHandle ? {
+                        x: Number(Math.max(0, Math.min(1, point.outHandle.x + deltaX)).toFixed(4)),
+                        y: Number(Math.max(0, Math.min(1, point.outHandle.y + deltaY)).toFixed(4)),
+                    } : undefined,
+                };
+            });
+            onUpdateSlotPoints(activeDrag.slotId, nextPoints);
+            return;
+        }
+
+        if (!onUpdateSlotBounds) return;
 
         const { x: initX, y: initY, width: initW, height: initH } = activeDrag.initialBounds;
 
@@ -143,6 +192,14 @@ export function FrameSlotDebugPreview({
                     const width = slot.normalizedBounds.width * 100;
                     const height = slot.normalizedBounds.height * 100;
 
+                    const polygonClip = slot.shape === "polygon" && slot.points && slot.points.length >= 3
+                        ? `polygon(${slot.points.map((point) => {
+                            const localX = ((point.x - slot.normalizedBounds.x) / slot.normalizedBounds.width) * 100;
+                            const localY = ((point.y - slot.normalizedBounds.y) / slot.normalizedBounds.height) * 100;
+                            return `${localX}% ${localY}%`;
+                        }).join(", ")})`
+                        : undefined;
+
                     const borderStyle = isSelected
                         ? "border-pink-500 bg-pink-500/20 text-pink-700 ring-2 ring-pink-400/80 z-30"
                         : status === "auto-approved"
@@ -166,13 +223,68 @@ export function FrameSlotDebugPreview({
                                 height: `${height}%`,
                             }}
                         >
+                            {polygonClip && (
+                                <div
+                                    className="absolute inset-0 bg-purple-500/25 pointer-events-none"
+                                    style={{ clipPath: polygonClip }}
+                                />
+                            )}
                             <div className="absolute left-1 top-1 flex items-center gap-1.5 rounded bg-black/80 px-2 py-0.5 text-[10px] font-black text-white shadow pointer-events-none">
-                                <span>#{slot.order + 1}</span>
+                                <span>#{slot.order + 1}{slot.shape === "polygon" ? " cong" : ""}</span>
                                 <span className="opacity-75 font-mono text-[9px]">
                                     {(slot.normalizedBounds.width * 100).toFixed(1)}%×
                                     {(slot.normalizedBounds.height * 100).toFixed(1)}%
                                 </span>
                             </div>
+
+                            {(slot.shape === "polygon" || slot.shape === "bezier") && slot.points && slot.points.length >= 3 && onUpdateSlotPoints && (
+                                <>
+                                    {slot.points.map((point, pointIndex) => {
+                                        const localLeft = ((point.x - slot.normalizedBounds.x) / slot.normalizedBounds.width) * 100;
+                                        const localTop = ((point.y - slot.normalizedBounds.y) / slot.normalizedBounds.height) * 100;
+                                        const selectedPoint = isSelected && selectedPointIndex === pointIndex;
+                                        return (
+                                            <button
+                                                key={`${slot.id}-point-${pointIndex}`}
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    onSelectSlot?.(slot.id);
+                                                    onSelectPoint?.(pointIndex);
+                                                }}
+                                                onMouseDown={(e) => handleMouseDown(e, slot, "point", pointIndex)}
+                                                className={`absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow-md z-50 cursor-grab active:cursor-grabbing ${selectedPoint ? "bg-purple-700 ring-2 ring-white" : "bg-purple-500 hover:bg-purple-600"}`}
+                                                style={{ left: `${localLeft}%`, top: `${localTop}%` }}
+                                                title={`Kéo điểm cong #${pointIndex + 1}`}
+                                                aria-label={`Kéo điểm cong #${pointIndex + 1}`}
+                                            />
+                                        );
+                                    })}
+                                    {slot.shape === "bezier" && selectedPointIndex !== null && slot.points[selectedPointIndex] && (() => {
+                                        const point = slot.points[selectedPointIndex];
+                                        const handles = [
+                                            { kind: "in-handle" as const, point: point.inHandle, label: "In" },
+                                            { kind: "out-handle" as const, point: point.outHandle, label: "Out" },
+                                        ].filter((item): item is { kind: "in-handle" | "out-handle"; point: { x: number; y: number }; label: string } => Boolean(item.point));
+                                        return handles.map((handle) => {
+                                            const localLeft = ((handle.point.x - slot.normalizedBounds.x) / slot.normalizedBounds.width) * 100;
+                                            const localTop = ((handle.point.y - slot.normalizedBounds.y) / slot.normalizedBounds.height) * 100;
+                                            return (
+                                                <button
+                                                    key={`${slot.id}-${selectedPointIndex}-${handle.kind}`}
+                                                    type="button"
+                                                    onMouseDown={(e) => handleMouseDown(e, slot, handle.kind, selectedPointIndex)}
+                                                    className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-fuchsia-500 shadow-md z-50 cursor-crosshair hover:bg-fuchsia-600"
+                                                    style={{ left: `${localLeft}%`, top: `${localTop}%` }}
+                                                    title={`Kéo Bezier ${handle.label} handle`}
+                                                    aria-label={`Kéo Bezier ${handle.label} handle`}
+                                                />
+                                            );
+                                        });
+                                    })()}
+                                </>
+                            )}
 
                             {/* Corner Drag Handles when interactive */}
                             {onUpdateSlotBounds && (

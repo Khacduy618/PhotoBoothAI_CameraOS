@@ -14,6 +14,14 @@ export interface ThemeConfig {
     accentColor: string;
 }
 
+export interface FramePoint {
+    x: number;
+    y: number;
+    inHandle?: { x: number; y: number };
+    outHandle?: { x: number; y: number };
+    cornerRadius?: number;
+}
+
 export interface FrameSlot {
     id: string;
     index: number;
@@ -22,7 +30,12 @@ export interface FrameSlot {
     width: number;
     height: number;
     photoViewportOrientation?: "portrait" | "landscape";
+    shape?: "rect" | "polygon" | "bezier";
+    points?: readonly FramePoint[];
 }
+
+export type PhotoFitMode = "contain" | "cover";
+export type PhotoAspectRatio = "2:3" | "3:2" | "4:3" | "1:1";
 
 export interface FrameConfig {
     id: string;
@@ -38,10 +51,14 @@ export interface FrameConfig {
     /** Legacy-compatible photo viewport orientation; not fixed frame orientation. */
     orientation?: "portrait" | "landscape";
     photoViewportOrientation?: "portrait" | "landscape";
+    photoAspectRatio?: PhotoAspectRatio;
+    photoFit?: PhotoFitMode;
     layoutFamily?: BoothLayoutFamily;
     outputWidth?: number;
     outputHeight?: number;
     slots?: readonly FrameSlot[];
+    createdAt?: string;
+    updatedAt?: string;
 }
 
 export interface StickerConfig {
@@ -83,4 +100,9 @@ export interface CapturedPhoto {
     originalUrl: string;
     outputUrl: string;
     usedFallback: boolean;
+    mediaUrl?: string;
+    storageKey?: string;
+    width?: number;
+    height?: number;
+    expiresAt?: string;
 }

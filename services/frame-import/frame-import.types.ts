@@ -1,5 +1,5 @@
 import type { BoothLayoutFamily } from "@/types/customization";
-import type { FrameConfig } from "@/types/theme";
+import type { FrameConfig, PhotoAspectRatio } from "@/types/theme";
 
 export type ImportedFrameShotCount = 1 | 2 | 4 | 6 | 8;
 export type FrameImportMaskSource = "alpha" | "companion-mask";
@@ -31,6 +31,8 @@ export interface DetectedSlot {
     areaRatio: number;
     fillRatio: number;
     touchesCanvasEdge: boolean;
+    shape?: "rect" | "polygon" | "bezier";
+    points?: readonly FramePoint[];
 }
 
 export type FrameImportWarning =
@@ -75,6 +77,14 @@ export interface FrameImportResult {
     status: FrameImportStatus;
 }
 
+export interface FramePoint {
+    x: number;
+    y: number;
+    inHandle?: { x: number; y: number };
+    outHandle?: { x: number; y: number };
+    cornerRadius?: number;
+}
+
 export interface FrameDefinitionSlot {
     id: string;
     index: number;
@@ -83,6 +93,8 @@ export interface FrameDefinitionSlot {
     width: number;
     height: number;
     photoViewportOrientation?: "portrait" | "landscape";
+    shape?: "rect" | "polygon" | "bezier";
+    points?: readonly FramePoint[];
 }
 
 export interface FrameDefinition {
@@ -93,15 +105,19 @@ export interface FrameDefinition {
     source: "canva" | "operator-upload";
     assetUrl?: string;
     thumbnailUrl?: string;
-    borderColor?: string;
-    borderWidth?: number;
     shotCount: ImportedFrameShotCount;
     photoViewportOrientation?: "portrait" | "landscape";
+    photoAspectRatio?: PhotoAspectRatio;
+    photoFit?: "contain" | "cover";
+    allowDraw?: boolean;
+    eventId?: string;
     layoutFamily?: BoothLayoutFamily;
     outputWidth: number;
     outputHeight: number;
     slots: readonly FrameDefinitionSlot[];
     status?: "published" | "private";
+    createdAt?: string;
+    updatedAt?: string;
 }
 
 export interface FrameDefinitionAdapterInput {

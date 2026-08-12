@@ -4,6 +4,7 @@ import type { ResolvedLayoutGeometry } from "./layout-geometry.service";
 import type { PreparedAssets } from "./render-asset-loader.service";
 import type { PreparedTextLayouts } from "./text-layout.service";
 import { resolveStickerConfig } from "@/config/sticker.config";
+import { calculateObjectFitRect } from "./object-fit.service";
 import { resolveRenderPlan } from "./render-plan.service";
 
 export interface CanvasRendererOptions {
@@ -14,6 +15,46 @@ export interface CanvasRendererOptions {
     textLayouts: PreparedTextLayouts;
     surface: RenderSurface;
     createCanvas?: () => HTMLCanvasElement;
+}
+
+function drawRoundedPolygonPath(
+    context: CanvasRenderingContext2D,
+    points: readonly { x: number; y: number; cornerRadius?: number }[],
+): void {
+    if (!context.moveTo || !context.lineTo || !context.quadraticCurveTo || points.length < 3) return;
+
+    const pointAt = (index: number) => points[(index + points.length) % points.length];
+    const getInsetPoint = (from: { x: number; y: number }, to: { x: number; y: number }, radius: number) => {
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const length = Math.hypot(dx, dy) || 1;
+        const distance = Math.min(radius, length / 2);
+        return {
+            x: from.x + (dx / length) * distance,
+            y: from.y + (dy / length) * distance,
+        };
+    };
+
+    const first = pointAt(0);
+    const previous = pointAt(-1);
+    const firstRadius = first.cornerRadius ?? 0;
+    const firstStart = firstRadius > 0 ? getInsetPoint(first, previous, firstRadius) : first;
+    context.moveTo(firstStart.x, firstStart.y);
+
+    for (let index = 0; index < points.length; index += 1) {
+        const prev = pointAt(index - 1);
+        const current = pointAt(index);
+        const next = pointAt(index + 1);
+        const radius = current.cornerRadius ?? 0;
+        if (radius > 0) {
+            const before = getInsetPoint(current, prev, radius);
+            const after = getInsetPoint(current, next, radius);
+            context.lineTo(before.x, before.y);
+            context.quadraticCurveTo(current.x, current.y, after.x, after.y);
+        } else {
+            context.lineTo(current.x, current.y);
+        }
+    }
 }
 
 export class CanvasRenderer {
@@ -72,32 +113,49 @@ export class CanvasRenderer {
                 }
                 
                 if (context.save) context.save();
-                // Clip slot rect
+                // Clip photos to the actual slot shape. Rect slots use their bounding box;
+                // polygon slots prevent attendee media from leaking through decorative
+                // transparent areas outside the operator-selected punchout shape.
                 if (context.beginPath) context.beginPath();
-                if (context.rect) context.rect(slotX, slotY, slotWidth, slotHeight);
+                if (slot.shape === "bezier" && slot.points && slot.points.length >= 3 && context.moveTo && context.bezierCurveTo) {
+                    context.moveTo(slot.points[0].x, slot.points[0].y);
+                    for (let pointIndex = 0; pointIndex < slot.points.length; pointIndex += 1) {
+                        const current = slot.points[pointIndex];
+                        const next = slot.points[(pointIndex + 1) % slot.points.length];
+                        const c1 = current.outHandle ?? current;
+                        const c2 = next.inHandle ?? next;
+                        context.bezierCurveTo(c1.x, c1.y, c2.x, c2.y, next.x, next.y);
+                    }
+                    if (context.closePath) context.closePath();
+                } else if (slot.shape === "polygon" && slot.points && slot.points.length >= 3 && context.moveTo && context.lineTo) {
+                    if (slot.points.some((point) => (point.cornerRadius ?? 0) > 0)) {
+                        drawRoundedPolygonPath(context, slot.points);
+                    } else {
+                        context.moveTo(slot.points[0].x, slot.points[0].y);
+                        for (let pointIndex = 1; pointIndex < slot.points.length; pointIndex += 1) {
+                            context.lineTo(slot.points[pointIndex].x, slot.points[pointIndex].y);
+                        }
+                    }
+                    if (context.closePath) context.closePath();
+                } else if (context.rect) {
+                    context.rect(slotX, slotY, slotWidth, slotHeight);
+                }
                 if (context.clip) context.clip();
 
-                // Cover draw
                 const imgWidth = (img as HTMLImageElement).naturalWidth || img.width || 800;
                 const imgHeight = (img as HTMLImageElement).naturalHeight || img.height || 600;
-                const imgAspect = imgWidth / imgHeight;
-                const slotAspect = slotWidth / slotHeight;
-
-                let drawW = slotWidth;
-                let drawH = slotHeight;
-                let offsetX = 0;
-                let offsetY = 0;
-
-                if (imgAspect > slotAspect) {
-                    drawW = slotHeight * imgAspect;
-                    offsetX = -(drawW - slotWidth) / 2;
-                } else {
-                    drawH = slotWidth / imgAspect;
-                    offsetY = -(drawH - slotHeight) / 2;
-                }
+                const drawRect = calculateObjectFitRect({
+                    imageWidth: imgWidth,
+                    imageHeight: imgHeight,
+                    targetX: slotX,
+                    targetY: slotY,
+                    targetWidth: slotWidth,
+                    targetHeight: slotHeight,
+                    fit: renderConfig.frame.photoFit ?? "contain",
+                });
 
                 if (context.drawImage) {
-                    context.drawImage(img as CanvasImageSource, slotX + offsetX, slotY + offsetY, drawW, drawH);
+                    context.drawImage(img as CanvasImageSource, drawRect.x, drawRect.y, drawRect.width, drawRect.height);
                 }
                 if (context.restore) context.restore();
             } else {
@@ -109,18 +167,14 @@ export class CanvasRenderer {
             }
         }
 
-        // 3. Draw the selected frame overlay once (Canva PNG overlay or code-designed solid border), after photos and before pen strokes.
+        // 3. Draw only real Canva/operator PNG overlays above photos. Bundled solid frames
+        // are represented by the sheet background underneath photos, not by a border stroke
+        // over the captured media.
         if (assets.frame && context.drawImage) {
             context.drawImage(assets.frame, 0, 0, canvas.width, canvas.height);
-        } else if (renderConfig.frame.borderWidth > 0 && renderConfig.frame.borderColor !== "transparent" && context.strokeRect) {
-            context.save();
-            context.strokeStyle = renderConfig.frame.borderColor;
-            context.lineWidth = renderConfig.frame.borderWidth * 2;
-            context.strokeRect(0, 0, canvas.width, canvas.height);
-            context.restore();
         }
 
-        // 4. Draw Overlays (currently drawing-only in the simplified attendee flow; legacy sticker/text rendering remains for stored sessions)
+        // 4. Draw Overlays above both photos and Canva frame so drawing can decorate imported frames too.
         for (const item of overlays) {
             const rotRad = item.rotationRadians !== undefined ? item.rotationRadians : ((item.rotationDegrees || 0) * Math.PI) / 180;
             const opacity = item.opacity !== undefined ? item.opacity : 1;
@@ -214,19 +268,9 @@ export class CanvasRenderer {
                 context.lineCap = "round";
                 context.lineJoin = "round";
 
-                // Keep print/export layers deterministic:
-                // background → photos clipped to frame slots → frame overlay → attendee drawing.
-                // Drawing is clipped to the non-photo area so pen strokes decorate the frame layer
-                // without covering captured originals in the printed/exported output.
-                if (context.beginPath && context.rect && context.clip) {
-                    context.beginPath();
-                    context.rect(0, 0, canvas.width, canvas.height);
-                    plan.grid.cells.slice(0, renderConfig.layout.shotCount).forEach((slot) => {
-                        context.rect(slot.x, slot.y, slot.width, slot.height);
-                    });
-                    context.clip("evenodd");
-                }
-
+                // Match the attendee preview exactly: drawings are sheet-level overlays above
+                // the selected frame and captured photos. Do not clip strokes away during
+                // export, otherwise the downloaded derivative diverges from what the user saw.
                 if (context.beginPath) context.beginPath();
                 if (context.moveTo) context.moveTo(item.points[0].x * canvas.width, item.points[0].y * canvas.height);
                 for (let i = 1; i < item.points.length; i++) {

@@ -494,7 +494,7 @@ export function CustomizeFlow({
                 </div>
 
                 <p className="text-xs text-pink-900/70 leading-relaxed font-medium">
-                    Nhấn <strong className="text-pink-950">&quot;Hoàn tất & Xuất ảnh&quot;</strong> để chuyển sang màn hình In ảnh & Tải về.
+                    Nhấn <strong className="text-pink-950">&quot;Hoàn tất & Xuất ảnh&quot;</strong> để chuyển sang màn hình xem lại và tải file cục bộ.
                 </p>
             </div>
         </WizardShell>

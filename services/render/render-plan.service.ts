@@ -17,6 +17,8 @@ export interface RenderPlanPhotoSlot extends RenderPlanRect {
     index: number;
     column: number;
     row: number;
+    shape?: "rect" | "polygon" | "bezier";
+            points?: readonly { x: number; y: number; inHandle?: { x: number; y: number }; outHandle?: { x: number; y: number }; cornerRadius?: number }[];
 }
 
 export interface ResolvedRenderPlan {
@@ -71,10 +73,22 @@ export function resolveRenderPlan(
     const slotScale = renderConfig.photoSlots ? surface.width / renderConfig.outputWidth : scale;
     const cells = sourceSlots.map((slot) => {
         const positionedSlot = slot as typeof slot & { column?: number; row?: number };
+        const shapedSlot = slot as typeof slot & {
+            shape?: "rect" | "polygon" | "bezier";
+    points?: readonly { x: number; y: number; inHandle?: { x: number; y: number }; outHandle?: { x: number; y: number }; cornerRadius?: number }[];
+        };
         return {
             ...scaleRect(slot, slotScale),
             id: slot.id,
             index: slot.index,
+            shape: shapedSlot.shape,
+            points: shapedSlot.points?.map((point) => ({
+                x: point.x * slotScale,
+                y: point.y * slotScale,
+                inHandle: point.inHandle ? { x: point.inHandle.x * slotScale, y: point.inHandle.y * slotScale } : undefined,
+                outHandle: point.outHandle ? { x: point.outHandle.x * slotScale, y: point.outHandle.y * slotScale } : undefined,
+                cornerRadius: point.cornerRadius,
+            })),
             column: positionedSlot.column ?? slot.index % renderConfig.layout.columns,
             row: positionedSlot.row ?? Math.floor(slot.index / renderConfig.layout.columns),
         };

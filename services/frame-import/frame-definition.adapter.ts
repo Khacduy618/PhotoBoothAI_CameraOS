@@ -21,6 +21,14 @@ function normalizeSlot(
         width,
         height,
         photoViewportOrientation: slot.photoViewportOrientation,
+        shape: slot.shape,
+        points: slot.points?.map((point) => ({
+            x: point.x * outputWidth,
+            y: point.y * outputHeight,
+            inHandle: point.inHandle ? { x: point.inHandle.x * outputWidth, y: point.inHandle.y * outputHeight } : undefined,
+            outHandle: point.outHandle ? { x: point.outHandle.x * outputWidth, y: point.outHandle.y * outputHeight } : undefined,
+            cornerRadius: point.cornerRadius,
+        })),
     };
 }
 
@@ -58,17 +66,21 @@ export function convertFrameDefinitionToRuntimeFrame({
         id: definition.id,
         name: definition.name,
         description: definition.description ?? "",
-        borderColor: definition.borderColor ?? "transparent",
-        borderWidth: definition.borderWidth ?? 0,
+        borderColor: "transparent",
+        borderWidth: 0,
         kind: "png-overlay",
         source: definition.source,
         assetUrl: definition.assetUrl,
         shotCount: definition.shotCount,
         orientation: definition.photoViewportOrientation,
         photoViewportOrientation: definition.photoViewportOrientation,
+        photoAspectRatio: definition.photoAspectRatio,
+        photoFit: definition.photoFit ?? "contain",
         layoutFamily: definition.layoutFamily,
         outputWidth,
         outputHeight,
         slots: normalizedSlots,
+        createdAt: definition.createdAt,
+        updatedAt: definition.updatedAt,
     };
 }

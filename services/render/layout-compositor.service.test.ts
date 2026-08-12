@@ -52,6 +52,8 @@ function createCanvasStub() {
     const moveTo = vi.fn();
     const lineTo = vi.fn();
     const stroke = vi.fn();
+    const closePath = vi.fn();
+    const bezierCurveTo = vi.fn();
     const context = {
         fillStyle: "#000000",
         strokeStyle: "#000000",
@@ -70,6 +72,8 @@ function createCanvasStub() {
         moveTo,
         lineTo,
         stroke,
+        closePath,
+        bezierCurveTo,
     } as unknown as CanvasRenderingContext2D;
     const canvas: CanvasLike = {
         width: 0,
@@ -98,6 +102,8 @@ function createCanvasStub() {
         moveTo,
         lineTo,
         stroke,
+        closePath,
+        bezierCurveTo,
     };
 }
 
@@ -322,7 +328,7 @@ describe("layout compositor", () => {
         ).rejects.toThrow("cần 4 ảnh");
     });
 
-    it("clips drawing overlays to the frame layer so printed output does not cover photo slots", async () => {
+    it("renders drawing overlays as sheet-level strokes to match attendee preview", async () => {
         const { canvas, rect, clip, stroke } = createCanvasStub();
         const renderConfig = createRenderConfig({
             ...createRenderSelection("four-portrait-2x2"),
@@ -367,10 +373,58 @@ describe("layout compositor", () => {
             createCanvas: () => canvas,
         });
 
-        expect(rect).toHaveBeenCalledWith(0, 0, 1200, 1800);
-        expect(rect).toHaveBeenCalledTimes(9);
-        expect(clip).toHaveBeenCalledWith("evenodd");
+        expect(rect).not.toHaveBeenCalledWith(0, 0, 1200, 1800);
+        expect(rect).toHaveBeenCalledTimes(4);
+        expect(clip).not.toHaveBeenCalledWith("evenodd");
         expect(stroke).toHaveBeenCalledTimes(1);
+    });
+
+    it("clips exported photos to polygon frame slots when operator selected a curved punchout", async () => {
+        const { canvas, rect, moveTo, lineTo, closePath, clip } = createCanvasStub();
+        const renderConfig = createRenderConfig(createRenderSelection("single-4x6-landscape"));
+        const polygonSlot = {
+            id: "poly-slot-1",
+            index: 0,
+            x: 180,
+            y: 120,
+            width: 900,
+            height: 600,
+            photoViewportOrientation: "landscape" as const,
+            shape: "polygon" as const,
+            points: [
+                { x: 240, y: 120 },
+                { x: 1020, y: 120 },
+                { x: 1080, y: 420 },
+                { x: 1020, y: 720 },
+                { x: 240, y: 720 },
+                { x: 180, y: 420 },
+            ],
+        };
+
+        await composePhotoLayout({
+            renderConfig: {
+                ...renderConfig,
+                frame: {
+                    ...renderConfig.frame,
+                    slots: [polygonSlot],
+                    outputWidth: 1200,
+                    outputHeight: 800,
+                    photoFit: "contain",
+                },
+                photoSlots: [polygonSlot],
+                outputWidth: 1200,
+                outputHeight: 800,
+            },
+            sources: [createSource("photo-1")],
+            createImage: async () => createImage(900, 600),
+            createCanvas: () => canvas,
+        });
+
+        expect(rect).not.toHaveBeenCalledWith(180, 120, 900, 600);
+        expect(moveTo).toHaveBeenCalledWith(240, 120);
+        expect(lineTo).toHaveBeenCalledWith(1080, 420);
+        expect(closePath).toHaveBeenCalled();
+        expect(clip).toHaveBeenCalled();
     });
 
     it("does not mutate source blobs while composing derivatives", async () => {

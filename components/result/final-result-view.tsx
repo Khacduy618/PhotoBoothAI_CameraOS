@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { useBoothSession } from "@/components/booth/booth-session-context";
 import { PreviewRenderer } from "@/components/booth/preview-renderer";
 
@@ -14,17 +14,6 @@ export function FinalResultView({
     onStartNewSession,
 }: FinalResultViewProps) {
     const { selection, capturedPhotos } = useBoothSession();
-    const [isPrinting, setIsPrinting] = useState(false);
-    const [showQrModal, setShowQrModal] = useState(false);
-
-    const handlePrint = () => {
-        setIsPrinting(true);
-        setTimeout(() => {
-            window.print();
-            setIsPrinting(false);
-        }, 500);
-    };
-
     return (
         <section className="flex flex-col h-full w-full max-w-6xl mx-auto p-4 md:p-6 overflow-hidden">
             {/* Header */}
@@ -83,30 +72,12 @@ export function FinalResultView({
                                 Lưu giữ khoảnh khắc của bạn
                             </h2>
                             <p className="text-xs text-pink-900/70 font-medium leading-relaxed">
-                                Bạn có thể in ảnh trực tiếp ra máy in Photobooth, quét mã QR để tải ảnh về điện thoại, hoặc lưu file độ phân giải cao.
+                                File xuất được tạo cục bộ từ ảnh đã lưu và khung đang chọn. Không dùng cloud, không công khai đường dẫn ảnh và không giả lập trạng thái phần cứng chưa kiểm thử.
                             </p>
                         </div>
 
-                        {/* Action Buttons */}
-                        <div className="space-y-3 pt-2">
-                            <button
-                                type="button"
-                                onClick={handlePrint}
-                                disabled={isPrinting}
-                                className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-pink-500 via-rose-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white font-black text-sm shadow-xl shadow-pink-300/50 flex items-center justify-center gap-2.5 transition active:scale-95 disabled:opacity-50"
-                            >
-                                <span className="text-lg">🖨️</span>
-                                <span>{isPrinting ? "Đang gửi lệnh in..." : "In ảnh Photobooth (Print)"}</span>
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => setShowQrModal(true)}
-                                className="w-full py-3.5 px-5 rounded-2xl bg-white border-2 border-pink-300 hover:border-pink-500 text-pink-950 font-black text-xs shadow-md flex items-center justify-center gap-2 transition active:scale-95"
-                            >
-                                <span className="text-lg">📲</span>
-                                <span>Quét mã QR tải về điện thoại</span>
-                            </button>
+                        <div className="rounded-2xl border border-pink-200 bg-white/70 p-4 text-xs font-bold text-pink-950 shadow-sm">
+                            Dùng nút <span className="text-pink-700">Tải ảnh</span> trong thanh công cụ để lưu derivative cuối cùng đúng như preview.
                         </div>
                     </div>
 
@@ -121,29 +92,6 @@ export function FinalResultView({
                 </div>
             </div>
 
-            {/* QR Modal Simple Overlay */}
-            {showQrModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
-                    <div className="bg-white rounded-3xl p-6 max-w-sm w-full space-y-4 text-center shadow-2xl border border-pink-200">
-                        <h3 className="text-lg font-black text-pink-950">📲 Quét mã QR tải ảnh</h3>
-                        <div className="w-48 h-48 mx-auto bg-pink-50 border border-pink-200 rounded-2xl flex flex-col items-center justify-center p-3 text-pink-950 shadow-inner">
-                            <div className="w-36 h-36 bg-neutral-900 rounded-xl flex items-center justify-center text-white text-xs font-mono">
-                                [QR CODE API]
-                            </div>
-                        </div>
-                        <p className="text-xs text-pink-900/70 font-medium">
-                            Dùng camera điện thoại quét mã trên để xem và lưu bức ảnh kỷ niệm về máy!
-                        </p>
-                        <button
-                            type="button"
-                            onClick={() => setShowQrModal(false)}
-                            className="w-full py-2.5 rounded-xl bg-pink-500 text-white font-extrabold text-xs shadow-md hover:bg-pink-600 transition"
-                        >
-                            Đóng
-                        </button>
-                    </div>
-                </div>
-            )}
         </section>
     );
 }

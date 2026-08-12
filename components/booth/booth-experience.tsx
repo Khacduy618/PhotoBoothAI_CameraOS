@@ -20,8 +20,9 @@ import {
 import { EditingWorkspace } from "@/components/editor/EditingWorkspace";
 import { composePhotoLayout } from "@/services/render/layout-compositor.service";
 import { createRenderConfig } from "@/services/render/render-config.builder";
+import { listLocalSessionPhotos } from "@/services/storage/local-media-client.service";
 import type { BoothSession } from "@/types/session";
-import type { BoothSelection } from "@/types/theme";
+import type { BoothSelection, CapturedPhoto } from "@/types/theme";
 
 type RestoreStatus = "loading" | "ready";
 
@@ -60,6 +61,8 @@ export function BoothExperience() {
         useState<RestoreStatus>("loading");
     const [restoredSession, setRestoredSession] =
         useState<BoothSession | null>(null);
+    const [initialCapturedPhotos, setInitialCapturedPhotos] =
+        useState<CapturedPhoto[]>([]);
     const sessionStorageRef =
         useRef<SessionStorageService | null>(null);
     const sessionServiceRef =
@@ -94,6 +97,24 @@ export function BoothExperience() {
             let loadedSelection = defaultBoothSelection;
             if (activeSession.ok && activeSession.value) {
                 setRestoredSession(activeSession.value);
+                const localPhotos = await listLocalSessionPhotos(activeSession.value.id);
+                if (localPhotos.ok) {
+                    setInitialCapturedPhotos(
+                        localPhotos.value.map((photo) => ({
+                            id: photo.photoId,
+                            sessionId: photo.sessionId,
+                            originalBlob: new Blob([], { type: photo.mimeType }),
+                            originalUrl: photo.mediaUrl,
+                            outputUrl: photo.mediaUrl,
+                            mediaUrl: photo.mediaUrl,
+                            storageKey: photo.storageKey,
+                            width: photo.width,
+                            height: photo.height,
+                            expiresAt: photo.expiresAt,
+                            usedFallback: false,
+                        })),
+                    );
+                }
                 if (activeSession.value.selection) {
                     loadedSelection = normalizeBoothSelection(
                         activeSession.value.selection,
@@ -133,7 +154,10 @@ export function BoothExperience() {
     }
 
     return (
-        <BoothSessionProvider initialSelection={initialSelection}>
+        <BoothSessionProvider
+            initialSelection={initialSelection}
+            initialCapturedPhotos={initialCapturedPhotos}
+        >
             <BoothInnerExperience
                 restoredSession={restoredSession}
                 onAbandonSession={abandonSession}
@@ -218,7 +242,20 @@ function BoothInnerExperience({
         setIsExporting(true);
         try {
             const chronologicalPhotos = capturedPhotos.slice().reverse();
-            const sources = chronologicalPhotos.map((p) => ({ photoId: p.id, blob: p.originalBlob }));
+            const sources = await Promise.all(
+                chronologicalPhotos.map(async (p) => {
+                    if (p.originalBlob.size > 0) {
+                        return { photoId: p.id, blob: p.originalBlob };
+                    }
+
+                    const response = await fetch(p.mediaUrl || p.originalUrl);
+                    if (!response.ok) {
+                        throw new Error("Không thể tải ảnh gốc đã lưu để xuất file.");
+                    }
+
+                    return { photoId: p.id, blob: await response.blob() };
+                }),
+            );
             const result = await composePhotoLayout({
                 sources: sources.length > 0 ? sources : [],
                 renderConfig: createRenderConfig(selection),

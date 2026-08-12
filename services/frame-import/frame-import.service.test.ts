@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { buildCompanionMask } from "@/services/frame-import/alpha-mask.service";
+import { buildCompanionMask, isCanvaWhiteSlotPixel } from "@/services/frame-import/alpha-mask.service";
 import { findConnectedComponents } from "@/services/frame-import/connected-components.service";
 import { filterSlotCandidates } from "@/services/frame-import/slot-candidate-filter.service";
 import { orderSlots } from "@/services/frame-import/slot-ordering.service";
 import { calculateConfidence, classifyConfidence, inferShotCount } from "@/services/frame-import/confidence.service";
 import { analyzeImportFrame } from "@/services/frame-import/frame-import-analyzer.service";
 import { convertFrameDefinitionToRuntimeFrame } from "@/services/frame-import/frame-definition.adapter";
+import { isPointInsideFrameSlotCutout, shouldClearFrameSlotPixel } from "@/services/frame-import/transparent-punchout.service";
 import type { FrameDefinition } from "@/services/frame-import/frame-import.types";
 
 function createSyntheticFourSlotCompanionMask(width: number, height: number): Uint8Array {
@@ -88,7 +89,7 @@ describe("frame import analyzer services", () => {
         expect(result.status).toBe("auto-approved");
     });
 
-    it("analyzes Canva frame filled with sky-and-hills placeholder graphics", () => {
+    it("analyzes Canva frame filled with white opaque photo-slot placeholders", () => {
         const width = 120;
         const height = 180;
         const rgba = new Uint8ClampedArray(width * height * 4);
@@ -105,23 +106,117 @@ describe("frame import analyzer services", () => {
         for (let index = 0; index < width * height; index += 1) {
             if (mask[index] === 1) {
                 const pixel = index * 4;
-                rgba[pixel] = 188; // Canva Sky R
-                rgba[pixel + 1] = 227; // Canva Sky G
-                rgba[pixel + 2] = 254; // Canva Sky B
+                rgba[pixel] = 248;
+                rgba[pixel + 1] = 248;
+                rgba[pixel + 2] = 246;
                 rgba[pixel + 3] = 255;
             }
         }
 
         const result = analyzeImportFrame({
-            fileName: "canva-sky-hills-frame.png",
+            fileName: "canva-white-slot-frame.png",
             rgba,
             width,
             height,
         });
 
-        expect(result.sourceFileName).toBe("canva-sky-hills-frame.png");
+        expect(result.sourceFileName).toBe("canva-white-slot-frame.png");
         expect(result.analysis.detectedShotCount).toBe(4);
         expect(result.status).toBe("auto-approved");
+    });
+
+    it("does not treat colored Canva backgrounds as removable white slot fill", () => {
+        expect(isCanvaWhiteSlotPixel(188, 227, 254, 255)).toBe(false);
+        expect(isCanvaWhiteSlotPixel(130, 210, 126, 255)).toBe(false);
+        expect(isCanvaWhiteSlotPixel(245, 210, 230, 255)).toBe(false);
+        expect(isCanvaWhiteSlotPixel(248, 248, 246, 255)).toBe(true);
+    });
+
+    it("clears only white slot fill inside polygon cutouts and preserves colored frame art", () => {
+        const polygon = [
+            { x: 10, y: 10 },
+            { x: 50, y: 10 },
+            { x: 50, y: 50 },
+            { x: 10, y: 50 },
+        ];
+
+        expect(isPointInsideFrameSlotCutout(25, 25, polygon)).toBe(true);
+        expect(isPointInsideFrameSlotCutout(5, 25, polygon)).toBe(false);
+        expect(shouldClearFrameSlotPixel({ x: 25, y: 25, r: 248, g: 248, b: 246, a: 255, polygonPoints: polygon })).toBe(true);
+        expect(shouldClearFrameSlotPixel({ x: 5, y: 25, r: 248, g: 248, b: 246, a: 255, polygonPoints: polygon })).toBe(false);
+        expect(shouldClearFrameSlotPixel({ x: 25, y: 25, r: 188, g: 227, b: 254, a: 255, polygonPoints: polygon })).toBe(false);
+    });
+
+    it("infers an occluded slot from fragmented placeholder regions", () => {
+        const width = 160;
+        const height = 160;
+        const rgba = new Uint8ClampedArray(width * height * 4);
+
+        for (let index = 0; index < width * height; index += 1) {
+            const pixel = index * 4;
+            rgba[pixel] = 30;
+            rgba[pixel + 1] = 30;
+            rgba[pixel + 2] = 60;
+            rgba[pixel + 3] = 255;
+        }
+
+        const fragments = [
+            { x: 35, y: 35, width: 32, height: 32 },
+            { x: 93, y: 35, width: 32, height: 32 },
+            { x: 35, y: 93, width: 32, height: 32 },
+            { x: 93, y: 93, width: 32, height: 32 },
+        ];
+
+        for (const fragment of fragments) {
+            for (let y = fragment.y; y < fragment.y + fragment.height; y += 1) {
+                for (let x = fragment.x; x < fragment.x + fragment.width; x += 1) {
+                    const pixel = (y * width + x) * 4;
+                    rgba[pixel] = 240;
+                    rgba[pixel + 1] = 244;
+                    rgba[pixel + 2] = 248;
+                    rgba[pixel + 3] = 255;
+                }
+            }
+        }
+
+        const result = analyzeImportFrame({
+            fileName: "occluded-sticker-slot.png",
+            rgba,
+            width,
+            height,
+        });
+
+        expect(result.status).toBe("needs-review");
+        expect(result.slots).toHaveLength(1);
+        expect(result.slots[0].normalizedBounds.x).toBeLessThan(0.3);
+        expect(result.slots[0].normalizedBounds.width).toBeGreaterThan(0.5);
+    });
+
+    it("falls back to a needs-review landscape 3:2 slot when Canva PNG has no detectable transparent slot", () => {
+        const width = 180;
+        const height = 120;
+        const rgba = new Uint8ClampedArray(width * height * 4);
+
+        for (let index = 0; index < width * height; index += 1) {
+            const pixel = index * 4;
+            rgba[pixel] = 245;
+            rgba[pixel + 1] = 210;
+            rgba[pixel + 2] = 230;
+            rgba[pixel + 3] = 255;
+        }
+
+        const result = analyzeImportFrame({
+            fileName: "opaque-canon-6d-landscape-frame.png",
+            rgba,
+            width,
+            height,
+        });
+
+        expect(result.status).toBe("needs-review");
+        expect(result.analysis.detectedShotCount).toBe(1);
+        expect(result.analysis.warnings).toContain("LOW_CONFIDENCE");
+        expect(result.slots).toHaveLength(1);
+        expect(result.slots[0].normalizedBounds.width / result.slots[0].normalizedBounds.height).toBeCloseTo(3 / 2, 2);
     });
 
     it("classifies confidence thresholds correctly", () => {
@@ -140,15 +235,15 @@ describe("frame import analyzer services", () => {
             description: "Synthetic imported frame",
             kind: "png-overlay",
             source: "canva",
-            borderColor: "#ffffff",
-            borderWidth: 0,
+            assetUrl: "data:image/png;base64,test",
             shotCount: 4,
             photoViewportOrientation: "portrait",
+            photoAspectRatio: "2:3",
             layoutFamily: "2x2",
             outputWidth: 1200,
             outputHeight: 1800,
             slots: [
-                { id: "s1", index: 0, x: 0.05, y: 0.05, width: 0.42, height: 0.42, photoViewportOrientation: "portrait" },
+                { id: "s1", index: 0, x: 0.05, y: 0.05, width: 0.42, height: 0.42, photoViewportOrientation: "portrait", shape: "polygon", points: [{ x: 0.05, y: 0.05 }, { x: 0.47, y: 0.05 }, { x: 0.47, y: 0.47 }, { x: 0.05, y: 0.47 }] },
                 { id: "s2", index: 1, x: 0.53, y: 0.05, width: 0.42, height: 0.42, photoViewportOrientation: "portrait" },
                 { id: "s3", index: 2, x: 0.05, y: 0.53, width: 0.42, height: 0.42, photoViewportOrientation: "portrait" },
                 { id: "s4", index: 3, x: 0.53, y: 0.53, width: 0.42, height: 0.42, photoViewportOrientation: "portrait" },
@@ -169,7 +264,16 @@ describe("frame import analyzer services", () => {
             width: 504,
             height: 756,
             photoViewportOrientation: "portrait",
+            shape: "polygon",
+            points: [
+                { x: 60, y: 90 },
+                { x: 564, y: 90 },
+                { x: 564, y: 846 },
+                { x: 60, y: 846 },
+            ],
         });
+        expect(frameConfig.photoAspectRatio).toBe("2:3");
+        expect(frameConfig.photoFit).toBe("contain");
         expect(frameConfig.outputWidth).toBe(1200);
         expect(frameConfig.outputHeight).toBe(1800);
     });

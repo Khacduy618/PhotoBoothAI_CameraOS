@@ -55,10 +55,13 @@ export function PreviewRenderer({
     activePenWidth = 9,
     children,
 }: PreviewRendererProps) {
+    const [failedFrameAssetId, setFailedFrameAssetId] = React.useState<string | null>(null);
     const config = renderConfig || (selection ? createRenderConfig(selection) : null);
     if (!config) return null;
 
     const { layout, theme, frame, style, overlays } = config;
+    const activeFrameAssetUrl = failedFrameAssetId === frame.id ? undefined : frame.assetUrl;
+
     const cellFrame = {
         ...frame,
         id: "none",
@@ -135,29 +138,22 @@ export function PreviewRenderer({
                     })}
                 </div>
 
-                {/* Frame Overlay Layer - Always lays ON TOP of all photo viewports */}
-                {frame.assetUrl ? (
+                {/* Canva/operator PNG overlay stays above photos. Bundled solid frames are only the sheet background, not an extra border layer over photos. */}
+                {activeFrameAssetUrl ? (
                     <img
-                        src={frame.assetUrl}
+                        src={activeFrameAssetUrl}
                         alt={frame.name}
                         className="absolute inset-0 w-full h-full object-fill pointer-events-none select-none z-10"
-                    />
-                ) : frame.borderWidth > 0 && frame.borderColor !== "transparent" ? (
-                    <div
-                        className="absolute inset-0 pointer-events-none select-none z-10 border-solid"
-                        style={{
-                            borderColor: frame.borderColor,
-                            borderWidth: `${(frame.borderWidth / renderPlan.sheet.width) * 100}cqw`,
-                        }}
+                        onError={() => setFailedFrameAssetId(frame.id)}
                     />
                 ) : null}
 
-                {/* SVG Drawing Strokes Overlay */}
+                {/* SVG Drawing Strokes Overlay - draw above Canva frame so attendee/operator drawing decorates the selected frame too. */}
                 <svg
                     className="absolute inset-0 w-full h-full pointer-events-none"
                     viewBox={`0 0 ${renderPlan.sheet.width} ${renderPlan.sheet.height}`}
                     preserveAspectRatio="none"
-                    style={{ zIndex: 5 }}
+                    style={{ zIndex: 20 }}
                 >
                     {overlays
                         .filter((o): o is DrawingOverlay => o.type === "drawing" && Boolean(o.points && o.points.length >= 2))

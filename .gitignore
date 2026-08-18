@@ -50,3 +50,4 @@ next-env.d.ts
 *.log
 *.txt
 *.backup-before-browser
+apps/artifacts/windowmini-storage/sessions/

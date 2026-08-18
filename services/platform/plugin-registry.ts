@@ -1,0 +1,38 @@
+import React from "react";
+
+export interface WizardStep<TSession = unknown> {
+    id: string;
+    title: string;
+    component: React.ComponentType<Record<string, unknown>>;
+    validate?: (session: TSession) => boolean;
+    canSkip?: boolean;
+    isVisible?: (session: TSession) => boolean;
+    next?: (session: TSession) => string;
+}
+
+export class PluginRegistry {
+    private static steps: WizardStep[] = [];
+
+    static registerStep(step: WizardStep) {
+        if (this.steps.some(s => s.id === step.id)) {
+            return;
+        }
+        this.steps.push(step);
+    }
+
+    static getSteps(): WizardStep[] {
+        return [...this.steps];
+    }
+
+    static getVisibleSteps(session: unknown): WizardStep[] {
+        return this.steps.filter(step => !step.isVisible || step.isVisible(session));
+    }
+
+    static getStepById(id: string): WizardStep | undefined {
+        return this.steps.find(s => s.id === id);
+    }
+
+    static clear() {
+        this.steps = [];
+    }
+}

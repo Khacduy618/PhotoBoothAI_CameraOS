@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CameraOS FrameDefinition",
+  "type": "object",
+  "required": [
+    "version",
+    "id",
+    "name",
+    "assetType",
+    "assetUrl",
+    "output",
+    "shotCount",
+    "slots",
+    "importMetadata"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "assetType": {
+      "const": "png"
+    },
+    "assetUrl": {
+      "type": "string"
+    },
+    "thumbnailUrl": {
+      "type": "string"
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "width",
+        "height",
+        "aspectRatio",
+        "orientation"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "aspectRatio": {
+          "const": "4:6"
+        },
+        "orientation": {
+          "const": "portrait"
+        }
+      }
+    },
+    "shotCount": {
+      "enum": [
+        1,
+        2,
+        4,
+        6
+      ]
+    },
+    "slots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "order",
+          "x",
+          "y",
+          "width",
+          "height",
+          "fit"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "x": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "y": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "width": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          },
+          "height": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          },
+          "fit": {
+            "const": "cover"
+          }
+        }
+      }
+    },
+    "importMetadata": {
+      "type": "object",
+      "required": [
+        "source",
+        "maskSource",
+        "sourceHash",
+        "confidence",
+        "reviewedByHuman",
+        "analyzerVersion"
+      ],
+      "properties": {
+        "source": {
+          "const": "canva"
+        },
+        "maskSource": {
+          "enum": [
+            "alpha",
+            "companion-mask"
+          ]
+        },
+        "sourceHash": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reviewedByHuman": {
+          "type": "boolean"
+        },
+        "analyzerVersion": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

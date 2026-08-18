@@ -102,7 +102,7 @@ function splitMergedPhotostripSlots(
         const minH = Math.min(...heights);
 
         const hasMergedSlot = sorted.some(
-            (s) => s.normalizedBounds.height >= 0.35 || s.normalizedBounds.height >= minH * 1.35,
+            (s) => s.normalizedBounds.height >= 0.65 || s.normalizedBounds.height >= minH * 1.75,
         );
 
         if (hasMergedSlot) {
@@ -110,7 +110,7 @@ function splitMergedPhotostripSlots(
             let orderCounter = 0;
 
             for (const slot of sorted) {
-                const isMerged = slot.normalizedBounds.height >= 0.35 || slot.normalizedBounds.height >= minH * 1.35;
+                const isMerged = slot.normalizedBounds.height >= 0.65 || slot.normalizedBounds.height >= minH * 1.75;
                 if (isMerged) {
                     const b = slot.normalizedBounds;
                     const slotGapRatio = 0.012;
@@ -162,9 +162,12 @@ export function analyzeImportFrame({
     companionMask,
     importId = `import_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
 }: AnalyzeFrameInput): FrameImportResult {
-    const mask = typeof companionMask !== "undefined"
-        ? buildCompanionMask(companionMask, width, height)
+    const maskResult = typeof companionMask !== "undefined"
+        ? { mask: buildCompanionMask(companionMask, width, height), maskSource: "companion-mask" as const }
         : buildAlphaMask(rgba, width, height);
+
+    const mask = maskResult.mask;
+    const maskSource = maskResult.maskSource;
 
     const transparentPixels = mask.reduce((sum, value) => sum + value, 0);
     const components = findConnectedComponents(mask, width, height);
@@ -189,13 +192,17 @@ export function analyzeImportFrame({
         : strictCandidates;
     const rawDetectedSlots = orderSlots(tolerantCandidates);
     const detectedSlots = splitMergedPhotostripSlots(rawDetectedSlots, width, height);
-    const fallbackSlots = detectedSlots.length > 0 ? [] : [buildFallbackSlot(width, height)];
-    const orderedSlots = detectedSlots.length > 0 ? detectedSlots : fallbackSlots;
+    const usedFallback = detectedSlots.length === 0;
+    const fallbackSlots = usedFallback ? [buildFallbackSlot(width, height)] : [];
+    const orderedSlots = (usedFallback ? fallbackSlots : detectedSlots).map((slot) => ({
+        ...slot,
+        slotSource: usedFallback ? ("fallback" as const) : ("auto" as const),
+    }));
     const detectedShotCount = inferShotCount(orderedSlots.length);
-    const confidence = detectedSlots.length > 0 ? calculateConfidence(orderedSlots) : 0.65;
+    const confidence = !usedFallback ? calculateConfidence(orderedSlots) : 0.50;
     const warnings: FrameImportWarning[] = [];
 
-    if (transparentPixels === 0) {
+    if (transparentPixels === 0 || usedFallback) {
         warnings.push("NO_TRANSPARENT_SLOT_FOUND");
     }
 
@@ -203,13 +210,19 @@ export function analyzeImportFrame({
         warnings.push("UNSUPPORTED_SLOT_COUNT");
     }
 
-    if (confidence < 0.9) {
+    if (confidence < 0.9 || usedFallback) {
         warnings.push("LOW_CONFIDENCE");
     }
 
     const isPng = fileName.toLowerCase().endsWith(".png");
-    const autoApprove = isPng && transparentPixels > 0 && !usedTolerantDetector;
-    const status = autoApprove ? "auto-approved" : (detectedSlots.length === 0 || usedTolerantDetector ? "needs-review" : detectedShotCount ? classifyConfidence(confidence) : "rejected");
+    const autoApprove = isPng && transparentPixels > 0 && !usedTolerantDetector && !usedFallback;
+    const status = autoApprove
+        ? "auto-approved"
+        : usedFallback || usedTolerantDetector
+        ? "needs-review"
+        : detectedShotCount
+        ? classifyConfidence(confidence)
+        : "rejected";
     const finalConfidence = autoApprove ? 1.0 : confidence;
     const finalWarnings = autoApprove ? [] : warnings;
 
@@ -222,7 +235,7 @@ export function analyzeImportFrame({
             mimeType: "image/png",
             hasAlpha: typeof companionMask === "undefined",
         },
-        maskSource: typeof companionMask !== "undefined" ? "companion-mask" : "alpha",
+        maskSource,
         analysis: {
             transparentPixelRatio: transparentPixels / (width * height),
             rawComponentCount: components.length,

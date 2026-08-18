@@ -65,7 +65,7 @@ export const GUEST_PRODUCTS: Record<GuestProductId, GuestProductConfig> = {
     printSheets: 1,
     premium: false,
     group: "Photo Sheet",
-    description: "1 × Trang ảnh 10×15 dọc (4 ô ảnh)",
+    description: "1 × Trang ảnh 10×15 (4 ô ảnh)",
   },
 
   SHEET_6: {
@@ -77,6 +77,6 @@ export const GUEST_PRODUCTS: Record<GuestProductId, GuestProductConfig> = {
     printSheets: 1,
     premium: false,
     group: "Photo Sheet",
-    description: "1 × Trang ảnh 10×15 ngang (6 ô ảnh)",
+    description: "1 × Trang ảnh 10×15 (6 ô ảnh)",
   },
 };

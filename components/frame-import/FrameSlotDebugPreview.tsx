@@ -236,6 +236,17 @@ export function FrameSlotDebugPreview({
                             )}
                             <div className="absolute left-1 top-1 flex items-center gap-1.5 rounded bg-black/80 px-2 py-0.5 text-[10px] font-black text-white shadow pointer-events-none">
                                 <span>#{slot.order + 1}{slot.shape === "polygon" ? " cong" : ""}</span>
+                                {(slot as { slotSource?: string }).slotSource && (
+                                    <span className={`px-1 py-0.2 rounded text-[8px] uppercase font-bold ${
+                                        (slot as { slotSource?: string }).slotSource === "fallback"
+                                            ? "bg-amber-600 text-white"
+                                            : (slot as { slotSource?: string }).slotSource === "manual"
+                                            ? "bg-blue-600 text-white"
+                                            : "bg-emerald-600 text-white"
+                                    }`}>
+                                        {(slot as { slotSource?: string }).slotSource}
+                                    </span>
+                                )}
                                 <span className="opacity-75 font-mono text-[9px]">
                                     {(slot.normalizedBounds.width * 100).toFixed(1)}%×
                                     {(slot.normalizedBounds.height * 100).toFixed(1)}%

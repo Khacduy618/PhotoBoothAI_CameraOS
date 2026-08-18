@@ -4,7 +4,6 @@ import React, { useState, useEffect } from "react";
 import { analyzeImportFrame } from "@/services/frame-import/frame-import-analyzer.service";
 import type { FrameImportResult, FrameDefinition, ImportedFrameShotCount } from "@/services/frame-import/frame-import.types";
 import { LocalFrameRegistry } from "@/services/frame/local-frame-registry";
-import { punchOutFrameSlots } from "@/services/frame-import/transparent-punchout.service";
 import { FrameImportResultCard } from "./FrameImportResultCard";
 
 interface ImageFileState {
@@ -417,15 +416,13 @@ export function FrameImportPanel() {
                         points: s.points,
                     }));
 
-                    const transparentAssetUrl = item.objectUrl ? await punchOutFrameSlots(item.objectUrl, definitionSlots) : item.objectUrl;
-
                     const definition: FrameDefinition = {
                         id: `imported-${item.result.importId}`,
                         name: defaultName,
                         description: "Canva imported frame overlay",
                         kind: "png-overlay",
                         source: "canva",
-                        assetUrl: transparentAssetUrl,
+                        assetUrl: item.objectUrl,
                         shotCount: detectedShotCount,
                         photoViewportOrientation,
                         photoAspectRatio,
@@ -590,7 +587,7 @@ export function FrameImportPanel() {
 
                                         <div className="grid grid-cols-2 gap-3 items-center">
                                             <div
-                                                className="mx-auto overflow-hidden rounded-xl border border-neutral-200 bg-neutral-900 p-1 flex items-center justify-center"
+                                                className="mx-auto overflow-hidden rounded-xl border border-neutral-200 bg-neutral-100 p-1 flex items-center justify-center relative bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:8px_8px]"
                                                 style={{
                                                     maxHeight: "180px",
                                                     aspectRatio: def.outputWidth && def.outputHeight ? `${def.outputWidth} / ${def.outputHeight}` : "2 / 3",

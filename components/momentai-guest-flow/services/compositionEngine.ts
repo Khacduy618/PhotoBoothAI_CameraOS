@@ -1,6 +1,7 @@
 import { FrameTemplate, PhotoItem, EventConfig, PaperSize } from '../types';
 import { HOI_AN_SAMPLE_PHOTOS } from '../data/hoianSamplePhotos';
 import { isStripTemplate } from '../components/UI/frame-previews/FramePreviewCard';
+import { calculatePhotoLayerGeometry } from '../../../services/layout/frameGeometry';
 
 export class CompositionEngine {
   public async renderComposition(
@@ -10,11 +11,14 @@ export class CompositionEngine {
     customText?: string,
     drawDataUrl?: string,
     targetWidth: number = 1800,
-    targetHeight: number = 2700
+    targetHeight: number = 2700,
+    options?: { allowSampleFallback?: boolean; debugScale?: number }
   ): Promise<{ master: string; share: string; print: string }> {
+    const actualWidth = (frame as any).outputWidth || (frame as any).canvas?.width || targetWidth;
+    const actualHeight = (frame as any).outputHeight || (frame as any).canvas?.height || targetHeight;
     const canvas = document.createElement('canvas');
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
+    canvas.width = actualWidth;
+    canvas.height = actualHeight;
     const ctx = canvas.getContext('2d')!;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
@@ -24,39 +28,57 @@ export class CompositionEngine {
     ctx.fillStyle = (bg && bg !== 'transparent') ? bg : '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 2. Load and Draw Photos into Slots
+    const isProduction = process.env.NODE_ENV === 'production' || (typeof window !== 'undefined' && (window as any).isProductionMode);
+    const allowFallback = options?.allowSampleFallback ?? !isProduction;
+
+    // 2. Draw Captured Photo Layers BEHIND Frame PNG (Layer 0)
     for (let i = 0; i < frame.slots.length; i++) {
       const slot = frame.slots[i];
       const photo = slotPhotos[i];
 
-      const slotX = (slot.x / 100) * canvas.width;
-      const slotY = (slot.y / 100) * canvas.height;
-      const slotW = (slot.width / 100) * canvas.width;
-      const slotH = (slot.height / 100) * canvas.height;
-
-      ctx.save();
-      if (slot.borderRadius) {
-        this.clipRoundedRect(ctx, slotX, slotY, slotW, slotH, slot.borderRadius);
-      } else {
-        ctx.beginPath();
-        ctx.rect(slotX, slotY, slotW, slotH);
+      if ((!photo || !photo.dataUrl) && !allowFallback) {
+        throw new Error(`[CompositionEngine] Missing required customer photo for slot ${i + 1}`);
       }
 
       const imgUrl = (photo && photo.dataUrl) ? photo.dataUrl : HOI_AN_SAMPLE_PHOTOS[i % HOI_AN_SAMPLE_PHOTOS.length];
       try {
         const img = await this.loadImage(imgUrl);
-        // Scale-to-fit center photo inside viewport without cropping
-        this.drawImageFit(ctx, img, slotX, slotY, slotW, slotH);
+        const imageW = photo?.width || (img as HTMLImageElement).naturalWidth || img.width || 1920;
+        const imageH = photo?.height || (img as HTMLImageElement).naturalHeight || img.height || 1080;
+
+        const geom = calculatePhotoLayerGeometry({
+          canvasWidth: canvas.width,
+          canvasHeight: canvas.height,
+          slot,
+          imageWidth: imageW,
+          imageHeight: imageH,
+          debugScale: options?.debugScale,
+        });
+
+        ctx.drawImage(img, geom.photoX, geom.photoY, geom.photoWidth, geom.photoHeight);
       } catch {
-        // Fallback to sample photo if custom photo load failed
         try {
           const fallbackImg = await this.loadImage(HOI_AN_SAMPLE_PHOTOS[i % HOI_AN_SAMPLE_PHOTOS.length]);
-          this.drawImageFit(ctx, fallbackImg, slotX, slotY, slotW, slotH);
+          const geom = calculatePhotoLayerGeometry({
+            canvasWidth: canvas.width,
+            canvasHeight: canvas.height,
+            slot,
+            imageWidth: fallbackImg.width || 1920,
+            imageHeight: fallbackImg.height || 1080,
+          });
+
+          ctx.drawImage(fallbackImg, geom.photoX, geom.photoY, geom.photoWidth, geom.photoHeight);
         } catch {
-          this.drawSlotPlaceholder(ctx, slotX, slotY, slotW, slotH, i + 1);
+          const geom = calculatePhotoLayerGeometry({
+            canvasWidth: canvas.width,
+            canvasHeight: canvas.height,
+            slot,
+            imageWidth: 1920,
+            imageHeight: 1080,
+          });
+          this.drawSlotPlaceholder(ctx, geom.slotX, geom.slotY, geom.slotWidth, geom.slotHeight, i + 1);
         }
       }
-      ctx.restore();
     }
 
     // 3. Draw Frame Overlay Image if present (check all potential overlay property names)
@@ -76,8 +98,8 @@ export class CompositionEngine {
     // 4. Draw Branding Fallback Text ONLY if NO overlay image is present
     if (!hasOverlayImage) {
       const branding = frame.eventBranding || {
-        text: eventConfig.eventName || 'PHỐ CỔ HỘI AN',
-        subtext: eventConfig.customTagline || 'Tiệm Ảnh Di Sản',
+        text: eventConfig.eventName || '',
+        subtext: eventConfig.customTagline || '',
         showDate: true,
       };
 
@@ -213,8 +235,8 @@ export class CompositionEngine {
       return;
     }
 
-    // Cover scale: scale photo to cover full slot height and width, centered
-    const scale = Math.max(viewportW / img.width, viewportH / img.height);
+    // Scale-to-fit: scale photo to fit inside slot without crop or stretch, centered
+    const scale = Math.min(viewportW / img.width, viewportH / img.height);
     const renderWidth = img.width * scale;
     const renderHeight = img.height * scale;
     const x = viewportX + (viewportW - renderWidth) / 2;

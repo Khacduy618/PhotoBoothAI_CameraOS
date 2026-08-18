@@ -91,10 +91,19 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
       const correlationId = `${session.sessionId}_shot_${shotIndex}_${Date.now()}`;
       await getDesktopCameraBridge()?.capture({ sessionId: session.sessionId, shotIndex, correlationId }).catch(() => null);
       const dataUrl = await cameraService.capturePhoto(shot, session.sessionId);
+      const imgDimensions = await new Promise<{ width: number; height: number }>((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve({ width: img.naturalWidth || 1920, height: img.naturalHeight || 1080 });
+        img.onerror = () => resolve({ width: 1920, height: 1080 });
+        img.src = dataUrl;
+      });
+
       const newPhoto: PhotoItem = {
         id: `photo_${Date.now()}_${shot}`,
         index: shot + 1,
         dataUrl,
+        width: imgDimensions.width,
+        height: imgDimensions.height,
         timestamp: new Date().toLocaleTimeString('vi-VN'),
       };
       completedPhotos.push(newPhoto);

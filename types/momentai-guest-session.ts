@@ -62,6 +62,7 @@ export interface MomentAITemplate {
     slots: MomentAITemplateSlot[];
     assets: {
         background: string;
+        overlay?: string;
         overlayColor: string;
         textColor: string;
     };

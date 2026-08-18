@@ -2,7 +2,7 @@ import type { BoothLayoutFamily } from "@/types/customization";
 import type { FrameConfig, PhotoAspectRatio } from "@/types/theme";
 
 export type ImportedFrameShotCount = 1 | 2 | 4 | 6 | 8;
-export type FrameImportMaskSource = "alpha" | "companion-mask";
+export type FrameImportMaskSource = "alpha" | "companion-mask" | "white-fill";
 export type FrameImportStatus = "auto-approved" | "needs-review" | "rejected";
 
 export interface PixelBounds {
@@ -107,6 +107,10 @@ export interface FrameDefinition {
     kind: "png-overlay";
     source: "canva" | "operator-upload";
     assetUrl?: string;
+    assets?: {
+        overlay?: string;
+        background?: string;
+    };
     thumbnailUrl?: string;
     shotCount: ImportedFrameShotCount;
     targetProduct?: FrameTargetProduct;

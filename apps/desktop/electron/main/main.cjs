@@ -241,6 +241,13 @@ function ensureAdminDb() {
     }
   } catch {}
 
+  // Purge any legacy mock frames saved in SQLite during previous testing
+  try {
+    adminDb.exec(`
+      DELETE FROM admin_frames WHERE frame_id LIKE '%1premium%' OR frame_id LIKE '%desktop_template%' OR definition_json LIKE '%PHỐ CỔ HỘI AN%';
+    `);
+  } catch {}
+
   const now = nowIso();
   const popularEvents = [
     { eventId: 'event_hoi_an_heritage', name: 'Hội An Di Sản • Heritage Photo Booth' },
@@ -287,12 +294,16 @@ function listTemplates(eventId, captureFormatId) {
         const def = JSON.parse(row.definition_json);
         const shotCount = def.shotCount || (def.slots ? def.slots.length : 0);
         if (shotCount === targetShotCount || targetShotCount === 3 || shotCount === 1) {
+          const isLandscape = def.orientation === 'landscape' || (def.outputWidth && def.outputHeight ? def.outputWidth > def.outputHeight : false);
           importedTemplates.push({
             templateId: def.id,
             eventId: def.eventId || cleanEventId,
             captureFormatId,
             name: def.name || 'Khung Import Canva',
             status: 'PUBLISHED',
+            orientation: isLandscape ? 'landscape' : 'portrait',
+            outputWidth: def.outputWidth || 1800,
+            outputHeight: def.outputHeight || 2700,
             canvas: { width: def.outputWidth || 1800, height: def.outputHeight || 2700 },
             slots: (def.slots || []).map((slot, index) => ({
               slotIndex: index + 1,
@@ -308,7 +319,7 @@ function listTemplates(eventId, captureFormatId) {
               textColor: '#1A1A1A',
             },
             customization: { allowTyping: false, allowDraw: Boolean(def.allowDraw) },
-            printProfile: { paper: '4x6', orientation: 'portrait', dpi: 300 },
+            printProfile: { paper: '4x6', orientation: isLandscape ? 'landscape' : 'portrait', dpi: 300 },
           });
         }
       } catch {
@@ -322,141 +333,37 @@ function listTemplates(eventId, captureFormatId) {
   // 2. Also check in-memory adminTemplates map
   const inMemoryImported = Array.from(adminTemplates.values())
     .filter((def) => def.status === 'published' && (!def.eventId || def.eventId === cleanEventId) && (def.shotCount === targetShotCount || (def.slots && def.slots.length === targetShotCount)))
-    .map((def) => ({
-      templateId: def.id,
-      eventId: def.eventId || cleanEventId,
-      captureFormatId,
-      name: def.name || 'Khung Import Canva',
-      status: 'PUBLISHED',
-      canvas: { width: def.outputWidth || 1800, height: def.outputHeight || 2700 },
-      slots: (def.slots || []).map((slot, index) => ({
-        slotIndex: index + 1,
-        x: slot.x <= 1 ? slot.x * 100 : slot.x,
-        y: slot.y <= 1 ? slot.y * 100 : slot.y,
-        width: slot.width <= 1 ? slot.width * 100 : slot.width,
-        height: slot.height <= 1 ? slot.height * 100 : slot.height,
-      })),
-      assets: {
-        background: '#FDFCFB',
-        overlay: def.assetUrl,
-        overlayColor: 'transparent',
-        textColor: '#1A1A1A',
-      },
-      customization: { allowTyping: false, allowDraw: Boolean(def.allowDraw) },
-      printProfile: { paper: '4x6', orientation: 'portrait', dpi: 300 },
-    }));
+    .map((def) => {
+      const isLandscape = def.orientation === 'landscape' || (def.outputWidth && def.outputHeight ? def.outputWidth > def.outputHeight : false);
+      return {
+        templateId: def.id,
+        eventId: def.eventId || cleanEventId,
+        captureFormatId,
+        name: def.name || 'Khung Import Canva',
+        status: 'PUBLISHED',
+        orientation: isLandscape ? 'landscape' : 'portrait',
+        outputWidth: def.outputWidth || 1800,
+        outputHeight: def.outputHeight || 2700,
+        canvas: { width: def.outputWidth || 1800, height: def.outputHeight || 2700 },
+        slots: (def.slots || []).map((slot, index) => ({
+          slotIndex: index + 1,
+          x: slot.x <= 1 ? slot.x * 100 : slot.x,
+          y: slot.y <= 1 ? slot.y * 100 : slot.y,
+          width: slot.width <= 1 ? slot.width * 100 : slot.width,
+          height: slot.height <= 1 ? slot.height * 100 : slot.height,
+        })),
+        assets: {
+          background: '#FDFCFB',
+          overlay: def.assetUrl,
+          overlayColor: 'transparent',
+          textColor: '#1A1A1A',
+        },
+        customization: { allowTyping: false, allowDraw: Boolean(def.allowDraw) },
+        printProfile: { paper: '4x6', orientation: isLandscape ? 'landscape' : 'portrait', dpi: 300 },
+      };
+    });
 
-  // 3. Fallback default templates
-  const count = format.slotCount;
-  const is6Shot = count === 6;
-  const is4Shot = captureFormatId === 'format_4shot';
-
-  const portraitSlots = count === 4
-    ? [
-      { slotIndex: 1, x: 6, y: 5, width: 41, height: 40 },
-      { slotIndex: 2, x: 53, y: 5, width: 41, height: 40 },
-      { slotIndex: 3, x: 6, y: 48, width: 41, height: 40 },
-      { slotIndex: 4, x: 53, y: 48, width: 41, height: 40 },
-    ]
-    : count === 2
-    ? [{ slotIndex: 1, x: 5, y: 5, width: 43, height: 78 }, { slotIndex: 2, x: 52, y: 5, width: 43, height: 78 }]
-    : [{ slotIndex: 1, x: 10, y: 6, width: 80, height: 76 }];
-
-  const cameraRatioSlots = count === 6
-    ? [
-      { slotIndex: 1, x: 5, y: 5, width: 43, height: 25 },
-      { slotIndex: 2, x: 52, y: 5, width: 43, height: 25 },
-      { slotIndex: 3, x: 5, y: 32, width: 43, height: 25 },
-      { slotIndex: 4, x: 52, y: 32, width: 43, height: 25 },
-      { slotIndex: 5, x: 5, y: 59, width: 43, height: 25 },
-      { slotIndex: 6, x: 52, y: 59, width: 43, height: 25 },
-    ]
-    : count === 4
-    ? [{ slotIndex: 1, x: 5, y: 5, width: 43, height: 36 }, { slotIndex: 2, x: 52, y: 5, width: 43, height: 36 }, { slotIndex: 3, x: 5, y: 44, width: 43, height: 36 }, { slotIndex: 4, x: 52, y: 44, width: 43, height: 36 }]
-    : count === 2
-    ? [{ slotIndex: 1, x: 8, y: 6, width: 84, height: 38 }, { slotIndex: 2, x: 8, y: 48, width: 84, height: 38 }]
-    : [{ slotIndex: 1, x: 6, y: 10, width: 88, height: 68 }];
-
-  const fallbackTemplates = is6Shot
-    ? [
-        {
-          templateId: `desktop_template_white_camera_${captureFormatId}`,
-          eventId: cleanEventId,
-          captureFormatId,
-          name: 'Khung Trắng Tối Giản (6 Shots - Camera 3:2)',
-          status: 'PUBLISHED',
-          canvas: { width: 1800, height: 2700 },
-          slots: cameraRatioSlots,
-          assets: { background: '#FDFCFB', overlayColor: '#1A1A1A', textColor: '#1A1A1A' },
-          customization: { allowTyping: false, allowDraw: true },
-          printProfile: { paper: '6x8', orientation: 'portrait', dpi: 300 },
-        },
-        {
-          templateId: `desktop_template_black_camera_${captureFormatId}`,
-          eventId: cleanEventId,
-          captureFormatId,
-          name: 'Khung Đen Cổ Điển (6 Shots - Camera 3:2)',
-          status: 'PUBLISHED',
-          canvas: { width: 1800, height: 2700 },
-          slots: cameraRatioSlots,
-          assets: { background: '#1A1A1A', overlayColor: '#FDFCFB', textColor: '#FDFCFB' },
-          customization: { allowTyping: false, allowDraw: true },
-          printProfile: { paper: '6x8', orientation: 'portrait', dpi: 300 },
-        },
-      ]
-    : [
-        {
-          templateId: `desktop_template_white_portrait_${captureFormatId}`,
-          eventId: cleanEventId,
-          captureFormatId,
-          name: is4Shot ? 'Khung Trắng Tối Giản (4 Shots - Lưới 2x2 Cắt Dọc)' : `${format.label} Khung Trắng Tối Giản (Cắt Dọc Portrait)`,
-          status: 'PUBLISHED',
-          canvas: { width: 1800, height: 2700 },
-          slots: portraitSlots,
-          assets: { background: '#FDFCFB', overlayColor: '#1A1A1A', textColor: '#1A1A1A' },
-          customization: { allowTyping: false, allowDraw: true },
-          printProfile: { paper: '4x6', orientation: 'portrait', dpi: 300 },
-        },
-        {
-          templateId: `desktop_template_white_camera_${captureFormatId}`,
-          eventId: cleanEventId,
-          captureFormatId,
-          name: is4Shot ? 'Khung Trắng Tối Giản (4 Shots - Camera 3:2)' : `${format.label} Khung Trắng Tối Giản (Camera 3:2)`,
-          status: 'PUBLISHED',
-          canvas: { width: 1800, height: 2700 },
-          slots: cameraRatioSlots,
-          assets: { background: '#FDFCFB', overlayColor: '#1A1A1A', textColor: '#1A1A1A' },
-          customization: { allowTyping: false, allowDraw: true },
-          printProfile: { paper: '4x6', orientation: 'portrait', dpi: 300 },
-        },
-        {
-          templateId: `desktop_template_black_portrait_${captureFormatId}`,
-          eventId: cleanEventId,
-          captureFormatId,
-          name: is4Shot ? 'Khung Đen Cổ Điển (4 Shots - Lưới 2x2 Cắt Dọc)' : `${format.label} Khung Đen Cổ Điển (Cắt Dọc Portrait)`,
-          status: 'PUBLISHED',
-          canvas: { width: 1800, height: 2700 },
-          slots: portraitSlots,
-          assets: { background: '#1A1A1A', overlayColor: '#FDFCFB', textColor: '#FDFCFB' },
-          customization: { allowTyping: false, allowDraw: true },
-          printProfile: { paper: '4x6', orientation: 'portrait', dpi: 300 },
-        },
-        {
-          templateId: `desktop_template_black_camera_${captureFormatId}`,
-          eventId: cleanEventId,
-          captureFormatId,
-          name: is4Shot ? 'Khung Đen Cổ Điển (4 Shots - Camera 3:2)' : `${format.label} Khung Đen Cổ Điển (Camera 3:2)`,
-          status: 'PUBLISHED',
-          canvas: { width: 1800, height: 2700 },
-          slots: cameraRatioSlots,
-          assets: { background: '#1A1A1A', overlayColor: '#FDFCFB', textColor: '#FDFCFB' },
-          customization: { allowTyping: false, allowDraw: true },
-          printProfile: { paper: '4x6', orientation: 'portrait', dpi: 300 },
-        },
-      ];
-
-  const hasImported = importedTemplates.length > 0 || inMemoryImported.length > 0;
-  const combined = hasImported ? [...importedTemplates, ...inMemoryImported] : fallbackTemplates;
+  const combined = [...importedTemplates, ...inMemoryImported];
   return Array.from(new Map(combined.map((f) => [f.templateId || f.id, f])).values());
 }
 

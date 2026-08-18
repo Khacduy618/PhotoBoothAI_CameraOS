@@ -135,10 +135,10 @@ describe("frame import analyzer services", () => {
         for (let index = 0; index < width * height; index += 1) {
             if (mask[index] === 1) {
                 const pixel = index * 4;
-                rgba[pixel] = 248;
-                rgba[pixel + 1] = 248;
-                rgba[pixel + 2] = 246;
-                rgba[pixel + 3] = 255;
+                rgba[pixel] = 0;
+                rgba[pixel + 1] = 0;
+                rgba[pixel + 2] = 0;
+                rgba[pixel + 3] = 0;
             }
         }
 
@@ -152,6 +152,80 @@ describe("frame import analyzer services", () => {
         expect(result.sourceFileName).toBe("canva-white-slot-frame.png");
         expect(result.analysis.detectedShotCount).toBe(4);
         expect(result.status).toBe("auto-approved");
+    });
+
+    it("clears outer white paper margins on opaque PNG uploads so inner white photo slots are detected cleanly", () => {
+        const width = 100;
+        const height = 150;
+        const rgba = new Uint8ClampedArray(width * height * 4);
+
+        // Fill background with white (e.g. Canva opaque export)
+        for (let i = 0; i < width * height; i++) {
+            const p = i * 4;
+            rgba[p] = 255;
+            rgba[p + 1] = 255;
+            rgba[p + 2] = 255;
+            rgba[p + 3] = 255;
+        }
+
+        // Add a colored border/frame graphic at margin (e.g. dark border between x=10..90, y=10..140)
+        for (let y = 10; y < 140; y++) {
+            for (let x = 10; x < 90; x++) {
+                if (x === 10 || x === 89 || y === 10 || y === 139) {
+                    const p = (y * width + x) * 4;
+                    rgba[p] = 40;
+                    rgba[p + 1] = 40;
+                    rgba[p + 2] = 40;
+                    rgba[p + 3] = 255;
+                }
+            }
+        }
+
+        // Inside the border, the inner slot area (x=15..85, y=15..135) is white
+        const result = analyzeImportFrame({
+            fileName: "opaque-canva-export-with-border.png",
+            rgba,
+            width,
+            height,
+        });
+
+        expect(result.slots.length).toBe(1);
+        expect(result.maskSource).toBe("white-fill");
+        expect(result.slots[0].normalizedBounds.x).toBeGreaterThanOrEqual(0.1);
+        expect(result.slots[0].normalizedBounds.width).toBeGreaterThanOrEqual(0.6);
+    });
+
+    it("isolates inner transparent photo slots when Canva PNG export has a transparent outer background", () => {
+        const width = 100;
+        const height = 150;
+        const rgba = new Uint8ClampedArray(width * height * 4);
+
+        // Entire canvas is transparent by default (a = 0)
+        // Add an opaque frame border graphic (e.g. dark border between x=10..90, y=10..140)
+        for (let y = 10; y < 140; y++) {
+            for (let x = 10; x < 90; x++) {
+                if (x === 10 || x === 89 || y === 10 || y === 139) {
+                    const p = (y * width + x) * 4;
+                    rgba[p] = 40;
+                    rgba[p + 1] = 40;
+                    rgba[p + 2] = 40;
+                    rgba[p + 3] = 255; // Opaque border line
+                }
+            }
+        }
+
+        // Inside the border (x=11..88, y=11..138), pixels are transparent (a = 0)
+        const result = analyzeImportFrame({
+            fileName: "canva-transparent-export-with-border.png",
+            rgba,
+            width,
+            height,
+        });
+
+        expect(result.slots.length).toBe(1);
+        expect(result.maskSource).toBe("alpha");
+        expect(result.slots[0].normalizedBounds.x).toBeGreaterThanOrEqual(0.1);
+        expect(result.slots[0].normalizedBounds.width).toBeGreaterThanOrEqual(0.6);
     });
 
     it("does not treat colored Canva backgrounds as removable white slot fill", () => {

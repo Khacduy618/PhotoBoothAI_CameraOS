@@ -39,18 +39,36 @@ export function FrameImportResultCard({
     const [selectedSlotId, setSelectedSlotId] = useState<string | null>(result.slots[0]?.id || null);
     const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
 
-    const initialProduct: FrameTargetProduct =
-        result.slots.length === 1
-            ? "PREMIUM_POSTCARD"
-            : result.slots.length === 2
-            ? "STRIP_2"
-            : result.slots.length === 6
-            ? "SHEET_6"
-            : "STRIP_4";
+    const inferProductFromSlotsAndName = (): FrameTargetProduct => {
+        const lowerName = sourceFileName.toLowerCase();
+        if (result.slots.length === 1) return "PREMIUM_POSTCARD";
+        if (result.slots.length === 2) return "STRIP_2";
+        if (result.slots.length === 6) return "SHEET_6";
+        if (result.slots.length === 4) {
+            const hasMultipleColumns = result.slots.some((s) => s.normalizedBounds.x >= 0.35);
+            if (lowerName.includes("sheet") || hasMultipleColumns) {
+                return "SHEET_4";
+            }
+            return "STRIP_4";
+        }
+        return "STRIP_4";
+    };
+
+    const inferOrientationFromSlots = (): "portrait" | "landscape" => {
+        if (result.slots.length > 0) {
+            const firstSlot = result.slots[0];
+            const slotWidth = firstSlot.normalizedBounds.width * image.width;
+            const slotHeight = firstSlot.normalizedBounds.height * image.height;
+            return slotWidth >= slotHeight ? "landscape" : "portrait";
+        }
+        return image.width > image.height ? "landscape" : "portrait";
+    };
+
+    const initialProduct: FrameTargetProduct = inferProductFromSlotsAndName();
 
     const [targetProduct, setTargetProduct] = useState<FrameTargetProduct>(initialProduct);
     const [frameOrientation, setFrameOrientation] = useState<"portrait" | "landscape">(
-        image.width > image.height ? "landscape" : "portrait"
+        inferOrientationFromSlots()
     );
 
     const handleSyncSlotsToRef = (refSlotId: string) => {
@@ -356,7 +374,15 @@ export function FrameImportResultCard({
             points: s.points,
         }));
 
-        const transparentAssetUrl = imageUrl ? await punchOutFrameSlots(imageUrl, definitionSlots) : imageUrl;
+        let finalOverlayUrl = imageUrl;
+        // Mode A vs Mode B Architecture:
+        // Mode A (PRE-TRANSPARENT PNG): Original PNG already contains transparent photo openings.
+        // In Mode A, finalOverlayUrl MUST BE imageUrl directly without modification. Slots are used ONLY for captured-photo positioning.
+        // Mode B (GENERATED PUNCHOUT): Image is opaque or requires generated cutout.
+        const isPreTransparentPng = image.hasAlpha && analysis.transparentPixelRatio > 0;
+        if (imageUrl && definitionSlots.length > 0 && !isPreTransparentPng) {
+            finalOverlayUrl = await punchOutFrameSlots(imageUrl, definitionSlots);
+        }
 
         const safeImportId = importId.replace(/[^a-zA-Z0-9_-]/g, "_");
         const definition: FrameDefinition = {
@@ -365,7 +391,11 @@ export function FrameImportResultCard({
             description: frameDescription,
             kind: "png-overlay",
             source: "canva",
-            assetUrl: transparentAssetUrl,
+            assetUrl: finalOverlayUrl,
+            assets: {
+                overlay: finalOverlayUrl,
+                background: "#ffffff",
+            },
             shotCount: detectedShotCount,
             targetProduct,
             outputPaper,
@@ -377,6 +407,7 @@ export function FrameImportResultCard({
             outputWidth: image.width,
             outputHeight: image.height,
             slots: definitionSlots,
+            status: "published",
         };
 
         await onPublish(definition, cardEventId);
@@ -566,12 +597,6 @@ export function FrameImportResultCard({
                             <span className="font-bold text-neutral-900">{editableSlots.length} ô</span>
                         </div>
                         <div className="flex justify-between text-neutral-600 font-medium">
-                            <span>Transparent Ratio:</span>
-                            <span className="font-bold text-neutral-900">
-                                {(analysis.transparentPixelRatio * 100).toFixed(1)}%
-                            </span>
-                        </div>
-                        <div className="flex justify-between text-neutral-600 font-medium">
                             <span>Image Size:</span>
                             <span className="font-bold text-neutral-900">
                                 {image.width} × {image.height} px
@@ -714,7 +739,7 @@ export function FrameImportResultCard({
                                 <option value="STRIP_4">⚡ Photo Strip 4 ô (Chuẩn 5x15 cm)</option>
                                 <option value="SHEET_4">📄 Photo Sheet 4 ô (Chuẩn 10x15 cm)</option>
                                 <option value="SHEET_6">📄 Photo Sheet 6 ô (Chuẩn 10x15 cm)</option>
-                                <option value="PREMIUM_POSTCARD">🖼️ Premium Postcard 1 ô (Chuẩn 10x15 / 15x10 cm)</option>
+                                <option value="PREMIUM_POSTCARD">🖼️ Premium Postcard 1 ô (Chuẩn 10x15 cm)</option>
                             </select>
                         </div>
 

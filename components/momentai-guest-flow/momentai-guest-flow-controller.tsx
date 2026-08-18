@@ -402,6 +402,8 @@ export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefin
     allowTyping: true,
     allowDraw: definition.allowDraw ?? true,
     orientation: isLandscape ? 'landscape' : 'portrait',
+    outputWidth: definition.outputWidth || 1800,
+    outputHeight: definition.outputHeight || 2700,
     preferredPaper: isStrip ? '2x6-double' : '4x6',
     supportedPapers: isStrip ? ['2x6-double', '4x6'] : ['4x6'],
     renderMode: isStrip ? 'double-strip' : 'standard',
@@ -453,6 +455,10 @@ function isLocalNetworkHost(hostname: string) {
 }
 
 function mapTemplateToFrameTemplate(template: MomentAITemplate): FrameTemplate {
+  const width = template.canvas?.width || (template as unknown as { outputWidth?: number }).outputWidth || 1800;
+  const height = template.canvas?.height || (template as unknown as { outputHeight?: number }).outputHeight || 2700;
+  const isLandscape = template.printProfile?.orientation === 'landscape' || (template as unknown as { orientation?: string }).orientation === 'landscape' || width > height;
+
   return {
     id: template.templateId,
     name: template.name,
@@ -461,6 +467,9 @@ function mapTemplateToFrameTemplate(template: MomentAITemplate): FrameTemplate {
     shotCount: template.slots.length,
     allowTyping: false,
     allowDraw: template.customization.allowDraw,
+    orientation: isLandscape ? 'landscape' : 'portrait',
+    outputWidth: width,
+    outputHeight: height,
     layout: {
       type: template.captureFormatId === 'format_6shot' ? '2x3' : template.captureFormatId === 'format_4shot' ? '1x4' : template.captureFormatId === 'format_2shot' ? '1x2' : '1x1',
       slotCount: template.slots.length,
@@ -474,6 +483,7 @@ function mapTemplateToFrameTemplate(template: MomentAITemplate): FrameTemplate {
     })),
     assets: {
       background: template.assets.background,
+      overlay: template.assets.overlay,
       overlayColor: template.assets.overlayColor,
       textColor: template.assets.textColor,
       borderWidth: 10,
@@ -482,8 +492,8 @@ function mapTemplateToFrameTemplate(template: MomentAITemplate): FrameTemplate {
     preferredPaper: template.printProfile.paper,
     renderMode: template.printProfile.paper === '2x6-double' ? 'double-strip' : 'standard',
     eventBranding: {
-      text: 'PHỐ CỔ HỘI AN',
-      subtext: 'Tiệm Ảnh Di Sản • 2026',
+      text: '',
+      subtext: '',
       showDate: true,
     },
   };
@@ -541,13 +551,11 @@ async function listGuestTemplates(eventId: string, captureFormatId: MomentAICapt
   const allowLocalFallback = isLocalGuestFallbackAllowed();
   if (bridge) {
     const result = await bridge.listTemplates(eventId, captureFormatId).catch(() => null) as WindowMiniResult<MomentAITemplate[]> | null;
-    if (result?.ok && Array.isArray(result.value) && (result.value.length > 0 || !allowLocalFallback)) return result.value;
+    if (result?.ok && Array.isArray(result.value)) return result.value;
     if (!allowLocalFallback) throw new Error('Desktop guest templates IPC is unavailable.');
   }
 
-  if (allowLocalFallback) return createLocalTemplates(eventId, captureFormatId);
-
-  throw new Error('MomentAI guest templates IPC is unavailable.');
+  return [];
 }
 
 async function dispatchGuestSessionAction(action: string, body: Record<string, unknown>, previous: MomentAIGuestSession | null): Promise<MomentAIGuestSession> {
@@ -659,7 +667,18 @@ function applyLocalGuestAction(action: string, body: Record<string, unknown>, pr
     }
     case 'select-template': {
       const templateId = String(body.templateId || 'template_local');
-      const template = createLocalTemplates(session.eventId, session.captureFormat?.id ?? 'format_4shot').find((item) => item.templateId === templateId) ?? createLocalTemplates(session.eventId, session.captureFormat?.id ?? 'format_4shot')[0];
+      const template = (body.template as MomentAITemplate) ?? {
+        templateId,
+        eventId: session.eventId,
+        captureFormatId: session.captureFormat?.id ?? 'format_4shot',
+        name: 'Imported Frame',
+        status: 'PUBLISHED',
+        canvas: { width: 1800, height: 2700 },
+        slots: session.photos.map((_, i) => ({ slotIndex: i + 1, x: 0, y: 0, width: 100, height: 100 })),
+        assets: { background: 'transparent' },
+        customization: { allowTyping: false, allowDraw: true },
+        printProfile: { paper: '4x6', orientation: 'portrait', dpi: 300 },
+      };
       return {
         ...session,
         selectedTemplate: template,
@@ -701,36 +720,6 @@ function createLocalSession(eventId = 'event_hoi_an_heritage'): MomentAIGuestSes
   };
 }
 
-function createLocalTemplates(eventId: string, captureFormatId: MomentAICaptureFormatId): MomentAITemplate[] {
-  const format = LOCAL_CAPTURE_FORMATS.find((item) => item.id === captureFormatId) ?? LOCAL_CAPTURE_FORMATS[2];
-  let slots = [{ slotIndex: 1, x: 2, y: 2, width: 96, height: 86 }];
-  if (format.slotCount === 2) {
-    slots = [
-      { slotIndex: 1, x: 2, y: 2, width: 96, height: 43 },
-      { slotIndex: 2, x: 2, y: 46.5, width: 96, height: 43 },
-    ];
-  } else if (format.slotCount === 4) {
-    slots = [
-      { slotIndex: 1, x: 2, y: 2, width: 46, height: 41 },
-      { slotIndex: 2, x: 52, y: 2, width: 46, height: 41 },
-      { slotIndex: 3, x: 2, y: 45, width: 46, height: 41 },
-      { slotIndex: 4, x: 52, y: 45, width: 46, height: 41 },
-    ];
-  }
-
-  return [{
-    templateId: `desktop_template_${captureFormatId}`,
-    eventId,
-    captureFormatId,
-    name: `${format.label} Heritage Frame`,
-    status: 'PUBLISHED',
-    canvas: { width: 1800, height: 2700 },
-    slots,
-    assets: { background: '#F4F2EE', overlayColor: '#1A1A1A', textColor: '#1A1A1A' },
-    customization: { allowTyping: false, allowDraw: false },
-    printProfile: { paper: '4x6', orientation: 'portrait', dpi: 300 },
-  }];
-}
 
 function sanitizePhotoId(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128) || `photo_${localSessionSequence}`;

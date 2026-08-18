@@ -40,11 +40,20 @@ export const PhotoReviewScreen: React.FC<PhotoReviewScreenProps> = ({
 
   const executeSingleRetake = async (index: number) => {
     const dataUrl = await cameraService.capturePhoto(index);
+    const imgDimensions = await new Promise<{ width: number; height: number }>((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.naturalWidth || 1920, height: img.naturalHeight || 1080 });
+      img.onerror = () => resolve({ width: 1920, height: 1080 });
+      img.src = dataUrl;
+    });
+
     retakeSequenceRef.current += 1;
     const newPhoto: PhotoItem = {
       id: `photo_retake_${session.sessionId}_${index}_${retakeSequenceRef.current}`,
       index: index + 1,
       dataUrl,
+      width: imgDimensions.width,
+      height: imgDimensions.height,
       timestamp: new Date().toLocaleTimeString('vi-VN'),
       isRetaken: true,
     };

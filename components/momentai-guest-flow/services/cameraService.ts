@@ -4,6 +4,8 @@ export class CameraService {
   private mediaStream: MediaStream | null = null;
   private videoElement: HTMLVideoElement | null = null;
   private audioCtx: AudioContext | null = null;
+  private mediaRecorder: MediaRecorder | null = null;
+  private recordedChunks: Blob[] = [];
 
   private settings: CameraSettings = {
     iso: 400,
@@ -43,6 +45,13 @@ export class CameraService {
   }
 
   public async startWebcam(): Promise<boolean> {
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { status: () => Promise<unknown> } } } }).momentai?.guest?.camera?.status) {
+      try {
+        await (window as unknown as { momentai: { guest: { camera: { status: () => Promise<unknown> } } } }).momentai.guest.camera.status();
+      } catch (err) {
+        console.warn('IPC camera status call failed:', err);
+      }
+    }
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -127,8 +136,20 @@ export class CameraService {
     }
   }
 
-  public async capturePhoto(shotIndex: number): Promise<string> {
+  public async capturePhoto(shotIndex: number, sessionId?: string): Promise<string> {
     this.playShutterSound();
+
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { capture: (ctx: unknown) => Promise<unknown> } } } }).momentai?.guest?.camera?.capture) {
+      try {
+        await (window as unknown as { momentai: { guest: { camera: { capture: (ctx: unknown) => Promise<unknown> } } } }).momentai.guest.camera.capture({
+          sessionId: sessionId || 'desktop_session',
+          shotIndex: shotIndex + 1,
+          correlationId: `capture_${Date.now()}_${shotIndex + 1}`,
+        });
+      } catch (err) {
+        console.warn('IPC camera capture call failed:', err);
+      }
+    }
 
     // Increment shutter count
     this.settings.shutterCount += 1;
@@ -140,6 +161,8 @@ export class CameraService {
       canvas.height = this.videoElement.videoHeight || 1080;
       const ctx = canvas.getContext('2d');
       if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         // Mirror webcam horizontally for intuitive preview
         ctx.translate(canvas.width, 0);
         ctx.scale(-1, 1);
@@ -148,14 +171,9 @@ export class CameraService {
         // Reset transform
         ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-        // Add subtle watermark/timestamp in Canon style
-        ctx.font = 'bold 24px monospace';
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-        ctx.shadowColor = 'black';
-        ctx.shadowBlur = 4;
-        ctx.fillText(`MOMENTAI CANON 6D #${shotIndex + 1}`, 30, canvas.height - 30);
+        console.log(`[CameraService] Captured photo resolution: ${canvas.width}x${canvas.height}`);
 
-        return canvas.toDataURL('image/jpeg', 0.95);
+        return canvas.toDataURL('image/jpeg', 0.98);
       }
     }
 
@@ -231,17 +249,80 @@ export class CameraService {
     ctx.fill();
     ctx.restore();
 
-    // Canon 6D OSD Watermark
-    ctx.font = 'bold 36px sans-serif';
-    ctx.fillStyle = 'white';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-    ctx.shadowBlur = 8;
-    ctx.fillText(`CANON EOS 6D • SHOT ${shotIndex + 1}`, 60, canvas.height - 80);
-
-    ctx.font = '24px monospace';
-    ctx.fillText(`ISO ${this.settings.iso} | ${this.settings.shutterSpeed}s | ${this.settings.aperture}`, 60, canvas.height - 40);
-
     return canvas.toDataURL('image/jpeg', 0.95);
+  }
+
+  public async autofocus(sessionId?: string): Promise<boolean> {
+    this.playBeepSound(1200, 80);
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { autofocus: (ctx: unknown) => Promise<unknown> } } } }).momentai?.guest?.camera?.autofocus) {
+      try {
+        await (window as unknown as { momentai: { guest: { camera: { autofocus: (ctx: unknown) => Promise<unknown> } } } }).momentai.guest.camera.autofocus({
+          sessionId: sessionId || 'desktop_session',
+        });
+      } catch (err) {
+        console.warn('IPC autofocus failed:', err);
+      }
+    }
+    return true;
+  }
+
+  public async startSessionRecording(sessionId?: string): Promise<boolean> {
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { startRecording: (ctx: unknown) => Promise<unknown> } } } }).momentai?.guest?.camera?.startRecording) {
+      try {
+        await (window as unknown as { momentai: { guest: { camera: { startRecording: (ctx: unknown) => Promise<unknown> } } } }).momentai.guest.camera.startRecording({
+          sessionId: sessionId || 'desktop_session',
+        });
+      } catch (err) {
+        console.warn('IPC startRecording failed:', err);
+      }
+    }
+
+    if (this.mediaStream && typeof MediaRecorder !== 'undefined') {
+      try {
+        this.recordedChunks = [];
+        const options = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+          ? { mimeType: 'video/webm;codecs=vp9' }
+          : MediaRecorder.isTypeSupported('video/webm')
+          ? { mimeType: 'video/webm' }
+          : undefined;
+        this.mediaRecorder = new MediaRecorder(this.mediaStream, options);
+        this.mediaRecorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            this.recordedChunks.push(event.data);
+          }
+        };
+        this.mediaRecorder.start(100);
+        return true;
+      } catch (e) {
+        console.warn('MediaRecorder start error:', e);
+      }
+    }
+    return false;
+  }
+
+  public async stopSessionRecording(sessionId?: string): Promise<Blob | null> {
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { stopRecording: (ctx: unknown) => Promise<unknown> } } } }).momentai?.guest?.camera?.stopRecording) {
+      try {
+        await (window as unknown as { momentai: { guest: { camera: { stopRecording: (ctx: unknown) => Promise<unknown> } } } }).momentai.guest.camera.stopRecording({
+          sessionId: sessionId || 'desktop_session',
+        });
+      } catch (err) {
+        console.warn('IPC stopRecording failed:', err);
+      }
+    }
+
+    return new Promise((resolve) => {
+      if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+        this.mediaRecorder.onstop = () => {
+          const blob = new Blob(this.recordedChunks, { type: this.mediaRecorder?.mimeType || 'video/webm' });
+          this.mediaRecorder = null;
+          resolve(blob);
+        };
+        this.mediaRecorder.stop();
+      } else {
+        resolve(null);
+      }
+    });
   }
 }
 

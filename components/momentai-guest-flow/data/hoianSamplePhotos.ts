@@ -1,11 +1,13 @@
-export const HOI_AN_SAMPLE_PHOTOS = [
-  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 1
-  'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 2
-  'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 3
-  'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 4
-  'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 5
-  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 6
-  'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 7
-  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 8
-];
+const samplePhoto = (start: string, end: string) =>
+  `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${start}"/><stop offset="100%" stop-color="${end}"/></linearGradient></defs><rect width="800" height="1000" fill="url(#g)"/><circle cx="400" cy="360" r="140" fill="rgba(26,26,26,0.12)"/><ellipse cx="400" cy="740" rx="260" ry="200" fill="rgba(26,26,26,0.1)"/></svg>`)}`;
 
+export const HOI_AN_SAMPLE_PHOTOS = [
+  samplePhoto('#F5F3EF', '#EBE7E0'),
+  samplePhoto('#EBE8E1', '#DFDAD1'),
+  samplePhoto('#F8F6F0', '#EAE6DD'),
+  samplePhoto('#ECE8E1', '#DDD8CE'),
+  samplePhoto('#F2EFE9', '#E4DFC3'),
+  samplePhoto('#EBE7DF', '#D9D3C7'),
+  samplePhoto('#F4F1EA', '#E6E1D6'),
+  samplePhoto('#EDE8DF', '#DDD7CB'),
+];

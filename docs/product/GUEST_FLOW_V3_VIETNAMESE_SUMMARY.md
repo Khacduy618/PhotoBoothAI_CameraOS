@@ -1,7 +1,8 @@
 # MomentAI Guest Flow V3 — Tóm tắt tiếng Việt
 
-Status: Tài liệu tóm tắt flow màn hình, data và backend/system cho Guest Flow V3.
-Source architecture: `docs/architecture/MomentAI_Guest_Internal_System_Design.md`.
+Status: Tài liệu tóm tắt flow màn hình, data và backend/system cho Guest Flow V3, cập nhật theo Production Brief v3.1 và quyết định PM.
+Source architecture: `docs/architecture/MomentAI_Guest_Internal_System_Design.md` và `docs/MomentAI_CameraOS_Production_Brief_v3.1.md`.
+Target V1: Windows 10 x64 booth PC / Mini PC form factor + Electron + Vite React renderer. Admin/operator nằm trong Electron và ẩn với guest. macOS chỉ là development path với Device/Fake adapter; React Native, iPad app và macOS production runtime không thuộc phạm vi V1.
 
 ## 1. Flow màn hình guest
 
@@ -12,7 +13,7 @@ START / SHOWCASE
 → CHỌN TEMPLATE / KHUNG MẪU
 → CUSTOMIZE, nếu template cho phép type/draw
 → RENDER THÀNH PHẨM
-→ MÀN KẾT THÚC: ẢNH FINAL + QR + AUTO PRINT NGẦM
+→ MÀN KẾT THÚC: ẢNH FINAL + LOCAL QR/FALLBACK + GUEST-CONFIRMED PRINT
 → DONE hoặc TIMEOUT 120 GIÂY
 → RESET GUEST SESSION
 → START
@@ -52,10 +53,12 @@ Guest thấy:
 
 Backend/system lúc idle:
 
-- Event config đã load;
+- Active Event config đã load;
 - Template cache sẵn sàng;
-- Camera service sẵn sàng;
-- Printer service sẵn sàng nếu bật print;
+- Health gate tính `READY` / `DEGRADED` / `BLOCKED`;
+- Camera service dùng active adapter phù hợp: Fake / Device / Canon;
+- Printer service có thể READY, DEGRADED hoặc DISABLED theo event print policy;
+- Local QR/share có thể AVAILABLE hoặc UNAVAILABLE theo network reachability;
 - Chưa có guest session active.
 
 Khi bấm Start:
@@ -109,10 +112,10 @@ Luồng backend cho mỗi shot:
 CaptureManager
 → countdown
 → CameraService.capture()
-→ CanonAdapter / Canon EDSDK
-→ Canon EOS 6D chụp
-→ nhận/download JPEG
-→ validate JPEG
+→ active CameraAdapter: Fake / Device / Canon
+→ nếu Canon: CanonAdapter / CanonCameraBridge / EDSDK / EOS 6D
+→ nhận/acquire still image
+→ validate image
 → PhotoStorage.saveOriginal()
 → tạo Photo object
 → thêm vào session.photos
@@ -285,44 +288,47 @@ Composition tạo 3 output:
 | Output | File ví dụ | Dùng cho |
 |---|---|---|
 | Master | `final-master.png` | archive, re-render, reprint |
-| Share | `final-share.jpg` | upload cloud, QR, gallery |
+| Share | `final-share.jpg` | Local QR, gallery, hoặc cloud nếu PM duyệt provider sau |
 | Print | `final-print.jpg` | printer |
 
-## 10. Màn 06 — Result + QR + Auto Print ngầm
+## 10. Màn 06 — Result + Local QR/Fallback + Guest-confirmed Print
 
 Đây là màn kết thúc.
 
 Guest thấy:
 
 - ảnh final;
-- QR để tải ảnh từ cloud;
+- Local QR để tải ảnh khi điện thoại có thể truy cập booth local network endpoint;
+- fallback rõ ràng khi QR local không khả dụng;
 - trạng thái in;
+- nút Print khi event bật `GUEST_CONFIRM`;
 - countdown 120 giây;
 - nút Done.
 
-Sau khi composition xong, hệ thống chạy song song:
+Sau khi composition xong, hệ thống chuẩn bị share output:
 
 ```text
 final-share.jpg
-→ DeliveryService upload cloud
-→ tạo cloud download URL
+→ LocalShareService tạo tokenized local network URL
 → QR Generator
-→ QRCodeCard
+→ QRCodeCard hoặc QR unavailable fallback
 ```
 
-và:
+Local QR chỉ hợp lệ khi URL không phải `localhost`, không expose local absolute path và điện thoại guest truy cập được cùng network/booth hotspot.
+
+Khi guest xác nhận in:
 
 ```text
 final-print.jpg
 → PrintService
-→ tạo PrintJob
+→ tạo durable PrintJob với idempotency key
 → PrintQueue
-→ Printer Worker
-→ macOS Print System
-→ Photo Printer
+→ FakePrinterAdapter hoặc WindowsPrintAdapter khi CP1000 khả dụng
+→ nếu production hardware: Windows Print System
+→ Canon SELPHY CP1000
 ```
 
-Auto Print là hoạt động ngầm sau khi final hoàn tất, chạy trên màn Result + QR. Guest không cần chọn máy in hoặc giấy.
+V1 dùng `PrintPolicy=GUEST_CONFIRM`. Guest được bấm xác nhận in nhưng không chọn máy in, giấy, layout hoặc print profile.
 
 Nếu print lỗi:
 
@@ -385,9 +391,10 @@ Không disconnect Canon EOS 6D khi reset guest session.
 CameraOS Start
 → load EventConfig
 → load TemplateCache
-→ connect Canon EOS 6D
-→ prepare PrinterService
-→ show StartScreen
+→ initialize CameraService với Fake / Device / Canon adapter theo config và hardware availability
+→ initialize PrinterService với FakePrinter hoặc WindowsPrintAdapter khi CP1000 khả dụng
+→ run HardwareHealthService / readiness gate
+→ show StartScreen nếu READY/allowed DEGRADED, hoặc operator recovery nếu BLOCKED
 
 Guest Start
 → SessionController.createSession()
@@ -400,9 +407,9 @@ Guest Start
 → AssignmentEngine map shot vào slot
 → Customize nếu template cho phép
 → CompositionEngine render master/share/print
-→ DeliveryService upload share lên cloud
-→ QR Generator tạo QR
-→ PrintService enqueue print ngầm
+→ LocalShareService tạo tokenized local QR nếu network reachable
+→ QR Generator tạo QR hoặc fallback
+→ PrintService enqueue print khi guest xác nhận in
 → ResultScreen
 → Done/Timeout
 → SessionController.complete()
@@ -440,11 +447,11 @@ Guest Start
 - Giữ originals.
 - Cho retry composition hoặc reset an toàn.
 
-### Cloud/QR lỗi
+### Local QR/share lỗi
 
-- Báo QR/cloud unavailable.
+- Báo QR unavailable/fallback nếu điện thoại không truy cập được booth endpoint.
 - Giữ ảnh và outputs.
-- Không expose local path.
+- Không expose local absolute path, `localhost`-only URL hoặc QR secret.
 
 ### Print lỗi
 
@@ -457,8 +464,11 @@ Guest Start
 Target mới:
 
 - Camera: Canon EOS 6D;
-- Host: macOS;
-- Camera integration: Canon EDSDK;
-- Printer: macOS print system / photo printer.
+- Host: Windows 10 x64 booth PC;
+- Desktop shell: Electron;
+- Renderer: Vite React + TypeScript;
+- Admin/operator: nằm trong Electron, ẩn với guest;
+- Camera integration: Canon EDSDK qua USB;
+- Printer: Canon SELPHY CP1000 qua Windows Print System.
 
-PASS hardware chỉ được claim khi có bằng chứng real device cụ thể. Nếu chỉ test bằng mock/dev browser thì phải ghi PARTIAL.
+PASS hardware chỉ được claim khi có bằng chứng real device cụ thể trên target Windows 10 x64 booth PC. Local QR PASS cần bằng chứng scan từ điện thoại thật trên cùng network reachable. Nếu chỉ test bằng fake adapter/mock/dev browser/shadow mode thì phải ghi PARTIAL hoặc Not tested.

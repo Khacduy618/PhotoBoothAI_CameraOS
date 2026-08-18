@@ -20,8 +20,12 @@ function isValidFrameDefinition(definition: FrameDefinition): boolean {
     if (!definition.id || !definition.name || definition.kind !== "png-overlay") return false;
     if (
         definition.assetUrl &&
-        !definition.assetUrl.startsWith("data:image/png") &&
-        !definition.assetUrl.startsWith("/api/local-media/")
+        !definition.assetUrl.startsWith("data:image/") &&
+        !definition.assetUrl.startsWith("/api/local-media/") &&
+        !definition.assetUrl.startsWith("/frames/") &&
+        !definition.assetUrl.startsWith("/") &&
+        !definition.assetUrl.startsWith("http://") &&
+        !definition.assetUrl.startsWith("https://")
     ) return false;
     if (!Number.isFinite(definition.outputWidth) || definition.outputWidth <= 0) return false;
     if (!Number.isFinite(definition.outputHeight) || definition.outputHeight <= 0) return false;
@@ -37,8 +41,8 @@ function isValidFrameDefinition(definition: FrameDefinition): boolean {
         slot.y >= 0 &&
         slot.width > 0 &&
         slot.height > 0 &&
-        slot.x + slot.width <= 1.001 &&
-        slot.y + slot.height <= 1.001
+        slot.x + slot.width <= 100.1 &&
+        slot.y + slot.height <= 100.1
     ));
 }
 

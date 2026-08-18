@@ -162,15 +162,20 @@ export function FrameSlotDebugPreview({
 
     return (
         <div
-            className={`relative w-full overflow-hidden rounded-xl border border-neutral-200 bg-neutral-950/90 shadow-inner select-none ${className}`}
+            className={`relative mx-auto overflow-hidden rounded-xl border border-neutral-300 shadow-md select-none transition-all flex items-center justify-center ${className}`}
+            style={{
+                backgroundImage: "conic-gradient(#cbd5e1 90deg, #f1f5f9 90deg 180deg, #cbd5e1 180deg 270deg, #f1f5f9 270deg)",
+                backgroundSize: "24px 24px",
+                maxHeight: "56vh",
+                aspectRatio: `${image.width} / ${image.height}`,
+            }}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
         >
             <div
                 ref={containerRef}
-                className="relative w-full"
-                style={{ paddingBottom: `${(1 / aspectRatio) * 100}%` }}
+                className="relative w-full h-full"
             >
                 {imageUrl ? (
                     <img
@@ -201,12 +206,12 @@ export function FrameSlotDebugPreview({
                         : undefined;
 
                     const borderStyle = isSelected
-                        ? "border-pink-500 bg-pink-500/20 text-pink-700 ring-2 ring-pink-400/80 z-30"
+                        ? "border-pink-500 bg-pink-500/10 text-pink-700 ring-2 ring-pink-400/80 z-30"
                         : status === "auto-approved"
-                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-700 z-20"
+                        ? "border-emerald-500 bg-transparent text-emerald-700 z-20"
                         : status === "needs-review"
-                        ? "border-amber-500 bg-amber-500/10 text-amber-700 z-20"
-                        : "border-rose-500 bg-rose-500/10 text-rose-700 z-20";
+                        ? "border-amber-500 bg-transparent text-amber-700 z-20"
+                        : "border-rose-500 bg-transparent text-rose-700 z-20";
 
                     return (
                         <div

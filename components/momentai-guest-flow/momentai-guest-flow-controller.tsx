@@ -1,20 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { AttractScreen } from './components/Guest/AttractScreen';
-import { SelectShotsScreen } from './components/Guest/SelectShotsScreen';
+import { SelectProductScreen } from './components/Guest/SelectProductScreen';
 import { AutoCaptureScreen } from './components/Guest/AutoCaptureScreen';
-import { SelectPrintQuantityScreen } from './components/Guest/SelectPrintQuantityScreen';
 import { SelectFrameScreen } from './components/Guest/SelectFrameScreen';
 import { DrawScreen } from './components/Guest/DrawScreen';
 import { PrintQRScreen } from './components/Guest/PrintQRScreen';
 import { compositionEngine } from './services/compositionEngine';
+import { isStripTemplate } from './components/UI/frame-previews/FramePreviewCard';
 import { cameraService } from './services/cameraService';
 import { LocalFrameRegistry } from '@/services/frame/local-frame-registry';
 import type { FrameDefinition } from '@/services/frame-import/frame-import.types';
-import type { CameraSettings, CaptureConfig, EventConfig, FrameTemplate, PhotoItem, PrinterSettings, SessionData } from './types';
+import type { CameraSettings, CaptureConfig, EventConfig, FrameTemplate, LayoutType, PhotoItem, PrinterSettings, SessionData, GuestScreenState } from './types';
 import type { MomentAICaptureFormat, MomentAICaptureFormatId, MomentAIGuestSession, MomentAITemplate } from '@/types/momentai-guest-session';
+import type { GuestProductConfig } from '@/types/guest-product';
 
 const EVENT_CONFIG: EventConfig = {
   eventName: 'PHỐ CỔ HỘI AN',
@@ -27,7 +28,7 @@ const EVENT_CONFIG: EventConfig = {
 };
 
 const CAPTURE_CONFIG: CaptureConfig = {
-  availableCounts: [1, 2, 4, 6],
+  availableCounts: [2, 3, 4, 6],
   defaultCount: 4,
   countdownSeconds: 3,
   intervalSeconds: 2,
@@ -40,60 +41,112 @@ const PRINTER_SETTINGS: PrinterSettings = {
   currentPaper: '4x6',
   paperRemaining: 100,
   paperTotal: 100,
-  autoPrint: true,
+  autoPrint: false,
   copiesDefault: 1,
   status: 'READY',
 };
 
+const LOCAL_CAPTURE_FORMATS: readonly MomentAICaptureFormat[] = [
+  { id: 'format_1shot', label: '1 Shot', shotCount: 1, slotCount: 1, layoutType: 'single' },
+  { id: 'format_2shot', label: '2 Shots', shotCount: 2, slotCount: 2, layoutType: 'vertical_2' },
+  { id: 'format_4shot', label: '4 Shots', shotCount: 4, slotCount: 4, layoutType: 'vertical_4' },
+  { id: 'format_6shot', label: '6 Shots', shotCount: 6, slotCount: 6, layoutType: '2col_3row' },
+];
+
 const formatIdByShotCount: Record<number, MomentAICaptureFormatId> = {
   1: 'format_1shot',
   2: 'format_2shot',
+  3: 'format_1shot',
   4: 'format_4shot',
   6: 'format_6shot',
 };
 
+let localSessionSequence = 0;
+
+interface WindowMiniResult<T> {
+  ok: boolean;
+  value?: T;
+  error?: unknown;
+}
+
+interface GuestReadinessSnapshot {
+  status: 'READY' | 'DEGRADED' | 'BLOCKED';
+  activeEvent: { eventId: string; enabledShotFormats: readonly MomentAICaptureFormatId[] } | null;
+  reasons: string[];
+}
+
+interface WindowMiniGuestSessionBridge {
+  getReadiness?(): Promise<unknown>;
+  create(eventId?: string): Promise<unknown>;
+  listCaptureFormats(): Promise<unknown>;
+  selectFormat(sessionId: string, formatId: string): Promise<unknown>;
+  addPhoto(sessionId: string, photo: unknown): Promise<unknown>;
+  listTemplates(eventId: string, captureFormatId: string): Promise<unknown>;
+  selectTemplate(sessionId: string, templateId: string): Promise<unknown>;
+  saveCustomization(sessionId: string, customization: unknown): Promise<unknown>;
+  compose(sessionId: string): Promise<unknown>;
+  requestPrint(sessionId: string, copies: number): Promise<unknown>;
+  complete(sessionId: string): Promise<unknown>;
+}
+
 export function MomentAIGuestFlowController() {
-  const [screenState, setScreenState] = useState<'G01_START' | 'G02_SELECT_SHOTS' | 'G02B_SELECT_PRINT_QTY' | 'G03_CAPTURE' | 'G04_SELECT_TEMPLATE' | 'G05_DRAW' | 'G07_PRINT_QR'>('G01_START');
+  const [screenState, setScreenState] = useState<GuestScreenState>('G01_START');
   const [cameraSettings, setCameraSettings] = useState<CameraSettings>(cameraService.getSettings());
   const [captureFormats, setCaptureFormats] = useState<readonly MomentAICaptureFormat[]>([]);
+  const [readiness, setReadiness] = useState<GuestReadinessSnapshot>(createLocalReadiness());
   const [backendSession, setBackendSession] = useState<MomentAIGuestSession | null>(null);
   const [currentSession, setCurrentSession] = useState<SessionData | null>(null);
   const [frameTemplates, setFrameTemplates] = useState<FrameTemplate[]>([]);
   const [importedFrameDefinitions, setImportedFrameDefinitions] = useState<readonly FrameDefinition[]>([]);
   const [selectedDrawDataUrl, setSelectedDrawDataUrl] = useState<string>('');
+  const navigationLockedRef = useRef(false);
 
   useEffect(() => {
     const updateImportedFrames = () => {
       setImportedFrameDefinitions(LocalFrameRegistry.getPublishedDefinitions());
     };
-    void LocalFrameRegistry.refreshFromAdminDb('event_hoi_an_heritage').then(updateImportedFrames);
+    void LocalFrameRegistry.refreshFromAdminDb().then(updateImportedFrames);
     updateImportedFrames();
     return LocalFrameRegistry.subscribe(updateImportedFrames);
   }, []);
 
   useEffect(() => {
-    fetch('/api/momentai-guest-session')
-      .then((response) => response.json())
-      .then((payload: { captureFormats?: MomentAICaptureFormat[] }) => setCaptureFormats(payload.captureFormats ?? []))
-      .catch(() => setCaptureFormats([]));
+    void loadGuestReadiness()
+      .then((snapshot) => {
+        setReadiness(snapshot);
+        return listGuestCaptureFormats(snapshot);
+      })
+      .then(setCaptureFormats)
+      .catch(() => {
+        const fallback = isLocalGuestFallbackAllowed() ? createLocalReadiness() : createBlockedReadiness('READINESS_UNAVAILABLE');
+        setReadiness(fallback);
+        setCaptureFormats(isLocalGuestFallbackAllowed() ? getFormatsForReadiness(fallback) : []);
+      });
   }, []);
-
+  
   const refreshCameraSettings = () => setCameraSettings(cameraService.getSettings());
 
-  async function api(action: string, body: Record<string, unknown> = {}) {
-    const response = await fetch('/api/momentai-guest-session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, ...body }),
+  const runNavigation = (action: () => void | Promise<void>) => {
+    if (navigationLockedRef.current) return;
+    navigationLockedRef.current = true;
+    void Promise.resolve(action()).finally(() => {
+      window.setTimeout(() => {
+        navigationLockedRef.current = false;
+      }, 900);
     });
-    const payload = await response.json() as { ok: boolean; session?: MomentAIGuestSession; error?: string };
-    if (!payload.ok || !payload.session) throw new Error(payload.error || 'MomentAI guest session API failed.');
-    setBackendSession(payload.session);
-    return payload.session;
+  };
+
+  async function api(action: string, body: Record<string, unknown> = {}) {
+    const session = await dispatchGuestSessionAction(action, body, backendSession);
+    setBackendSession(session);
+    return session;
   }
 
   const startNewSession = async () => {
-    const nextBackendSession = await api('start-session');
+    const latestReadiness = await loadGuestReadiness().catch(() => readiness);
+    setReadiness(latestReadiness);
+    if (latestReadiness.status === 'BLOCKED' || !latestReadiness.activeEvent) return;
+    const nextBackendSession = await api('start-session', { eventId: latestReadiness.activeEvent.eventId });
     const nextSession: SessionData = {
       sessionId: nextBackendSession.sessionId,
       createdAt: new Date(nextBackendSession.createdAt).toLocaleTimeString('vi-VN'),
@@ -106,23 +159,24 @@ export function MomentAIGuestFlowController() {
     };
     setSelectedDrawDataUrl('');
     setCurrentSession(nextSession);
-    setScreenState('G02_SELECT_SHOTS');
+    setScreenState('G02_SELECT_PRODUCT');
   };
 
-  const handleSelectShots = async (count: number) => {
+  const handleSelectProduct = async (product: GuestProductConfig) => {
     if (!backendSession || !currentSession) return;
+    const count = product.requiredShots;
     const backendFormat = captureFormats.find((format) => format.shotCount === count);
-    const formatId = backendFormat?.id ?? formatIdByShotCount[count];
+    const formatId = backendFormat?.id ?? formatIdByShotCount[count] ?? 'format_4shot';
     const nextBackendSession = await api('select-format', { sessionId: backendSession.sessionId, formatId });
-    setCurrentSession({ ...currentSession, captureCount: count, photos: [], slotAssignments: [] });
+    setCurrentSession({
+      ...currentSession,
+      product,
+      captureCount: count,
+      selectedPrintQuantity: product.printSheets,
+      photos: [],
+      slotAssignments: [],
+    });
     setBackendSession(nextBackendSession);
-    setScreenState('G02B_SELECT_PRINT_QTY');
-  };
-
-  const handleConfirmPrintQuantity = (quantity: number) => {
-    if (!currentSession) return;
-    const safeQuantity = Math.min(5, Math.max(1, Math.round(quantity)));
-    setCurrentSession({ ...currentSession, selectedPrintQuantity: safeQuantity });
     refreshCameraSettings();
     setScreenState('G03_CAPTURE');
   };
@@ -132,10 +186,15 @@ export function MomentAIGuestFlowController() {
   };
 
   const handleCaptureCompleted = async (capturedPhotos: PhotoItem[]) => {
-    if (!backendSession || !currentSession || !backendSession.captureFormat) return;
+    if (!backendSession || !currentSession) return;
     const sessionWithPhotos = { ...currentSession, photos: capturedPhotos };
     setCurrentSession(sessionWithPhotos);
-    let updatedBackend = backendSession;
+    let updatedBackend = backendSession.captureFormat
+      ? backendSession
+      : await api('select-format', {
+        sessionId: backendSession.sessionId,
+        formatId: formatIdByShotCount[currentSession.captureCount] ?? 'format_4shot',
+      });
     for (const photo of capturedPhotos) {
       updatedBackend = await api('add-photo', {
         sessionId: updatedBackend.sessionId,
@@ -148,34 +207,48 @@ export function MomentAIGuestFlowController() {
       });
     }
     if (!updatedBackend.captureFormat) return;
-    const response = await fetch(`/api/momentai-guest-session?eventId=${encodeURIComponent(updatedBackend.eventId)}&captureFormatId=${encodeURIComponent(updatedBackend.captureFormat.id)}`);
-    const payload = await response.json() as { templates?: MomentAITemplate[] };
-    await LocalFrameRegistry.refreshFromAdminDb(updatedBackend.eventId);
+    const templates = await listGuestTemplates(updatedBackend.eventId, updatedBackend.captureFormat.id);
+    await LocalFrameRegistry.refreshFromAdminDb().catch(() => undefined);
     const latestImportedDefinitions = LocalFrameRegistry.getPublishedDefinitions();
+    const isPremiumProduct = currentSession.product?.premium === true || currentSession.product?.id === 'PREMIUM_POSTCARD' || currentSession.product?.group === 'Premium';
+    const targetShotCount = currentSession.product?.requiredShots || updatedBackend.captureFormat?.shotCount || 4;
     const importedTemplates = latestImportedDefinitions
-      .filter((definition) => (!definition.eventId || definition.eventId === updatedBackend.eventId) && definition.shotCount === updatedBackend.captureFormat?.shotCount)
+      .filter((definition) => isPremiumProduct ? (definition.shotCount === 1 || definition.slots?.length === 1) : (definition.shotCount === targetShotCount))
       .map(mapImportedFrameDefinitionToFrameTemplate);
-    const backendTemplates = (payload.templates ?? []).map(mapTemplateToFrameTemplate);
-    setFrameTemplates(importedTemplates.length > 0 ? importedTemplates : backendTemplates);
+    const backendTemplates = templates.map(mapTemplateToFrameTemplate);
+    const allAvailableTemplates: FrameTemplate[] = importedTemplates.length > 0 ? importedTemplates : backendTemplates;
+    const uniqueTemplates = Array.from(new Map(allAvailableTemplates.map((t) => [t.id, t])).values());
+    setFrameTemplates(uniqueTemplates);
     setBackendSession(updatedBackend);
-    setScreenState('G04_SELECT_TEMPLATE');
+    setScreenState('G04_SELECT_FRAME');
   };
 
-  const handleSelectFrame = async (frame: FrameTemplate) => {
+  const handleSelectFrame = async (frame: FrameTemplate, selectedPhotoIndex?: number) => {
     if (!backendSession || !currentSession || !backendSession.captureFormat) return;
     let backendTemplateId = frame.id;
     if (frame.assets.overlay) {
-      const response = await fetch(`/api/momentai-guest-session?eventId=${encodeURIComponent(backendSession.eventId)}&captureFormatId=${encodeURIComponent(backendSession.captureFormat.id)}`);
-      const payload = await response.json() as { templates?: MomentAITemplate[] };
-      backendTemplateId = payload.templates?.[0]?.templateId ?? frame.id;
+      const templates = await listGuestTemplates(backendSession.eventId, backendSession.captureFormat.id);
+      backendTemplateId = templates[0]?.templateId ?? frame.id;
     }
     const nextBackendSession = await api('select-template', { sessionId: backendSession.sessionId, templateId: backendTemplateId });
-    const assignments = currentSession.photos.slice(0, frame.layout.slotCount);
-    const updatedSession = { ...currentSession, selectedFrame: frame, slotAssignments: assignments };
+    
+    const isPremium = currentSession.product?.premium === true;
+    const photoIdx = selectedPhotoIndex ?? 0;
+    const assignments = isPremium && currentSession.photos.length > 0
+      ? [currentSession.photos[photoIdx] || currentSession.photos[0]]
+      : currentSession.photos.slice(0, frame.layout.slotCount);
+
+    const updatedSession: SessionData = {
+      ...currentSession,
+      selectedFrame: frame,
+      selectedPhotoIndex: photoIdx,
+      slotAssignments: assignments,
+    };
     setCurrentSession(updatedSession);
     setBackendSession(nextBackendSession);
-    if (frame.allowDraw) {
-      setScreenState('G05_DRAW');
+
+    if (isPremium) {
+      setScreenState('G05_PREMIUM_CUSTOMIZE');
       return;
     }
     await renderAndShowResult(updatedSession, nextBackendSession, '');
@@ -193,21 +266,50 @@ export function MomentAIGuestFlowController() {
 
   const renderAndShowResult = async (session: SessionData, backend: MomentAIGuestSession, drawDataUrl: string) => {
     if (!session.selectedFrame) return;
+    const isStrip = isStripTemplate(session.selectedFrame);
+    const isLandscape = session.selectedFrame.orientation === 'landscape';
+    const targetWidth = isStrip ? 900 : isLandscape ? 2700 : 1800;
+    const targetHeight = isLandscape ? 1800 : 2700;
+
     const outputs = await compositionEngine.renderComposition(
       session.selectedFrame,
       session.slotAssignments,
       EVENT_CONFIG,
       undefined,
       drawDataUrl,
-      1800,
-      2700,
+      targetWidth,
+      targetHeight,
     );
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { storage?: { saveOutput: (sid: string, type: string, file: unknown) => Promise<unknown> } } } }).momentai?.guest?.storage?.saveOutput) {
+      try {
+        await (window as unknown as { momentai: { guest: { storage: { saveOutput: (sid: string, type: string, file: unknown) => Promise<unknown> } } } }).momentai.guest.storage.saveOutput(backend.sessionId, 'share', {
+          dataUrl: outputs.share,
+          mimeType: 'image/jpeg',
+        });
+        await (window as unknown as { momentai: { guest: { storage: { saveOutput: (sid: string, type: string, file: unknown) => Promise<unknown> } } } }).momentai.guest.storage.saveOutput(backend.sessionId, 'master', {
+          dataUrl: outputs.master,
+          mimeType: 'image/png',
+        });
+      } catch (e) {
+        console.warn('Storage saveOutput error:', e);
+      }
+    }
     const composedBackend = await api('compose', { sessionId: backend.sessionId });
-    const printCopies = Math.min(5, Math.max(1, Math.round(session.selectedPrintQuantity || 1)));
-    void api('auto-print', { sessionId: composedBackend.sessionId, copies: printCopies }).catch(() => undefined);
-    setCurrentSession({ ...session, outputs, printStatus: 'queued' });
+    setCurrentSession({ ...session, drawDataUrl, outputs, qr: mapBackendQr(composedBackend), printStatus: 'idle' });
     setBackendSession(composedBackend);
-    setScreenState('G07_PRINT_QR');
+    setScreenState('G06_RESULT');
+  };
+
+  const handleConfirmPrint = async () => {
+    if (!backendSession || !currentSession) return;
+    const printCopies = currentSession.product?.printSheets || 1;
+    setCurrentSession({ ...currentSession, printStatus: 'sending' });
+    try {
+      await api('request-print', { sessionId: backendSession.sessionId, copies: printCopies });
+      setCurrentSession((prev) => prev ? { ...prev, printStatus: 'queued' } : prev);
+    } catch {
+      setCurrentSession((prev) => prev ? { ...prev, printStatus: 'failed' } : prev);
+    }
   };
 
   const handleFinishSession = async () => {
@@ -228,54 +330,97 @@ export function MomentAIGuestFlowController() {
   }, [backendSession, currentSession]);
 
   return (
-    <div className="min-h-screen bg-[#FDFCFB] text-[#1A1A1A] font-sans flex flex-col justify-between select-none">
+    <div className="min-h-screen bg-[#FDFCFB] text-[#1A1A1A] font-sans flex flex-col justify-between select-none touch-manipulation">
       <main className="flex-1 relative flex flex-col items-center justify-center overflow-hidden">
-        {screenState === 'G01_START' && <AttractScreen eventConfig={EVENT_CONFIG} onStartSession={() => void startNewSession()} />}
-        {screenState === 'G02_SELECT_SHOTS' && <SelectShotsScreen onSelectShots={(count) => void handleSelectShots(count)} onBackToStart={() => setScreenState('G01_START')} />}
-        {screenState === 'G02B_SELECT_PRINT_QTY' && currentSession && <SelectPrintQuantityScreen shotCount={currentSession.captureCount} defaultQuantity={currentSession.selectedPrintQuantity || 1} onConfirmPrintQuantity={handleConfirmPrintQuantity} onBackToShots={() => setScreenState('G02_SELECT_SHOTS')} />}
-        {screenState === 'G03_CAPTURE' && currentSession && <AutoCaptureScreen session={currentSession} cameraSettings={cameraSettings} captureConfig={CAPTURE_CONFIG} onPhotoCaptured={handlePhotoCaptured} onCaptureCompleted={(photos) => void handleCaptureCompleted(photos)} />}
-        {screenState === 'G04_SELECT_TEMPLATE' && currentSession && <SelectFrameScreen session={currentSession} customTemplates={frameTemplates} onSelectFrame={(frame) => void handleSelectFrame(frame)} onBackToShots={() => setScreenState('G02_SELECT_SHOTS')} />}
-        {screenState === 'G05_DRAW' && currentSession?.selectedFrame && <DrawScreen session={currentSession} template={currentSession.selectedFrame} onConfirmDraw={(drawDataUrl) => void handleConfirmDraw(drawDataUrl)} onBackToTemplate={() => setScreenState('G04_SELECT_TEMPLATE')} />}
-        {screenState === 'G07_PRINT_QR' && resultSession && <PrintQRScreen session={resultSession} printerSettings={PRINTER_SETTINGS} onFinishSession={() => void handleFinishSession()} />}
+        {screenState === 'G01_START' && <AttractScreen eventConfig={EVENT_CONFIG} onStartSession={() => runNavigation(startNewSession)} readinessStatus={readiness.status} readinessReasons={readiness.reasons} />}
+        {screenState === 'G02_SELECT_PRODUCT' && <SelectProductScreen defaultProductId={currentSession?.product?.id} onSelectProduct={(product) => runNavigation(() => handleSelectProduct(product))} onBackToStart={() => runNavigation(() => setScreenState('G01_START'))} />}
+        {screenState === 'G03_CAPTURE' && currentSession && <AutoCaptureScreen session={currentSession} cameraSettings={cameraSettings} captureConfig={CAPTURE_CONFIG} onPhotoCaptured={handlePhotoCaptured} onCaptureCompleted={(photos) => { void handleCaptureCompleted(photos); }} />}
+        {screenState === 'G04_SELECT_FRAME' && currentSession && <SelectFrameScreen session={currentSession} customTemplates={frameTemplates} onSelectFrame={(frame, photoIdx) => runNavigation(() => handleSelectFrame(frame, photoIdx))} onBackToShots={() => runNavigation(() => setScreenState('G02_SELECT_PRODUCT'))} />}
+        {(screenState === 'G05_PREMIUM_CUSTOMIZE' || screenState === 'G05_DRAW') && currentSession?.selectedFrame && <DrawScreen session={currentSession} template={currentSession.selectedFrame} onConfirmDraw={(drawDataUrl) => runNavigation(() => handleConfirmDraw(drawDataUrl))} onBackToTemplate={() => runNavigation(() => setScreenState('G04_SELECT_FRAME'))} />}
+        {(screenState === 'G06_RESULT' || screenState === 'G07_PRINTING' || screenState === 'G07_PRINT_QR' || screenState === 'G08_PRINT_SUCCESS') && resultSession && <PrintQRScreen session={resultSession} printerSettings={PRINTER_SETTINGS} onConfirmPrint={() => runNavigation(handleConfirmPrint)} onFinishSession={() => runNavigation(handleFinishSession)} />}
       </main>
     </div>
   );
 }
 
-function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefinition): FrameTemplate {
+function normalizeSlotPercent(val: number): number {
+  return val <= 1 && val > 0 ? val * 100 : val;
+}
+
+export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefinition): FrameTemplate {
+  const normSlots = definition.slots.map((slot) => ({
+    id: slot.index + 1,
+    x: normalizeSlotPercent(slot.x),
+    y: normalizeSlotPercent(slot.y),
+    width: normalizeSlotPercent(slot.width),
+    height: normalizeSlotPercent(slot.height),
+  }));
+
+  const count = definition.shotCount === 8 ? 6 : definition.shotCount;
+  const hasSecondColumn = normSlots.some((s) => s.x >= 35);
+
+  const isExplicitStrip =
+    definition.targetProduct === 'STRIP_2' ||
+    definition.targetProduct === 'STRIP_4' ||
+    definition.outputPaper === '5x15' ||
+    (definition.outputWidth && definition.outputHeight
+      ? definition.outputHeight / definition.outputWidth >= 2.1
+      : false) ||
+    definition.layoutFamily?.toLowerCase().includes('strip') ||
+    definition.name?.toLowerCase().includes('strip');
+
+  const isStrip =
+    (isExplicitStrip || (count === 2 && !hasSecondColumn) || (count === 4 && !hasSecondColumn)) &&
+    definition.targetProduct !== 'SHEET_4' &&
+    definition.targetProduct !== 'SHEET_6' &&
+    definition.targetProduct !== 'PREMIUM_POSTCARD';
+
+  let layoutType: LayoutType = '1x1';
+  if (definition.targetProduct === 'STRIP_2' || count === 2) {
+    layoutType = '1x2';
+  } else if (definition.targetProduct === 'STRIP_4' || (count === 4 && isStrip)) {
+    layoutType = '1x4';
+  } else if (definition.targetProduct === 'SHEET_4' || (count === 4 && !isStrip)) {
+    layoutType = '2x2';
+  } else if (definition.targetProduct === 'SHEET_6' || count === 6) {
+    layoutType = '2x3';
+  }
+
+  const isLandscape =
+    definition.orientation === 'landscape' ||
+    definition.photoViewportOrientation === 'landscape' ||
+    (definition.outputWidth && definition.outputHeight
+      ? definition.outputWidth > definition.outputHeight
+      : false);
+
   return {
     id: definition.id,
     name: definition.name,
     thumbnail: definition.thumbnailUrl || definition.assetUrl || '',
     category: getImportedFrameCategory(definition),
-    shotCount: definition.shotCount === 8 ? 6 : definition.shotCount,
-    allowTyping: false,
-    allowDraw: Boolean(definition.allowDraw),
+    shotCount: count,
+    allowTyping: true,
+    allowDraw: definition.allowDraw ?? true,
+    orientation: isLandscape ? 'landscape' : 'portrait',
+    preferredPaper: isStrip ? '2x6-double' : '4x6',
+    supportedPapers: isStrip ? ['2x6-double', '4x6'] : ['4x6'],
+    renderMode: isStrip ? 'double-strip' : 'standard',
     layout: {
-      type: definition.shotCount === 6 ? '2x3' : definition.shotCount === 4 ? '1x4' : definition.shotCount === 2 ? '1x2' : '1x1',
-      slotCount: definition.slots.length,
+      type: layoutType,
+      slotCount: normSlots.length,
     },
-    slots: definition.slots.map((slot) => ({
-      id: slot.index + 1,
-      x: slot.x * 100,
-      y: slot.y * 100,
-      width: slot.width * 100,
-      height: slot.height * 100,
-    })),
+    slots: normSlots,
     assets: {
-      background: 'transparent',
+      background: '#FDFCFB',
       overlay: definition.assetUrl,
       overlayColor: 'transparent',
       textColor: '#1A1A1A',
       borderWidth: 0,
     },
-    supportedPapers: ['4x6'],
-    preferredPaper: '4x6',
-    renderMode: 'standard',
     eventBranding: {
       text: '',
       subtext: '',
-      showDate: false,
+      showDate: true,
     },
   };
 }
@@ -283,6 +428,28 @@ function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefinition):
 function getImportedFrameCategory(definition: FrameDefinition): string {
   const categorized = definition as FrameDefinition & { category?: string; eventCategory?: string; eventName?: string };
   return categorized.category || categorized.eventCategory || categorized.eventName || definition.layoutFamily || 'Khung đã upload';
+}
+
+function mapBackendQr(session: MomentAIGuestSession): SessionData['qr'] {
+  if (!session.qr) return { status: 'unavailable' };
+  if (session.qr.status === 'ready' && session.qr.url && !isUnsafeQrUrl(session.qr.url)) {
+    return { status: 'ready', url: session.qr.url };
+  }
+  return { status: session.qr.status === 'failed' ? 'failed' : 'unavailable' };
+}
+
+function isUnsafeQrUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'file:' || parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') return true;
+    return !isLocalNetworkHost(parsed.hostname);
+  } catch {
+    return true;
+  }
+}
+
+function isLocalNetworkHost(hostname: string) {
+  return hostname.endsWith('.local') || /^10\./.test(hostname) || /^192\.168\./.test(hostname) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
 }
 
 function mapTemplateToFrameTemplate(template: MomentAITemplate): FrameTemplate {
@@ -298,7 +465,13 @@ function mapTemplateToFrameTemplate(template: MomentAITemplate): FrameTemplate {
       type: template.captureFormatId === 'format_6shot' ? '2x3' : template.captureFormatId === 'format_4shot' ? '1x4' : template.captureFormatId === 'format_2shot' ? '1x2' : '1x1',
       slotCount: template.slots.length,
     },
-    slots: template.slots.map((slot) => ({ id: slot.slotIndex, x: slot.x, y: slot.y, width: slot.width, height: slot.height })),
+    slots: template.slots.map((slot) => ({
+      id: slot.slotIndex,
+      x: normalizeSlotPercent(slot.x),
+      y: normalizeSlotPercent(slot.y),
+      width: normalizeSlotPercent(slot.width),
+      height: normalizeSlotPercent(slot.height),
+    })),
     assets: {
       background: template.assets.background,
       overlayColor: template.assets.overlayColor,
@@ -316,6 +489,249 @@ function mapTemplateToFrameTemplate(template: MomentAITemplate): FrameTemplate {
   };
 }
 
+async function listGuestCaptureFormats(readiness?: GuestReadinessSnapshot): Promise<readonly MomentAICaptureFormat[]> {
+  const bridge = getDesktopGuestSessionBridge();
+  const allowLocalFallback = isLocalGuestFallbackAllowed();
+  if (bridge) {
+    const result = await bridge.listCaptureFormats().catch(() => null) as WindowMiniResult<MomentAICaptureFormat[]> | null;
+    if (result?.ok && Array.isArray(result.value) && (result.value.length > 0 || !allowLocalFallback)) return result.value;
+    if (!allowLocalFallback) throw new Error('Desktop guest capture formats IPC is unavailable.');
+  }
+
+  if (allowLocalFallback) return getFormatsForReadiness(readiness ?? createLocalReadiness());
+
+  throw new Error('MomentAI guest capture formats IPC is unavailable.');
+}
+
+async function loadGuestReadiness(): Promise<GuestReadinessSnapshot> {
+  const bridge = getDesktopGuestSessionBridge();
+  const allowLocalFallback = isLocalGuestFallbackAllowed();
+  if (bridge?.getReadiness) {
+    const result = await bridge.getReadiness().catch(() => null) as WindowMiniResult<GuestReadinessSnapshot> | null;
+    if (result?.ok && result.value) return normalizeReadiness(result.value);
+    if (!allowLocalFallback) throw new Error('Desktop guest readiness IPC is unavailable.');
+  }
+  if (allowLocalFallback) return createLocalReadiness();
+  return createBlockedReadiness('READINESS_UNAVAILABLE');
+}
+
+function getFormatsForReadiness(readiness: GuestReadinessSnapshot): readonly MomentAICaptureFormat[] {
+  const enabled = readiness.activeEvent?.enabledShotFormats ?? [];
+  return LOCAL_CAPTURE_FORMATS.filter((format) => enabled.includes(format.id));
+}
+
+function normalizeReadiness(snapshot: GuestReadinessSnapshot): GuestReadinessSnapshot {
+  return {
+    status: snapshot.status === 'READY' || snapshot.status === 'DEGRADED' || snapshot.status === 'BLOCKED' ? snapshot.status : 'BLOCKED',
+    activeEvent: snapshot.activeEvent ? { eventId: snapshot.activeEvent.eventId, enabledShotFormats: [...snapshot.activeEvent.enabledShotFormats] } : null,
+    reasons: Array.isArray(snapshot.reasons) ? snapshot.reasons.map(String) : [],
+  };
+}
+
+function createLocalReadiness(): GuestReadinessSnapshot {
+  return { status: 'READY', activeEvent: { eventId: 'event_hoi_an_heritage', enabledShotFormats: LOCAL_CAPTURE_FORMATS.map((format) => format.id) }, reasons: [] };
+}
+
+function createBlockedReadiness(reason: string): GuestReadinessSnapshot {
+  return { status: 'BLOCKED', activeEvent: null, reasons: [reason] };
+}
+
+async function listGuestTemplates(eventId: string, captureFormatId: MomentAICaptureFormatId): Promise<MomentAITemplate[]> {
+  const bridge = getDesktopGuestSessionBridge();
+  const allowLocalFallback = isLocalGuestFallbackAllowed();
+  if (bridge) {
+    const result = await bridge.listTemplates(eventId, captureFormatId).catch(() => null) as WindowMiniResult<MomentAITemplate[]> | null;
+    if (result?.ok && Array.isArray(result.value) && (result.value.length > 0 || !allowLocalFallback)) return result.value;
+    if (!allowLocalFallback) throw new Error('Desktop guest templates IPC is unavailable.');
+  }
+
+  if (allowLocalFallback) return createLocalTemplates(eventId, captureFormatId);
+
+  throw new Error('MomentAI guest templates IPC is unavailable.');
+}
+
+async function dispatchGuestSessionAction(action: string, body: Record<string, unknown>, previous: MomentAIGuestSession | null): Promise<MomentAIGuestSession> {
+  const bridge = getDesktopGuestSessionBridge();
+  const allowLocalFallback = isLocalGuestFallbackAllowed();
+  const desktopResult = bridge ? await invokeDesktopGuestAction(bridge, action, body).catch(() => null) as WindowMiniResult<Partial<MomentAIGuestSession>> | null : null;
+  if (desktopResult?.ok && desktopResult.value && hasUsableDesktopSession(action, desktopResult.value)) {
+    return allowLocalFallback ? normalizeSession(desktopResult.value, previous, action, body) : requireCompleteDesktopSession(desktopResult.value);
+  }
+  if (bridge && !allowLocalFallback) {
+    throw new Error(`Desktop guest IPC action failed: ${action}`);
+  }
+
+  if (allowLocalFallback) return applyLocalGuestAction(action, body, previous);
+
+  throw new Error(`Desktop guest IPC action unavailable: ${action}`);
+}
+
+function getDesktopGuestSessionBridge(): WindowMiniGuestSessionBridge | null {
+  if (typeof window === 'undefined') return null;
+  return (window.momentai?.guest?.session as WindowMiniGuestSessionBridge | undefined) ?? null;
+}
+
+function invokeDesktopGuestAction(bridge: WindowMiniGuestSessionBridge, action: string, body: Record<string, unknown>): Promise<unknown> {
+  switch (action) {
+    case 'start-session':
+      return bridge.create(body.eventId as string | undefined);
+    case 'select-format':
+      return bridge.selectFormat(String(body.sessionId || ''), String(body.formatId || ''));
+    case 'add-photo':
+      return bridge.addPhoto(String(body.sessionId || ''), body.photo);
+    case 'select-template':
+      return bridge.selectTemplate(String(body.sessionId || ''), String(body.templateId || ''));
+    case 'save-customization':
+      return bridge.saveCustomization(String(body.sessionId || ''), body.customization);
+    case 'compose':
+      return bridge.compose(String(body.sessionId || ''));
+    case 'request-print':
+      return bridge.requestPrint(String(body.sessionId || ''), Number(body.copies || 1));
+    case 'complete':
+      return bridge.complete(String(body.sessionId || ''));
+    default:
+      return Promise.resolve({ ok: false, error: 'UNKNOWN_GUEST_ACTION' });
+  }
+}
+
+function hasUsableDesktopSession(action: string, value: Partial<MomentAIGuestSession>) {
+  return action === 'start-session' ? Boolean(value.sessionId) : Boolean(value.sessionId && value.eventId);
+}
+
+function requireCompleteDesktopSession(value: Partial<MomentAIGuestSession>): MomentAIGuestSession {
+  if (!value.sessionId || !value.eventId || !value.status || !value.createdAt || !value.updatedAt) {
+    throw new Error('Desktop guest IPC returned an incomplete session.');
+  }
+  return {
+    sessionId: value.sessionId,
+    eventId: value.eventId,
+    captureFormat: value.captureFormat ?? null,
+    photos: value.photos ?? [],
+    selectedTemplate: value.selectedTemplate ?? null,
+    slotAssignments: value.slotAssignments ?? [],
+    customization: value.customization ?? { text: [], drawing: [] },
+    outputs: value.outputs ?? { master: null, share: null, print: null },
+    qr: value.qr ?? null,
+    printJob: value.printJob ?? null,
+    status: value.status,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+    completedAt: value.completedAt,
+  };
+}
+
+function isLocalGuestFallbackAllowed() {
+  if (typeof window === 'undefined') return false;
+  const { hostname, port, protocol } = window.location;
+  const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1';
+  return protocol === 'http:' && isLoopback && (port === '5173' || port === '5174');
+}
+
+function normalizeSession(partial: Partial<MomentAIGuestSession>, previous: MomentAIGuestSession | null, action: string, body: Record<string, unknown>): MomentAIGuestSession {
+  const fallback = previous ?? createLocalSession(body.eventId as string | undefined);
+  return applyLocalGuestAction(action, body, { ...fallback, ...partial });
+}
+
+function applyLocalGuestAction(action: string, body: Record<string, unknown>, previous: MomentAIGuestSession | null): MomentAIGuestSession {
+  const now = new Date().toISOString();
+  const session = previous ?? createLocalSession(body.eventId as string | undefined);
+
+  switch (action) {
+    case 'start-session':
+      return createLocalSession(body.eventId as string | undefined);
+    case 'select-format': {
+      const format = LOCAL_CAPTURE_FORMATS.find((item) => item.id === body.formatId) ?? LOCAL_CAPTURE_FORMATS[2];
+      return { ...session, captureFormat: format, status: 'READY_TO_CAPTURE', updatedAt: now };
+    }
+    case 'add-photo': {
+      const photo = body.photo as { photoId?: string; shotIndex?: number; originalPath?: string; dataUrl?: string } | undefined;
+      if (!photo?.photoId || typeof photo.shotIndex !== 'number' || !photo.originalPath) return { ...session, status: 'STORAGE_ERROR', updatedAt: now };
+      const nextPhoto = {
+        photoId: photo.photoId,
+        sessionId: session.sessionId,
+        shotIndex: photo.shotIndex,
+        originalPath: photo.originalPath,
+        status: 'valid' as const,
+        capturedAt: now,
+        dataUrl: photo.dataUrl,
+      };
+      return { ...session, photos: [...session.photos, nextPhoto], status: 'SELECTING_TEMPLATE', updatedAt: now };
+    }
+    case 'select-template': {
+      const templateId = String(body.templateId || 'template_local');
+      const template = createLocalTemplates(session.eventId, session.captureFormat?.id ?? 'format_4shot').find((item) => item.templateId === templateId) ?? createLocalTemplates(session.eventId, session.captureFormat?.id ?? 'format_4shot')[0];
+      return {
+        ...session,
+        selectedTemplate: template,
+        slotAssignments: session.photos.slice(0, template.slots.length).map((photo, index) => ({ slotIndex: index + 1, photoId: photo.photoId })),
+        status: template.customization.allowDraw || template.customization.allowTyping ? 'CUSTOMIZING' : 'COMPOSING',
+        updatedAt: now,
+      };
+    }
+    case 'save-customization':
+      return { ...session, customization: body.customization as MomentAIGuestSession['customization'] ?? session.customization, status: 'COMPOSING', updatedAt: now };
+    case 'compose':
+      return { ...session, outputs: { master: 'local-master', share: 'local-share', print: 'local-print' }, qr: { url: '', status: 'failed' }, status: 'RESULT_READY', updatedAt: now };
+    case 'request-print':
+      return { ...session, printJob: { jobId: `print_${session.sessionId}`, sessionId: session.sessionId, templateId: session.selectedTemplate?.templateId ?? 'template_local', file: 'local-print', paper: session.selectedTemplate?.printProfile.paper ?? '4x6', copies: Number(body.copies || 1), status: 'queued', createdAt: now, attempts: 0 }, updatedAt: now };
+    case 'complete':
+      return { ...session, status: 'COMPLETED', completedAt: now, updatedAt: now };
+    default:
+      return session;
+  }
+}
+
+function createLocalSession(eventId = 'event_hoi_an_heritage'): MomentAIGuestSession {
+  localSessionSequence += 1;
+  const now = new Date().toISOString();
+  return {
+    sessionId: `desktop_dev_session_${localSessionSequence}`,
+    eventId,
+    captureFormat: null,
+    photos: [],
+    selectedTemplate: null,
+    slotAssignments: [],
+    customization: { text: [], drawing: [] },
+    outputs: { master: null, share: null, print: null },
+    qr: null,
+    printJob: null,
+    status: 'SELECTING_FORMAT',
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function createLocalTemplates(eventId: string, captureFormatId: MomentAICaptureFormatId): MomentAITemplate[] {
+  const format = LOCAL_CAPTURE_FORMATS.find((item) => item.id === captureFormatId) ?? LOCAL_CAPTURE_FORMATS[2];
+  let slots = [{ slotIndex: 1, x: 2, y: 2, width: 96, height: 86 }];
+  if (format.slotCount === 2) {
+    slots = [
+      { slotIndex: 1, x: 2, y: 2, width: 96, height: 43 },
+      { slotIndex: 2, x: 2, y: 46.5, width: 96, height: 43 },
+    ];
+  } else if (format.slotCount === 4) {
+    slots = [
+      { slotIndex: 1, x: 2, y: 2, width: 46, height: 41 },
+      { slotIndex: 2, x: 52, y: 2, width: 46, height: 41 },
+      { slotIndex: 3, x: 2, y: 45, width: 46, height: 41 },
+      { slotIndex: 4, x: 52, y: 45, width: 46, height: 41 },
+    ];
+  }
+
+  return [{
+    templateId: `desktop_template_${captureFormatId}`,
+    eventId,
+    captureFormatId,
+    name: `${format.label} Heritage Frame`,
+    status: 'PUBLISHED',
+    canvas: { width: 1800, height: 2700 },
+    slots,
+    assets: { background: '#F4F2EE', overlayColor: '#1A1A1A', textColor: '#1A1A1A' },
+    customization: { allowTyping: false, allowDraw: false },
+    printProfile: { paper: '4x6', orientation: 'portrait', dpi: 300 },
+  }];
+}
+
 function sanitizePhotoId(value: string) {
-  return value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128) || `photo_${Date.now()}`;
+  return value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128) || `photo_${localSessionSequence}`;
 }

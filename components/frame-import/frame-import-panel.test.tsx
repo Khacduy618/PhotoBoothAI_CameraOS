@@ -27,16 +27,25 @@ const framesPayload = {
 
 describe("FrameImportPanel", () => {
     beforeEach(() => {
-        vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-            const url = String(input);
-            if (url.includes("/api/admin/events")) {
-                return Response.json(eventsPayload);
-            }
-            if (url.includes("/api/admin/frames")) {
-                return Response.json(framesPayload);
-            }
-            return Response.json({ ok: false }, { status: 404 });
-        }));
+        Object.defineProperty(window, "momentai", {
+            configurable: true,
+            value: {
+                admin: {
+                    events: {
+                        list: vi.fn(async () => ({ ok: true, value: eventsPayload.events })),
+                        create: vi.fn(),
+                    },
+                    templates: {
+                        list: vi.fn(async () => ({ ok: true, value: framesPayload.frames })),
+                        publish: vi.fn(async () => ({ ok: true, value: undefined })),
+                        archive: vi.fn(async () => ({ ok: true, value: undefined })),
+                        save: vi.fn(async () => ({ ok: true, value: undefined })),
+                        remove: vi.fn(async () => ({ ok: true, value: undefined })),
+                        clear: vi.fn(async () => ({ ok: true, value: undefined })),
+                    },
+                },
+            },
+        });
     });
 
     afterEach(() => {
@@ -47,17 +56,17 @@ describe("FrameImportPanel", () => {
     it("renders operator import tool header and file upload dropzone", async () => {
         render(<FrameImportPanel />);
 
-        expect(screen.getByText(/Canva Frame Import & Registry Tool/i)).toBeDefined();
-        expect(screen.getByText(/Chọn hoặc kéo thả file Canva PNG/i)).toBeDefined();
-        expect(screen.getAllByText(/Đã Đăng Ký/i).length).toBeGreaterThan(0);
+        expect(screen.getByText(/Canva frame registry/i)).toBeDefined();
+        expect(screen.getByText(/PNG only · max 25 files/i)).toBeDefined();
+        expect(screen.getAllByText(/Registry/i).length).toBeGreaterThan(0);
         await waitFor(() => expect(screen.getAllByText(/Phố Cổ Hội An/i).length).toBeGreaterThan(0));
     });
 
     it("shows selected event folder and SQLite-backed frame count", async () => {
         render(<FrameImportPanel />);
 
-        await waitFor(() => expect(screen.getByText(/1 frame trong event này/i)).toBeDefined());
-        fireEvent.click(screen.getByRole("button", { name: /Đã Đăng Ký/i }));
+        await waitFor(() => expect(screen.getByRole("button", { name: /Registry \(1\)/i })).toBeDefined());
+        fireEvent.click(screen.getByRole("button", { name: /Registry \(1\)/i }));
         await waitFor(() => expect(screen.getByText(/Sample Frame/i)).toBeDefined());
     });
 });

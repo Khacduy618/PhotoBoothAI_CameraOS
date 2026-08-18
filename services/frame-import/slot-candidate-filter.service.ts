@@ -10,12 +10,12 @@ export interface CandidateFilterConfig {
 }
 
 export const DEFAULT_FILTER_CONFIG: CandidateFilterConfig = Object.freeze({
-    minAreaRatio: 0.015,
-    maxAreaRatio: 0.45,
-    minWidthRatio: 0.10,
+    minAreaRatio: 0.02,
+    maxAreaRatio: 0.95,
+    minWidthRatio: 0.15,
     minHeightRatio: 0.08,
-    minFillRatio: 0.70,
-    rejectEdgeTouching: true,
+    minFillRatio: 0.45,
+    rejectEdgeTouching: false,
 });
 
 export function filterSlotCandidates(
@@ -26,7 +26,7 @@ export function filterSlotCandidates(
 ): DetectedSlot[] {
     const imageArea = imageWidth * imageHeight;
 
-    return components
+    const candidates = components
         .map((component, index) => {
             const width = component.maxX - component.minX + 1;
             const height = component.maxY - component.minY + 1;
@@ -70,4 +70,12 @@ export function filterSlotCandidates(
                 slot.fillRatio >= config.minFillRatio
             );
         });
+
+    if (candidates.length <= 1) {
+        return candidates;
+    }
+
+    // Filter out sticker noise cutouts whose area is less than 30% of the largest photo slot candidate
+    const maxCandidateArea = Math.max(...candidates.map((c) => c.areaRatio));
+    return candidates.filter((slot) => slot.areaRatio >= maxCandidateArea * 0.30);
 }

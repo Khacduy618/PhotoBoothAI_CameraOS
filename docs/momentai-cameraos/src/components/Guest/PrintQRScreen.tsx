@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { SessionData, PrinterSettings } from '../../types';
-import { printerService } from '../../services/printerService';
-import { QRCodeSVG } from '../UI/QRCodeSVG';
-import { Printer, CheckCircle2, Clock, Check } from 'lucide-react';
+import { Printer, Clock, Check, AlertCircle } from 'lucide-react';
 
 interface PrintQRScreenProps {
   session: SessionData;
@@ -16,10 +14,7 @@ export const PrintQRScreen: React.FC<PrintQRScreenProps> = ({
   onFinishSession,
 }) => {
   const [secondsRemaining, setSecondsRemaining] = useState<number>(120);
-  const [printStatus, setPrintStatus] = useState<string>('Đang chuẩn bị ảnh...');
-  const [isPrinted, setIsPrinted] = useState<boolean>(false);
-
-  const downloadUrl = `https://momentai.app/gallery/${session.sessionId}`;
+  const printStatus = 'Sẵn sàng in khi guest xác nhận trong app production';
 
   // 120 Seconds Auto Reset Countdown
   useEffect(() => {
@@ -36,33 +31,6 @@ export const PrintQRScreen: React.FC<PrintQRScreenProps> = ({
 
     return () => clearInterval(timer);
   }, [onFinishSession]);
-
-  // Auto trigger print simulation on mount
-  useEffect(() => {
-    const runAutoPrint = async () => {
-      if (session.outputs?.print && session.selectedFrame) {
-        setPrintStatus('Đang gửi lệnh in...');
-        const res = await printerService.createPrintJob(
-          session.sessionId,
-          session.selectedFrame.id,
-          session.selectedFrame.preferredPaper || printerSettings.currentPaper,
-          session.selectedPrintQuantity || 1,
-          session.outputs.print
-        );
-
-        if (res.success) {
-          setPrintStatus('In ảnh thành công!');
-          setIsPrinted(true);
-        } else {
-          setPrintStatus('Máy in đang cần hỗ trợ');
-        }
-      } else {
-        setPrintStatus('Đã sẵn sàng tải bản digital');
-      }
-    };
-
-    runAutoPrint();
-  }, [session, printerSettings]);
 
   const formatTimer = (sec: number) => {
     const m = Math.floor(sec / 60);
@@ -88,22 +56,22 @@ export const PrintQRScreen: React.FC<PrintQRScreenProps> = ({
         <div className="md:col-span-6 flex flex-col gap-6">
           {/* QR Code Card */}
           <div className="bg-[#F4F2EE] p-6 border border-[#1A1A1A]/15 flex flex-col items-center text-center shadow-xs rounded-xs">
-            <div className="p-3 bg-[#FDFCFB] border border-[#1A1A1A]/15 mb-4 shadow-xs rounded-2xs">
-              <QRCodeSVG value={downloadUrl} size={170} />
+            <div className="w-[194px] h-[194px] bg-[#FDFCFB] border border-dashed border-[#1A1A1A]/25 mb-4 flex items-center justify-center rounded-2xs">
+              <AlertCircle className="w-10 h-10 text-[#1A1A1A]/45" />
             </div>
-            <h3 className="font-serif italic text-xl font-bold text-[#1A1A1A] mb-1">Quét để tải ảnh số</h3>
-            <span className="text-[10px] font-mono opacity-70 font-medium">Ghi lại khoảnh khắc ngay về điện thoại</span>
+            <h3 className="font-serif italic text-xl font-bold text-[#1A1A1A] mb-1">QR chưa khả dụng</h3>
+            <span className="text-[10px] font-mono opacity-70 font-medium">Demo docs không tạo cloud QR hoặc tự động gửi lệnh in. Production dùng LocalShareService.</span>
           </div>
 
           {/* Print Status Banner */}
           <div className="bg-[#F4F2EE] p-5 border border-[#1A1A1A]/15 flex items-center justify-between rounded-xs">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-[#1A1A1A] text-[#FDFCFB] flex items-center justify-center flex-shrink-0 rounded-2xs">
-                {isPrinted ? <CheckCircle2 className="w-5 h-5 text-emerald-400" /> : <Printer className="w-5 h-5 animate-pulse" />}
+                <Printer className="w-5 h-5" />
               </div>
               <div>
                 <span className="block text-[10px] font-mono uppercase tracking-widest opacity-60">Trạng thái máy in</span>
-                <span className="font-serif italic text-base font-bold text-[#1A1A1A]">{printStatus}</span>
+                <span className="font-serif italic text-base font-bold text-[#1A1A1A]">{printStatus} ({printerSettings.currentPaper})</span>
               </div>
             </div>
           </div>

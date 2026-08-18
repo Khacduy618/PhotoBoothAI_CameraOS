@@ -334,7 +334,7 @@ export const CustomizeScreen: React.FC<CustomizeScreenProps> = ({
                     <img
                       src={photoUrl}
                       alt={`Slot ${i + 1}`}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover object-center"
                     />
                   </div>
                 );
@@ -353,7 +353,7 @@ export const CustomizeScreen: React.FC<CustomizeScreenProps> = ({
                     className="block text-xs font-bold mt-0.5 tracking-wide"
                     style={{ color: template.assets.textColor || '#1A1A1A' }}
                   >
-                    "{typedText}"
+                    &ldquo;{typedText}&rdquo;
                   </span>
                 ) : (
                   <span

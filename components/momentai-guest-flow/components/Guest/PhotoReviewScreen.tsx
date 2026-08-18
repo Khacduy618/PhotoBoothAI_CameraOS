@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { PhotoItem, SessionData } from '../../types';
 import { cameraService } from '../../services/cameraService';
 import { RefreshCw, ArrowRight } from 'lucide-react';
@@ -18,6 +18,7 @@ export const PhotoReviewScreen: React.FC<PhotoReviewScreenProps> = ({
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number | null>(null);
   const [isRetaking, setIsRetaking] = useState<boolean>(false);
   const [retakeCountdown, setRetakeCountdown] = useState<number>(3);
+  const retakeSequenceRef = useRef(0);
 
   const startRetakeProcess = (index: number) => {
     setSelectedPhotoIndex(index);
@@ -39,8 +40,9 @@ export const PhotoReviewScreen: React.FC<PhotoReviewScreenProps> = ({
 
   const executeSingleRetake = async (index: number) => {
     const dataUrl = await cameraService.capturePhoto(index);
+    retakeSequenceRef.current += 1;
     const newPhoto: PhotoItem = {
-      id: `photo_retake_${Date.now()}_${index}`,
+      id: `photo_retake_${session.sessionId}_${index}_${retakeSequenceRef.current}`,
       index: index + 1,
       dataUrl,
       timestamp: new Date().toLocaleTimeString('vi-VN'),

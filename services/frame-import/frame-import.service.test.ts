@@ -48,9 +48,38 @@ describe("frame import analyzer services", () => {
         expect(ordered.length).toBe(4);
         expect(ordered[0].order).toBe(0);
         expect(ordered[0].normalizedBounds.x).toBeLessThan(ordered[1].normalizedBounds.x);
+
         expect(inferShotCount(ordered.length)).toBe(4);
         expect(calculateConfidence(ordered)).toBeGreaterThanOrEqual(0.65);
         expect(classifyConfidence(calculateConfidence(ordered))).toBe("auto-approved");
+    });
+
+    it("automatically splits a giant merged single cutout in a tall photostrip frame into 4 equal slots", () => {
+        const width = 88;
+        const height = 265;
+        const rgba = new Uint8ClampedArray(width * height * 4);
+
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const offset = (y * width + x) * 4;
+                const isCutout = x >= 5 && x <= 83 && y >= 10 && y <= 250;
+                rgba[offset] = 20;
+                rgba[offset + 1] = 20;
+                rgba[offset + 2] = 30;
+                rgba[offset + 3] = isCutout ? 0 : 255;
+            }
+        }
+
+        const result = analyzeImportFrame({
+            fileName: "tall-strip.png",
+            rgba,
+            width,
+            height,
+        });
+
+        expect(result.slots.length).toBe(4);
+        expect(result.analysis.detectedShotCount).toBe(4);
+        expect(result.status).toBe("auto-approved");
     });
 
     it("analyzes synthetic RGBA input with transparent slots using alpha detection", () => {

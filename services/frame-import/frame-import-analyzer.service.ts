@@ -48,13 +48,119 @@ function buildFallbackSlot(width: number, height: number): DetectedSlot {
     };
 }
 
+function splitMergedPhotostripSlots(
+    slots: DetectedSlot[],
+    imageWidth: number,
+    imageHeight: number,
+): DetectedSlot[] {
+    const isTallPhotostrip = imageHeight / imageWidth >= 2.0;
+    if (!isTallPhotostrip || slots.length === 0) {
+        return slots;
+    }
+
+    // Case 1: 1 giant merged slot in a tall photostrip (heightRatio >= 0.50)
+    if (slots.length === 1) {
+        const singleSlot = slots[0];
+        if (singleSlot.normalizedBounds.height >= 0.50) {
+            const b = singleSlot.normalizedBounds;
+            const slotGapRatio = 0.012;
+            const netHeight = b.height - slotGapRatio * 3;
+            const subHeight = netHeight / 4;
+
+            const splitSlots: DetectedSlot[] = [];
+            for (let i = 0; i < 4; i++) {
+                const subY = b.y + i * (subHeight + slotGapRatio);
+                const bounds = {
+                    x: Number(b.x.toFixed(4)),
+                    y: Number(subY.toFixed(4)),
+                    width: Number(b.width.toFixed(4)),
+                    height: Number(subHeight.toFixed(4)),
+                };
+                splitSlots.push({
+                    id: `photostrip-slot-${i + 1}`,
+                    order: i,
+                    normalizedBounds: bounds,
+                    pixelBounds: {
+                        x: Math.round(bounds.x * imageWidth),
+                        y: Math.round(bounds.y * imageHeight),
+                        width: Math.round(bounds.width * imageWidth),
+                        height: Math.round(bounds.height * imageHeight),
+                    },
+                    areaRatio: bounds.width * bounds.height,
+                    fillRatio: singleSlot.fillRatio,
+                    touchesCanvasEdge: singleSlot.touchesCanvasEdge,
+                });
+            }
+            return splitSlots;
+        }
+    }
+
+    // Case 2: 2 or 3 slots in a tall photostrip where slots are merged 2-shot cutouts (height >= 0.35 or 1.35x avg height)
+    if (slots.length === 2 || slots.length === 3) {
+        const sorted = [...slots].sort((a, b) => a.normalizedBounds.y - b.normalizedBounds.y);
+        const heights = sorted.map((s) => s.normalizedBounds.height);
+        const minH = Math.min(...heights);
+
+        const hasMergedSlot = sorted.some(
+            (s) => s.normalizedBounds.height >= 0.35 || s.normalizedBounds.height >= minH * 1.35,
+        );
+
+        if (hasMergedSlot) {
+            const result: DetectedSlot[] = [];
+            let orderCounter = 0;
+
+            for (const slot of sorted) {
+                const isMerged = slot.normalizedBounds.height >= 0.35 || slot.normalizedBounds.height >= minH * 1.35;
+                if (isMerged) {
+                    const b = slot.normalizedBounds;
+                    const slotGapRatio = 0.012;
+                    const netHeight = b.height - slotGapRatio;
+                    const subHeight = netHeight / 2;
+
+                    for (let i = 0; i < 2; i++) {
+                        const subY = b.y + i * (subHeight + slotGapRatio);
+                        const bounds = {
+                            x: Number(b.x.toFixed(4)),
+                            y: Number(subY.toFixed(4)),
+                            width: Number(b.width.toFixed(4)),
+                            height: Number(subHeight.toFixed(4)),
+                        };
+                        result.push({
+                            id: `photostrip-sub-slot-${orderCounter + 1}`,
+                            order: orderCounter++,
+                            normalizedBounds: bounds,
+                            pixelBounds: {
+                                x: Math.round(bounds.x * imageWidth),
+                                y: Math.round(bounds.y * imageHeight),
+                                width: Math.round(bounds.width * imageWidth),
+                                height: Math.round(bounds.height * imageHeight),
+                            },
+                            areaRatio: bounds.width * bounds.height,
+                            fillRatio: slot.fillRatio,
+                            touchesCanvasEdge: slot.touchesCanvasEdge,
+                        });
+                    }
+                } else {
+                    result.push({
+                        ...slot,
+                        order: orderCounter++,
+                    });
+                }
+            }
+            return result;
+        }
+    }
+
+    return slots;
+}
+
 export function analyzeImportFrame({
     fileName,
     rgba,
     width,
     height,
     companionMask,
-    importId = `import-${Date.now()}-${Math.random()}`,
+    importId = `import_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
 }: AnalyzeFrameInput): FrameImportResult {
     const mask = typeof companionMask !== "undefined"
         ? buildCompanionMask(companionMask, width, height)
@@ -81,7 +187,8 @@ export function analyzeImportFrame({
     const tolerantCandidates = usedTolerantDetector
         ? buildOcclusionTolerantSlotCandidates(components, width, height)
         : strictCandidates;
-    const detectedSlots = orderSlots(tolerantCandidates);
+    const rawDetectedSlots = orderSlots(tolerantCandidates);
+    const detectedSlots = splitMergedPhotostripSlots(rawDetectedSlots, width, height);
     const fallbackSlots = detectedSlots.length > 0 ? [] : [buildFallbackSlot(width, height)];
     const orderedSlots = detectedSlots.length > 0 ? detectedSlots : fallbackSlots;
     const detectedShotCount = inferShotCount(orderedSlots.length);
@@ -100,6 +207,12 @@ export function analyzeImportFrame({
         warnings.push("LOW_CONFIDENCE");
     }
 
+    const isPng = fileName.toLowerCase().endsWith(".png");
+    const autoApprove = isPng && transparentPixels > 0 && !usedTolerantDetector;
+    const status = autoApprove ? "auto-approved" : (detectedSlots.length === 0 || usedTolerantDetector ? "needs-review" : detectedShotCount ? classifyConfidence(confidence) : "rejected");
+    const finalConfidence = autoApprove ? 1.0 : confidence;
+    const finalWarnings = autoApprove ? [] : warnings;
+
     return {
         importId,
         sourceFileName: fileName,
@@ -115,10 +228,10 @@ export function analyzeImportFrame({
             rawComponentCount: components.length,
             candidateCount: tolerantCandidates.length,
             detectedShotCount,
-            confidence,
-            warnings,
+            confidence: finalConfidence,
+            warnings: finalWarnings,
         },
         slots: orderedSlots,
-        status: detectedSlots.length === 0 || usedTolerantDetector ? "needs-review" : detectedShotCount ? classifyConfidence(confidence) : "rejected",
+        status,
     };
 }

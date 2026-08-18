@@ -4,7 +4,7 @@ import {
     addMomentAIGuestPhoto,
     completeMomentAIGuestSession,
     composeMomentAIOutputs,
-    enqueueMomentAIAutoPrint,
+    requestMomentAIPrint,
     getMomentAIGuestSession,
     listMomentAICaptureFormats,
     listMomentAITemplates,
@@ -66,8 +66,8 @@ export async function POST(request: NextRequest) {
                 return NextResponse.json({ ok: true, session: saveMomentAICustomization(requireSessionId(body.sessionId), body.customization) });
             case "compose":
                 return NextResponse.json({ ok: true, session: composeMomentAIOutputs(requireSessionId(body.sessionId)) });
-            case "auto-print":
-                return NextResponse.json({ ok: true, session: enqueueMomentAIAutoPrint(requireSessionId(body.sessionId), body.copies ?? 1) });
+            case "request-print":
+                return NextResponse.json({ ok: true, session: requestMomentAIPrint(requireSessionId(body.sessionId), body.copies ?? 1) });
             case "complete":
                 return NextResponse.json({ ok: true, session: completeMomentAIGuestSession(requireSessionId(body.sessionId)) });
             default:

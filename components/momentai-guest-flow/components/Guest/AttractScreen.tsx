@@ -7,20 +7,34 @@ import hoianSceneryImg from '../../assets/images/hoian_ancient_town_scenery_1786
 interface AttractScreenProps {
   eventConfig: EventConfig;
   onStartSession: () => void;
+  readinessStatus?: 'READY' | 'DEGRADED' | 'BLOCKED';
+  readinessReasons?: readonly string[];
 }
 
 export const AttractScreen: React.FC<AttractScreenProps> = ({
   onStartSession,
+  readinessStatus = 'READY',
+  readinessReasons = [],
 }) => {
+  const isBlocked = readinessStatus === 'BLOCKED';
+  const guestMessage = isBlocked
+    ? 'Booth đang cần hỗ trợ trước khi bắt đầu.'
+    : readinessStatus === 'DEGRADED'
+      ? 'Một số thiết bị phụ đang ở chế độ dự phòng. Bạn vẫn có thể bắt đầu.'
+      : 'Sẵn sàng chụp ảnh.';
+  const operatorReason = readinessReasons.length > 0 ? readinessReasons.join(', ') : 'Không có lý do vận hành.';
+
   return (
     <div
-      onClick={onStartSession}
-      className="relative w-full h-screen select-none cursor-pointer overflow-hidden flex flex-col justify-between"
+      onClick={isBlocked ? undefined : onStartSession}
+      aria-disabled={isBlocked}
+      data-readiness-status={readinessStatus}
+      className={`relative w-full h-screen select-none overflow-hidden flex flex-col justify-between ${isBlocked ? 'cursor-not-allowed' : 'cursor-pointer'}`}
     >
       {/* Full-Screen Scenery Background Image */}
       <div className="absolute inset-0 w-full h-full z-0 bg-black">
         <img
-          src={hoianSceneryImg.src}
+          src="/backgrounds/hoian-ancient-town-scenery.jpg"
           alt="Hội An Ancient Town Scenery"
           referrerPolicy="no-referrer"
           className="w-full h-full object-cover object-center scale-105 filter brightness-90 saturate-110"
@@ -42,18 +56,25 @@ export const AttractScreen: React.FC<AttractScreenProps> = ({
       </header>
 
       {/* Center Hero Text & Touch Action Button */}
-      <main className="relative z-10 my-auto px-6 max-w-4xl mx-auto flex flex-col items-center text-center gap-8 py-8">
+      <main className="relative z-10 my-auto px-6 max-w-6xl mx-auto flex flex-col items-center text-center gap-8 py-8">
         <div className="space-y-4">
           <motion.h1
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8 }}
-            className="text-4xl sm:text-6xl lg:text-7xl font-serif tracking-tight text-[#FDFCFB] leading-tight drop-shadow-lg"
+            className="text-4xl sm:text-6xl lg:text-9xl font-serif tracking-tight text-[#FDFCFB] leading-tight drop-shadow-lg"
           >
             Chụp Ảnh Lấy Ngay <br />
             <span className="italic font-light text-[#E6C687]">Tại Phố Cổ Hội An</span>
           </motion.h1>
         </div>
+
+        {readinessStatus !== 'READY' && (
+          <div className="max-w-xl rounded-sm border border-white/20 bg-black/45 px-5 py-3 text-center text-sm font-semibold tracking-wide text-[#FDFCFB] backdrop-blur-md" role={isBlocked ? 'alert' : 'status'}>
+            <p>{guestMessage}</p>
+            {isBlocked && <p className="mt-1 text-xs font-mono uppercase tracking-[0.18em] text-[#E6C687]">Operator: {operatorReason}</p>}
+          </div>
+        )}
 
         {/* Action Button Centered Directly Below Title Sequence */}
         <motion.div
@@ -77,11 +98,11 @@ export const AttractScreen: React.FC<AttractScreenProps> = ({
                 duration: 2,
               },
             }}
-            className="w-full sm:w-[380px] h-[60px] bg-[#FDFCFB] text-[#1A1A1A] border-2 border-[#E6C687] flex items-center justify-between px-8 group cursor-pointer shadow-2xl rounded-sm"
+            className={`w-full sm:w-[380px] h-[60px] border-2 flex items-center justify-between px-8 group shadow-2xl rounded-sm ${isBlocked ? 'bg-white/25 text-white/70 border-white/30 cursor-not-allowed' : 'bg-[#FDFCFB] text-[#1A1A1A] border-[#E6C687] cursor-pointer'}`}
           >
             <div className="flex items-center gap-3">
-              <Camera className="w-5 h-5 text-[#C85A32]" />
-              <span className="text-sm uppercase tracking-[0.25em] font-bold">CHẠM ĐỂ CHỤP ẢNH</span>
+              <Camera className={`w-5 h-5 ${isBlocked ? 'text-white/60' : 'text-[#C85A32]'}`} />
+              <span className="text-sm uppercase tracking-[0.25em] font-bold">{isBlocked ? 'TẠM DỪNG BẮT ĐẦU' : 'CHẠM ĐỂ CHỤP ẢNH'}</span>
             </div>
             <ArrowRight className="w-5 h-5 text-[#1A1A1A] transition-transform group-hover:translate-x-1.5" />
           </motion.div>

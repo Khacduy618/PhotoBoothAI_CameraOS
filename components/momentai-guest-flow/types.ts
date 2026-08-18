@@ -1,3 +1,5 @@
+import type { GuestProductConfig } from "@/types/guest-product";
+
 export type LayoutType = '1x1' | '1x2' | '1x3' | '2x2' | '1x4' | '2x3';
 
 export type PaperSize = '4x6' | '6x8' | '2x6-double';
@@ -18,6 +20,7 @@ export interface FrameTemplate {
   thumbnail: string;
   category: string;
   shotCount?: number; // 1, 2, 4, 6
+  orientation?: 'portrait' | 'landscape';
   allowTyping?: boolean;
   allowDraw?: boolean;
   textPlaceholder?: string;
@@ -55,8 +58,10 @@ export interface PhotoItem {
 export interface SessionData {
   sessionId: string;
   createdAt: string;
+  product?: GuestProductConfig;
   captureCount: number;
   photos: PhotoItem[];
+  selectedPhotoIndex?: number;
   selectedFrame?: FrameTemplate;
   slotAssignments: (PhotoItem | null)[]; // length matches selectedFrame.layout.slotCount
   paperSize?: PaperSize;
@@ -66,6 +71,10 @@ export interface SessionData {
     master?: string; // dataUrl
     share?: string; // dataUrl
     print?: string; // dataUrl
+  };
+  qr?: {
+    url?: string;
+    status: 'pending' | 'ready' | 'failed' | 'unavailable';
   };
   selectedPrintQuantity?: number;
   printStatus: 'idle' | 'queued' | 'rendering' | 'sending' | 'printing' | 'completed' | 'failed';
@@ -131,12 +140,18 @@ export interface PrintJob {
 export type GuestScreenState =
   | 'G01_START'
   | 'G01_ATTRACT'
+  | 'G02_SELECT_PRODUCT'
   | 'G02_SELECT_SHOTS'
   | 'G02B_SELECT_PRINT_QTY'
   | 'G03_CAPTURE'
   | 'G04_SELECT_FRAME'
   | 'G04_SELECT_TEMPLATE'
+  | 'G05_PREMIUM_CUSTOMIZE'
+  | 'G05_DRAW'
   | 'G05_CUSTOMIZE'
+  | 'G06_RESULT'
   | 'G06_FINAL_PREVIEW'
+  | 'G07_PRINTING'
   | 'G07_PRINT_QR'
+  | 'G08_PRINT_SUCCESS'
   | 'G08_DONE';

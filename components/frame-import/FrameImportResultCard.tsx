@@ -1,14 +1,16 @@
 "use client";
 
 import React, { useState } from "react";
-import type { DetectedSlot, FrameDefinition, FrameImportResult, FramePoint } from "@/services/frame-import/frame-import.types";
+import type { DetectedSlot, FrameDefinition, FrameImportResult, FrameOutputPaper, FramePoint, FrameTargetProduct } from "@/services/frame-import/frame-import.types";
 import { FrameSlotDebugPreview } from "./FrameSlotDebugPreview";
 import { punchOutFrameSlots } from "@/services/frame-import/transparent-punchout.service";
 
 interface FrameImportResultCardProps {
     result: FrameImportResult;
     imageUrl?: string;
-    onPublish: (definition: FrameDefinition) => void | Promise<void>;
+    events?: readonly { eventId: string; name: string }[];
+    selectedEventId?: string;
+    onPublish: (definition: FrameDefinition, targetEventId?: string) => void | Promise<void>;
     onReject: (importId: string) => void;
     isPublished?: boolean;
 }
@@ -16,6 +18,8 @@ interface FrameImportResultCardProps {
 export function FrameImportResultCard({
     result,
     imageUrl,
+    events,
+    selectedEventId,
     onPublish,
     onReject,
     isPublished = false,
@@ -27,12 +31,27 @@ export function FrameImportResultCard({
         .replace(/[-_]/g, " ")
         .replace(/\b\w/g, (c) => c.toUpperCase());
 
+    const [cardEventId, setCardEventId] = useState(selectedEventId || events?.[0]?.eventId || "event_hoi_an_heritage");
     const [frameName, setFrameName] = useState(defaultName);
     const [frameDescription, setFrameDescription] = useState("Canva imported frame overlay");
     const [allowDraw, setAllowDraw] = useState(false);
     const [editableSlots, setEditableSlots] = useState<readonly DetectedSlot[]>(result.slots);
     const [selectedSlotId, setSelectedSlotId] = useState<string | null>(result.slots[0]?.id || null);
     const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
+
+    const initialProduct: FrameTargetProduct =
+        result.slots.length === 1
+            ? "PREMIUM_POSTCARD"
+            : result.slots.length === 2
+            ? "STRIP_2"
+            : result.slots.length === 6
+            ? "SHEET_6"
+            : "STRIP_4";
+
+    const [targetProduct, setTargetProduct] = useState<FrameTargetProduct>(initialProduct);
+    const [frameOrientation, setFrameOrientation] = useState<"portrait" | "landscape">(
+        image.width > image.height ? "landscape" : "portrait"
+    );
 
     const handleSyncSlotsToRef = (refSlotId: string) => {
         const refSlot = editableSlots.find((s) => s.id === refSlotId);
@@ -170,6 +189,8 @@ export function FrameImportResultCard({
         }));
         setSelectedPointIndex(0);
     };
+
+
 
     const handleConvertSelectedToBezier = () => {
         if (!selectedSlotId) return;
@@ -319,9 +340,9 @@ export function FrameImportResultCard({
             window.alert("Số slot hiện tại chưa hỗ trợ. Hãy chỉnh về 1, 2, 4, 6 hoặc 8 slots trước khi publish.");
             return;
         }
-        const photoViewportOrientation: "portrait" | "landscape" =
-            image.width > image.height ? "landscape" : "portrait";
-        const photoAspectRatio = photoViewportOrientation === "landscape" ? "3:2" : "2:3";
+
+        const outputPaper: FrameOutputPaper =
+            targetProduct === "STRIP_2" || targetProduct === "STRIP_4" ? "5x15" : "10x15";
 
         const definitionSlots = editableSlots.map((s) => ({
             id: s.id,
@@ -330,24 +351,27 @@ export function FrameImportResultCard({
             y: s.normalizedBounds.y,
             width: s.normalizedBounds.width,
             height: s.normalizedBounds.height,
-            photoViewportOrientation,
+            photoViewportOrientation: frameOrientation,
             shape: s.shape ?? "rect",
             points: s.points,
         }));
 
-        // Automatically punch out (clear) slot regions to 100% transparent cutouts
         const transparentAssetUrl = imageUrl ? await punchOutFrameSlots(imageUrl, definitionSlots) : imageUrl;
 
+        const safeImportId = importId.replace(/[^a-zA-Z0-9_-]/g, "_");
         const definition: FrameDefinition = {
-            id: `imported-${importId}`,
+            id: `imported_${safeImportId}`,
             name: frameName || defaultName,
             description: frameDescription,
             kind: "png-overlay",
             source: "canva",
             assetUrl: transparentAssetUrl,
             shotCount: detectedShotCount,
-            photoViewportOrientation,
-            photoAspectRatio,
+            targetProduct,
+            outputPaper,
+            orientation: frameOrientation,
+            photoViewportOrientation: frameOrientation,
+            photoAspectRatio: frameOrientation === "landscape" ? "3:2" : "2:3",
             photoFit: "contain",
             allowDraw,
             outputWidth: image.width,
@@ -355,7 +379,7 @@ export function FrameImportResultCard({
             slots: definitionSlots,
         };
 
-        await onPublish(definition);
+        await onPublish(definition, cardEventId);
     };
 
     return (
@@ -372,8 +396,8 @@ export function FrameImportResultCard({
                 </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-3">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full">
+                <div className="lg:col-span-7 space-y-4">
                     <FrameSlotDebugPreview
                         result={result}
                         slots={editableSlots}
@@ -421,14 +445,14 @@ export function FrameImportResultCard({
                                 onClick={() => handleCreateManualGrid(4)}
                                 className="rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[10px] font-bold text-sky-900 hover:bg-sky-100 active:scale-95 cursor-pointer"
                             >
-Preset thủ công: 4 slots
+                                Preset thủ công: 4 slots
                             </button>
                             <button
                                 type="button"
                                 onClick={() => handleCreateManualGrid(6)}
                                 className="rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[10px] font-bold text-sky-900 hover:bg-sky-100 active:scale-95 cursor-pointer"
                             >
-Preset thủ công: 6 slots
+                                Preset thủ công: 6 slots
                             </button>
                             <button
                                 type="button"
@@ -438,6 +462,15 @@ Preset thủ công: 6 slots
                             >
                                 Chuyển slot sang cong
                             </button>
+                            <button
+                                type="button"
+                                onClick={handleResetSlots}
+                                className="rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1 text-[10px] font-bold text-neutral-700 hover:bg-neutral-100 active:scale-95 transition-all shadow-2xs cursor-pointer ml-auto"
+                            >
+                                Khôi phục ban đầu
+                            </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
                             <button
                                 type="button"
                                 onClick={handleConvertSelectedToBezier}
@@ -504,13 +537,6 @@ Preset thủ công: 6 slots
                             <span className="text-[11px] font-black uppercase tracking-wider text-pink-950">
                                 ⚡ Đồng bộ kích thước ô (One-Click Sync)
                             </span>
-                            <button
-                                type="button"
-                                onClick={handleResetSlots}
-                                className="text-[10px] font-bold text-neutral-500 hover:text-neutral-800 underline cursor-pointer"
-                            >
-                                Khôi phục ban đầu
-                            </button>
                         </div>
                         <div className="flex flex-wrap gap-1.5">
                             {editableSlots.map((slot) => (
@@ -527,17 +553,17 @@ Preset thủ công: 6 slots
                     </div>
                 </div>
 
-                <div className="space-y-3 text-xs">
+                <div className="lg:col-span-5 space-y-4 text-xs">
                     <div className="space-y-1 bg-neutral-50 p-3 rounded-xl border border-neutral-100">
                         <div className="flex justify-between text-neutral-600 font-medium">
-                            <span>Shot Count:</span>
-                            <span className="font-bold text-neutral-900">
-                                {analysis.detectedShotCount ?? "Uncertain"}
+                            <span>Shot Count (Số dáng chụp):</span>
+                            <span className="font-bold text-pink-700">
+                                {editableSlots.length} shots ({editableSlots.length} ô)
                             </span>
                         </div>
                         <div className="flex justify-between text-neutral-600 font-medium">
-                            <span>Detected Slots:</span>
-                            <span className="font-bold text-neutral-900">{editableSlots.length}</span>
+                            <span>Detected Slots (Số ô trên khung):</span>
+                            <span className="font-bold text-neutral-900">{editableSlots.length} ô</span>
                         </div>
                         <div className="flex justify-between text-neutral-600 font-medium">
                             <span>Transparent Ratio:</span>
@@ -570,12 +596,9 @@ Preset thủ công: 6 slots
                                         value={Number((selectedSlot.normalizedBounds.x * 100).toFixed(1))}
                                         onChange={(e) => {
                                             const val = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)) / 100;
-                                            handleUpdateSlotBounds(selectedSlot.id, {
-                                                ...selectedSlot.normalizedBounds,
-                                                x: Number(val.toFixed(4)),
-                                            });
+                                            handleUpdateSlotBounds(selectedSlot.id, { ...selectedSlot.normalizedBounds, x: val });
                                         }}
-                                        className="w-full rounded border border-neutral-300 px-1.5 py-1 font-mono text-neutral-900 bg-white"
+                                        className="w-full rounded border border-neutral-300 px-1.5 py-1 text-center font-bold text-neutral-900"
                                     />
                                 </div>
                                 <div>
@@ -588,12 +611,9 @@ Preset thủ công: 6 slots
                                         value={Number((selectedSlot.normalizedBounds.y * 100).toFixed(1))}
                                         onChange={(e) => {
                                             const val = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0)) / 100;
-                                            handleUpdateSlotBounds(selectedSlot.id, {
-                                                ...selectedSlot.normalizedBounds,
-                                                y: Number(val.toFixed(4)),
-                                            });
+                                            handleUpdateSlotBounds(selectedSlot.id, { ...selectedSlot.normalizedBounds, y: val });
                                         }}
-                                        className="w-full rounded border border-neutral-300 px-1.5 py-1 font-mono text-neutral-900 bg-white"
+                                        className="w-full rounded border border-neutral-300 px-1.5 py-1 text-center font-bold text-neutral-900"
                                     />
                                 </div>
                                 <div>
@@ -601,17 +621,14 @@ Preset thủ công: 6 slots
                                     <input
                                         type="number"
                                         step="0.1"
-                                        min="1"
+                                        min="0.1"
                                         max="100"
                                         value={Number((selectedSlot.normalizedBounds.width * 100).toFixed(1))}
                                         onChange={(e) => {
-                                            const val = Math.max(0.01, Math.min(1, parseFloat(e.target.value) || 0)) / 100;
-                                            handleUpdateSlotBounds(selectedSlot.id, {
-                                                ...selectedSlot.normalizedBounds,
-                                                width: Number(val.toFixed(4)),
-                                            });
+                                            const val = Math.max(0.01, Math.min(1, parseFloat(e.target.value) || 0.1)) / 100;
+                                            handleUpdateSlotBounds(selectedSlot.id, { ...selectedSlot.normalizedBounds, width: val });
                                         }}
-                                        className="w-full rounded border border-neutral-300 px-1.5 py-1 font-mono text-neutral-900 bg-white"
+                                        className="w-full rounded border border-neutral-300 px-1.5 py-1 text-center font-bold text-neutral-900"
                                     />
                                 </div>
                                 <div>
@@ -619,26 +636,36 @@ Preset thủ công: 6 slots
                                     <input
                                         type="number"
                                         step="0.1"
-                                        min="1"
+                                        min="0.1"
                                         max="100"
                                         value={Number((selectedSlot.normalizedBounds.height * 100).toFixed(1))}
                                         onChange={(e) => {
-                                            const val = Math.max(0.01, Math.min(1, parseFloat(e.target.value) || 0)) / 100;
-                                            handleUpdateSlotBounds(selectedSlot.id, {
-                                                ...selectedSlot.normalizedBounds,
-                                                height: Number(val.toFixed(4)),
-                                            });
+                                            const val = Math.max(0.01, Math.min(1, parseFloat(e.target.value) || 0.1)) / 100;
+                                            handleUpdateSlotBounds(selectedSlot.id, { ...selectedSlot.normalizedBounds, height: val });
                                         }}
-                                        className="w-full rounded border border-neutral-300 px-1.5 py-1 font-mono text-neutral-900 bg-white"
+                                        className="w-full rounded border border-neutral-300 px-1.5 py-1 text-center font-bold text-neutral-900"
                                     />
                                 </div>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1 border-t border-pink-200/40 mt-1">
+                                <span className="text-[10px] font-bold text-pink-900">
+                                    Vùng: {(selectedSlot.normalizedBounds.width * 100).toFixed(1)}% × {(selectedSlot.normalizedBounds.height * 100).toFixed(1)}%
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => handleDeleteSelectedSlot()}
+                                    className="rounded bg-rose-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-rose-700 active:scale-95 transition-all cursor-pointer"
+                                >
+                                    🗑 Xoá Ô này
+                                </button>
                             </div>
                         </div>
                     )}
 
                     {analysis.warnings.length > 0 && (
                         <div className="space-y-1">
-                            <span className="font-bold text-amber-900 text-[11px] uppercase tracking-wider">
+                            <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block">
                                 Warnings
                             </span>
                             <div className="flex flex-wrap gap-1">
@@ -654,7 +681,57 @@ Preset thủ công: 6 slots
                         </div>
                     )}
 
-                    <div className="space-y-2 pt-2">
+                    <div className="space-y-2 pt-2 border-t border-neutral-100">
+                        {events && events.length > 0 && (
+                            <div>
+                                <label className="block text-[11px] font-bold text-pink-950 uppercase tracking-wider mb-1">
+                                    🏷️ Gán Khung Cho Event
+                                </label>
+                                <select
+                                    value={cardEventId}
+                                    onChange={(e) => setCardEventId(e.target.value)}
+                                    className="w-full rounded-lg border border-pink-300 bg-pink-50/50 px-3 py-1.5 text-xs font-bold text-pink-950 focus:border-pink-500 focus:ring-1 focus:ring-pink-500"
+                                >
+                                    {events.map((ev) => (
+                                        <option key={ev.eventId} value={ev.eventId}>
+                                            {ev.name} ({ev.eventId})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="block text-[11px] font-bold text-pink-950 uppercase tracking-wider mb-1">
+                                📸 Loại Sản Phẩm Đích (Target Product)
+                            </label>
+                            <select
+                                value={targetProduct}
+                                onChange={(e) => setTargetProduct(e.target.value as FrameTargetProduct)}
+                                className="w-full rounded-lg border border-pink-300 bg-pink-50/50 px-3 py-1.5 text-xs font-bold text-pink-950 focus:border-pink-500 focus:ring-1 focus:ring-pink-500"
+                            >
+                                <option value="STRIP_2">⚡ Photo Strip 2 ô (Chuẩn 5x15 cm)</option>
+                                <option value="STRIP_4">⚡ Photo Strip 4 ô (Chuẩn 5x15 cm)</option>
+                                <option value="SHEET_4">📄 Photo Sheet 4 ô (Chuẩn 10x15 cm)</option>
+                                <option value="SHEET_6">📄 Photo Sheet 6 ô (Chuẩn 10x15 cm)</option>
+                                <option value="PREMIUM_POSTCARD">🖼️ Premium Postcard 1 ô (Chuẩn 10x15 / 15x10 cm)</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="block text-[11px] font-bold text-pink-950 uppercase tracking-wider mb-1">
+                                📐 Hướng Khung Ảnh (Orientation)
+                            </label>
+                            <select
+                                value={frameOrientation}
+                                onChange={(e) => setFrameOrientation(e.target.value as "portrait" | "landscape")}
+                                className="w-full rounded-lg border border-pink-300 bg-pink-50/50 px-3 py-1.5 text-xs font-bold text-pink-950 focus:border-pink-500 focus:ring-1 focus:ring-pink-500"
+                            >
+                                <option value="portrait">📱 Khung Dọc (Portrait)</option>
+                                <option value="landscape">🖥️ Khung Ngang (Landscape)</option>
+                            </select>
+                        </div>
+
                         <div>
                             <label className="block text-[11px] font-bold text-neutral-700 uppercase tracking-wider mb-1">
                                 Frame Name

@@ -26,10 +26,15 @@ export class CaptureCardAdapter
         this.disconnect();
 
         const videoConstraints: MediaTrackConstraints | boolean = deviceId
-            ? { deviceId: { exact: deviceId } }
+            ? {
+                  deviceId: { exact: deviceId },
+                  width: { ideal: boothConfig.camera.idealWidth, min: 1280 },
+                  height: { ideal: boothConfig.camera.idealHeight, min: 720 },
+                  frameRate: { ideal: boothConfig.camera.idealFrameRate },
+              }
             : {
-                  width: { ideal: boothConfig.camera.idealWidth },
-                  height: { ideal: boothConfig.camera.idealHeight },
+                  width: { ideal: boothConfig.camera.idealWidth, min: 1280 },
+                  height: { ideal: boothConfig.camera.idealHeight, min: 720 },
                   frameRate: { ideal: boothConfig.camera.idealFrameRate },
                   facingMode: "user",
               };

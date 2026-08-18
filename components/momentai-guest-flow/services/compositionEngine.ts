@@ -1,5 +1,6 @@
 import { FrameTemplate, PhotoItem, EventConfig, PaperSize } from '../types';
 import { HOI_AN_SAMPLE_PHOTOS } from '../data/hoianSamplePhotos';
+import { isStripTemplate } from '../components/UI/frame-previews/FramePreviewCard';
 
 export class CompositionEngine {
   public async renderComposition(
@@ -15,9 +16,12 @@ export class CompositionEngine {
     canvas.width = targetWidth;
     canvas.height = targetHeight;
     const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
 
     // 1. Draw Frame Background
-    ctx.fillStyle = frame.assets.background || '#ffffff';
+    const bg = frame.assets.background;
+    ctx.fillStyle = (bg && bg !== 'transparent') ? bg : '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // 2. Load and Draw Photos into Slots
@@ -41,75 +45,117 @@ export class CompositionEngine {
       const imgUrl = (photo && photo.dataUrl) ? photo.dataUrl : HOI_AN_SAMPLE_PHOTOS[i % HOI_AN_SAMPLE_PHOTOS.length];
       try {
         const img = await this.loadImage(imgUrl);
-        // Object-fit cover cropping inside slot
-        this.drawImageCover(ctx, img, slotX, slotY, slotW, slotH);
+        // Scale-to-fit center photo inside viewport without cropping
+        this.drawImageFit(ctx, img, slotX, slotY, slotW, slotH);
       } catch {
         // Fallback to sample photo if custom photo load failed
         try {
           const fallbackImg = await this.loadImage(HOI_AN_SAMPLE_PHOTOS[i % HOI_AN_SAMPLE_PHOTOS.length]);
-          this.drawImageCover(ctx, fallbackImg, slotX, slotY, slotW, slotH);
+          this.drawImageFit(ctx, fallbackImg, slotX, slotY, slotW, slotH);
         } catch {
           this.drawSlotPlaceholder(ctx, slotX, slotY, slotW, slotH, i + 1);
         }
       }
       ctx.restore();
-
-      // Slot stroke/border
-      if (frame.assets.borderWidth) {
-        ctx.lineWidth = frame.assets.borderWidth;
-        ctx.strokeStyle = frame.assets.overlayColor || '#000000';
-        ctx.strokeRect(slotX, slotY, slotW, slotH);
-      }
     }
 
-    // 3. Draw Frame Overlay Image if present
-    if (frame.assets.overlay) {
+    // 3. Draw Frame Overlay Image if present (check all potential overlay property names)
+    const overlayUrl = frame.assets?.overlay || (frame as any).assetUrl;
+    let hasOverlayImage = false;
+
+    if (overlayUrl) {
       try {
-        const overlayImg = await this.loadImage(frame.assets.overlay);
+        const overlayImg = await this.loadImage(overlayUrl);
         ctx.drawImage(overlayImg, 0, 0, canvas.width, canvas.height);
+        hasOverlayImage = true;
       } catch (err) {
         console.warn('Failed to load frame overlay image:', err);
       }
     }
 
-    // 4. Draw Branding & Custom Text
-    const branding = frame.eventBranding || {
-      text: eventConfig.eventName || 'MOMENTAI PHOTOBOOTH',
-      subtext: eventConfig.customTagline || 'Captured with Canon EOS 6D',
-      showDate: true,
-    };
+    // 4. Draw Branding Fallback Text ONLY if NO overlay image is present
+    if (!hasOverlayImage) {
+      const branding = frame.eventBranding || {
+        text: eventConfig.eventName || 'PHỐ CỔ HỘI AN',
+        subtext: eventConfig.customTagline || 'Tiệm Ảnh Di Sản',
+        showDate: true,
+      };
 
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.fillStyle = frame.assets.textColor || '#1A1A1A';
+      const isLandscape = canvas.width > canvas.height;
+      const isStrip = isStripTemplate(frame);
 
-    const textY = canvas.height - 130;
-    ctx.font = 'italic 52px "Playfair Display", serif';
-    ctx.fillText(branding.text, canvas.width / 2, textY);
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = frame.assets.textColor || '#1A1A1A';
 
-    if (customText) {
-      ctx.font = 'bold 36px "Plus Jakarta Sans", sans-serif';
-      ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}` : '#1A1A1A';
-      ctx.fillText(`"${customText}"`, canvas.width / 2, textY + 50);
-    } else if (branding.subtext) {
-      ctx.font = '30px "Plus Jakarta Sans", sans-serif';
-      ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}cc` : '#4b5563';
-      ctx.fillText(branding.subtext, canvas.width / 2, textY + 50);
+      if (isLandscape) {
+        // Landscape (2700x1800, height 1800px): branding area at bottom 12%
+        ctx.font = 'italic 38px "Playfair Display", serif';
+        ctx.fillText(branding.text, canvas.width / 2, 1660);
+
+        if (branding.subtext) {
+          ctx.font = '22px "Plus Jakarta Sans", sans-serif';
+          ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}cc` : '#4b5563';
+          ctx.fillText(branding.subtext, canvas.width / 2, 1705);
+        }
+
+        if (branding.showDate) {
+          const dateStr = new Date().toLocaleDateString('vi-VN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+          });
+          ctx.font = '18px monospace';
+          ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}88` : '#9ca3af';
+          ctx.fillText(dateStr, canvas.width / 2, 1745);
+        }
+      } else if (isStrip) {
+        // Strip (900x2700, height 2700px)
+        ctx.font = 'italic 36px "Playfair Display", serif';
+        ctx.fillText(branding.text, canvas.width / 2, 2520);
+
+        if (branding.subtext) {
+          ctx.font = '22px "Plus Jakarta Sans", sans-serif';
+          ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}cc` : '#4b5563';
+          ctx.fillText(branding.subtext, canvas.width / 2, 2570);
+        }
+
+        if (branding.showDate) {
+          const dateStr = new Date().toLocaleDateString('vi-VN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+          });
+          ctx.font = '18px monospace';
+          ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}88` : '#9ca3af';
+          ctx.fillText(dateStr, canvas.width / 2, 2620);
+        }
+      } else {
+        // Portrait Sheet (1800x2700, height 2700px)
+        ctx.font = 'italic 52px "Playfair Display", serif';
+        ctx.fillText(branding.text, canvas.width / 2, 2500);
+
+        if (branding.subtext) {
+          ctx.font = '30px "Plus Jakarta Sans", sans-serif';
+          ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}cc` : '#4b5563';
+          ctx.fillText(branding.subtext, canvas.width / 2, 2570);
+        }
+
+        if (branding.showDate) {
+          const dateStr = new Date().toLocaleDateString('vi-VN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+          });
+          ctx.font = '24px monospace';
+          ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}88` : '#9ca3af';
+          ctx.fillText(dateStr, canvas.width / 2, 2630);
+        }
+      }
+      ctx.restore();
     }
 
-    if (branding.showDate) {
-      const dateStr = new Date().toLocaleDateString('vi-VN', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-      });
-      ctx.font = '24px monospace';
-      ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}88` : '#9ca3af';
-      ctx.fillText(dateStr, canvas.width / 2, textY + 95);
-    }
-    ctx.restore();
-
-    // 4. Draw Custom Drawing Layer on top if present
+    // 5. Draw Custom Drawing & Text Layer on top
     if (drawDataUrl) {
       try {
         const drawImg = await this.loadImage(drawDataUrl);
@@ -123,9 +169,10 @@ export class CompositionEngine {
     const masterDataUrl = canvas.toDataURL('image/png');
     const shareDataUrl = canvas.toDataURL('image/jpeg', 0.85);
 
-    // Render Print Data URL (Handles 2x6 double-strip cut mode on 4x6 paper)
+    // Render Print Data URL (Handles 2x6 / 5x15 double-strip cut mode on 4x6 / 10x15 paper)
     let printDataUrl = masterDataUrl;
-    if (frame.renderMode === 'double-strip' || frame.preferredPaper === '2x6-double') {
+    const isStrip = isStripTemplate(frame);
+    if (frame.renderMode === 'double-strip' || frame.preferredPaper === '2x6-double' || isStrip) {
       printDataUrl = await this.renderDoubleStrip(canvas, 1800, 2700);
     }
 
@@ -153,31 +200,32 @@ export class CompositionEngine {
     ctx.fillText(`SLOT ${slotNumber}`, x + w / 2, y + h / 2);
   }
 
-  private drawImageCover(
+  private drawImageFit(
     ctx: CanvasRenderingContext2D,
     img: HTMLImageElement,
-    x: number,
-    y: number,
-    w: number,
-    h: number
+    viewportX: number,
+    viewportY: number,
+    viewportW: number,
+    viewportH: number
   ) {
-    const imgRatio = img.width / img.height;
-    const slotRatio = w / h;
-
-    let renderW = w;
-    let renderH = h;
-    let offsetX = 0;
-    let offsetY = 0;
-
-    if (imgRatio > slotRatio) {
-      renderW = h * imgRatio;
-      offsetX = (w - renderW) / 2;
-    } else {
-      renderH = w / imgRatio;
-      offsetY = (h - renderH) / 2;
+    if (!img.width || !img.height || !viewportW || !viewportH) {
+      ctx.drawImage(img, viewportX, viewportY, viewportW, viewportH);
+      return;
     }
 
-    ctx.drawImage(img, x + offsetX, y + offsetY, renderW, renderH);
+    // Cover scale: scale photo to cover full slot height and width, centered
+    const scale = Math.max(viewportW / img.width, viewportH / img.height);
+    const renderWidth = img.width * scale;
+    const renderHeight = img.height * scale;
+    const x = viewportX + (viewportW - renderWidth) / 2;
+    const y = viewportY + (viewportH - renderHeight) / 2;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(viewportX, viewportY, viewportW, viewportH);
+    ctx.clip();
+    ctx.drawImage(img, x, y, renderWidth, renderHeight);
+    ctx.restore();
   }
 
   private clipRoundedRect(
@@ -204,31 +252,34 @@ export class CompositionEngine {
     paperHeight: number
   ): Promise<string> {
     const printCanvas = document.createElement('canvas');
-    printCanvas.width = paperWidth; // e.g. 1800 (4 inches at 300DPI)
-    printCanvas.height = paperHeight; // e.g. 2700 (6 inches at 300DPI)
+    printCanvas.width = paperWidth; // 1800 px (4 inches at 300DPI)
+    printCanvas.height = paperHeight; // 2700 px (6 inches at 300DPI)
     const pctx = printCanvas.getContext('2d')!;
+    pctx.imageSmoothingEnabled = true;
+    pctx.imageSmoothingQuality = 'high';
 
     // Background white paper
     pctx.fillStyle = '#ffffff';
     pctx.fillRect(0, 0, paperWidth, paperHeight);
 
-    // Draw Left Strip
-    const stripWidth = paperWidth / 2 - 10;
-    pctx.drawImage(stripCanvas, 0, 0, stripWidth, paperHeight);
+    const halfW = paperWidth / 2; // 900 px
 
-    // Draw Right Duplicate Strip
-    pctx.drawImage(stripCanvas, paperWidth / 2 + 10, 0, stripWidth, paperHeight);
+    // Draw Left 5x15 Strip (0 to 900)
+    pctx.drawImage(stripCanvas, 0, 0, halfW, paperHeight);
 
-    // Draw dashed cut line in center
-    pctx.setLineDash([15, 15]);
+    // Draw Right 5x15 Strip Duplicate (900 to 1800)
+    pctx.drawImage(stripCanvas, halfW, 0, halfW, paperHeight);
+
+    // Draw thin dashed cut line down exact center axis
+    pctx.setLineDash([12, 12]);
     pctx.lineWidth = 2;
-    pctx.strokeStyle = '#cbd5e1';
+    pctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
     pctx.beginPath();
-    pctx.moveTo(paperWidth / 2, 0);
-    pctx.lineTo(paperWidth / 2, paperHeight);
+    pctx.moveTo(halfW, 0);
+    pctx.lineTo(halfW, paperHeight);
     pctx.stroke();
 
-    return printCanvas.toDataURL('image/jpeg', 0.95);
+    return printCanvas.toDataURL('image/jpeg', 0.98);
   }
 
   private loadImage(src: string): Promise<HTMLImageElement> {

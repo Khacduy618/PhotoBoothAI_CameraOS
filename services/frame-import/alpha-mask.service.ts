@@ -3,7 +3,7 @@ export function isCanvaWhiteSlotPixel(
     g: number,
     b: number,
     a: number,
-    alphaThreshold = 16,
+    alphaThreshold = 220,
 ): boolean {
     if (a <= alphaThreshold) {
         return true;
@@ -11,15 +11,16 @@ export function isCanvaWhiteSlotPixel(
 
     const maxRGB = Math.max(r, g, b);
     const minRGB = Math.min(r, g, b);
+    const avgRGB = (r + g + b) / 3;
     const saturation = maxRGB - minRGB;
 
-    // Canva often exports empty photo slots as opaque white/off-white rectangles.
-    // Keep this intentionally strict: only near-neutral bright pixels are treated
-    // as removable slot fill so colored/patterned frame backgrounds are preserved.
-    const isWhiteCanvasSlot = minRGB >= 244 && saturation <= 10;
-    const isOffWhiteCanvasSlot = minRGB >= 235 && saturation <= 8;
+    // Canva placeholder slots can be pure white, off-white, or light tint fills.
+    // Keep saturation <= 20 so colored frame decorations (like pink #F5D2E6 saturation=35) are preserved.
+    const isWhiteCanvasSlot = minRGB >= 230 && saturation <= 15;
+    const isOffWhiteCanvasSlot = minRGB >= 210 && saturation <= 18;
+    const isLightTintPlaceholder = minRGB >= 195 && saturation <= 20;
 
-    return isWhiteCanvasSlot || isOffWhiteCanvasSlot;
+    return isWhiteCanvasSlot || isOffWhiteCanvasSlot || isLightTintPlaceholder;
 }
 
 export function isCanvaPlaceholderPixel(

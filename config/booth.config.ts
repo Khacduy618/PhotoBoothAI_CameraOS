@@ -26,8 +26,8 @@ export const boothConfig = {
     },
 
     camera: {
-        idealWidth: 1280,
-        idealHeight: 720,
+        idealWidth: 1920,
+        idealHeight: 1080,
         idealFrameRate: 30,
     },
 

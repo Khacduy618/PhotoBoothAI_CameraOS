@@ -97,6 +97,9 @@ export interface FrameDefinitionSlot {
     points?: readonly FramePoint[];
 }
 
+export type FrameTargetProduct = "STRIP_2" | "STRIP_4" | "SHEET_4" | "SHEET_6" | "PREMIUM_POSTCARD";
+export type FrameOutputPaper = "5x15" | "10x15";
+
 export interface FrameDefinition {
     id: string;
     name: string;
@@ -106,6 +109,9 @@ export interface FrameDefinition {
     assetUrl?: string;
     thumbnailUrl?: string;
     shotCount: ImportedFrameShotCount;
+    targetProduct?: FrameTargetProduct;
+    outputPaper?: FrameOutputPaper;
+    orientation?: "portrait" | "landscape";
     photoViewportOrientation?: "portrait" | "landscape";
     photoAspectRatio?: PhotoAspectRatio;
     photoFit?: "contain" | "cover";

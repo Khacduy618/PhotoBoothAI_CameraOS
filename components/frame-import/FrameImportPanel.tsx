@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { analyzeImportFrame } from "@/services/frame-import/frame-import-analyzer.service";
-import type { FrameImportResult, FrameDefinition } from "@/services/frame-import/frame-import.types";
+import type { FrameImportResult, FrameDefinition, ImportedFrameShotCount } from "@/services/frame-import/frame-import.types";
 import { LocalFrameRegistry } from "@/services/frame/local-frame-registry";
 import { punchOutFrameSlots } from "@/services/frame-import/transparent-punchout.service";
 import { FrameImportResultCard } from "./FrameImportResultCard";
@@ -23,8 +23,71 @@ interface AdminEventRecord {
 
 type AdminFrameDefinition = FrameDefinition & { eventId?: string };
 
-function buildAdminHeaders(includeJson = false): HeadersInit {
-    return includeJson ? { "Content-Type": "application/json" } : {};
+interface WindowMiniResult<T> {
+    ok: boolean;
+    value?: T;
+    error?: unknown;
+}
+
+interface WindowMiniAdminBridge {
+    events?: {
+        list(): Promise<WindowMiniResult<AdminEventRecord[]>>;
+        create(name: string): Promise<WindowMiniResult<AdminEventRecord>>;
+    };
+    templates?: {
+        list(eventId?: string): Promise<WindowMiniResult<unknown[]>>;
+        publish(templateId: string, eventId?: string): Promise<WindowMiniResult<void>>;
+        archive(templateId: string, eventId?: string): Promise<WindowMiniResult<void>>;
+        save?(eventId: string, frame: AdminFrameDefinition): Promise<WindowMiniResult<void>>;
+        remove?(eventId: string, templateId: string): Promise<WindowMiniResult<void>>;
+        clear?(eventId: string): Promise<WindowMiniResult<void>>;
+    };
+}
+
+function getAdminBridge(): WindowMiniAdminBridge | null {
+    if (typeof window === "undefined") return null;
+    return (window.momentai?.admin as WindowMiniAdminBridge | undefined) ?? null;
+}
+
+function isElectronAdminRequired() {
+    if (typeof window === "undefined") return false;
+    const { hostname, port, protocol } = window.location;
+    const isLoopback = hostname === "localhost" || hostname === "127.0.0.1";
+    return !(protocol === "http:" && isLoopback && (port === "3000" || port === "5173" || port === "5174"));
+}
+
+function mapBridgeError(error: unknown, fallback: string) {
+    if (error && typeof error === "object" && "technicalMessage" in error) {
+        return String((error as { technicalMessage?: unknown }).technicalMessage || fallback);
+    }
+    if (typeof error === "string") return error;
+    return fallback;
+}
+
+function mapTemplateSummaryToFrameDefinition(summary: unknown): AdminFrameDefinition {
+    const value = summary as Partial<AdminFrameDefinition> & { templateId?: string; captureFormatId?: string };
+    const parsedShotCount = Number(value.shotCount ?? String(value.captureFormatId ?? "format_4shot").match(/format_(\d+)shot/)?.[1] ?? 4);
+    const shotCount: ImportedFrameShotCount = parsedShotCount === 1 || parsedShotCount === 2 || parsedShotCount === 6 || parsedShotCount === 8 ? parsedShotCount : 4;
+    const now = new Date().toISOString();
+    return {
+        id: String(value.id ?? value.templateId ?? `template_${shotCount}shot`),
+        name: String(value.name ?? `${shotCount} Shot Template`),
+        description: value.description ?? "Electron admin template summary",
+        kind: "png-overlay",
+        source: value.source ?? "canva",
+        assetUrl: value.assetUrl ?? "",
+        shotCount,
+        photoViewportOrientation: value.photoViewportOrientation ?? "portrait",
+        photoAspectRatio: value.photoAspectRatio ?? "2:3",
+        photoFit: value.photoFit ?? "contain",
+        outputWidth: value.outputWidth ?? 1800,
+        outputHeight: value.outputHeight ?? 2700,
+        slots: value.slots ?? Array.from({ length: shotCount }, (_, index) => ({ id: `slot_${index + 1}`, index: index + 1, x: 0.1, y: 0.1 + index * (0.75 / shotCount), width: 0.8, height: Math.max(0.1, 0.7 / shotCount), photoViewportOrientation: "portrait" as const, shape: "rect" as const })),
+        status: value.status === "private" ? "private" : "published",
+        eventId: value.eventId,
+        createdAt: value.createdAt ?? now,
+        updatedAt: value.updatedAt ?? now,
+    };
 }
 
 export function FrameImportPanel() {
@@ -39,24 +102,57 @@ export function FrameImportPanel() {
     const [registryFilter, setRegistryFilter] = useState<"all" | "published" | "private">("all");
 
     const refreshAdminRegistry = async (eventId = selectedEventId) => {
-        const frameQuery = `/api/admin/frames?eventId=${encodeURIComponent(eventId)}`;
-        const [eventsResponse, framesResponse] = await Promise.all([
-            fetch("/api/admin/events"),
-            fetch(frameQuery),
+        const bridge = getAdminBridge();
+        const [eventsResult, templatesResult] = await Promise.all([
+            bridge?.events?.list(),
+            bridge?.templates?.list(eventId),
         ]);
-        const eventsPayload = await eventsResponse.json() as { events?: AdminEventRecord[] };
-        const framesPayload = await framesResponse.json() as { frames?: AdminFrameDefinition[] };
-        const nextEvents = eventsPayload.events ?? [];
-        setEvents(nextEvents);
-        setAllDefinitions(framesPayload.frames ?? []);
-        if (!nextEvents.some((event) => event.eventId === eventId) && nextEvents[0]) {
-            setSelectedEventId(nextEvents[0].eventId);
+        if (eventsResult?.ok && templatesResult?.ok) {
+            const nextEvents = eventsResult.value ?? [];
+            setEvents(nextEvents);
+            setAllDefinitions((templatesResult.value ?? []).map(mapTemplateSummaryToFrameDefinition));
+            if (!nextEvents.some((event) => event.eventId === eventId) && nextEvents[0]) {
+                setSelectedEventId(nextEvents[0].eventId);
+            }
+            return;
         }
+
+        if (isElectronAdminRequired()) {
+            throw new Error(mapBridgeError(eventsResult?.error ?? templatesResult?.error, "Electron admin preload is unavailable."));
+        }
+
+        try {
+            const [eventsRes, framesRes] = await Promise.all([
+                fetch("/api/admin/events"),
+                fetch(`/api/admin/frames?eventId=${encodeURIComponent(eventId)}`),
+            ]);
+            const eventsPayload = await eventsRes.json() as { ok?: boolean; events?: AdminEventRecord[] };
+            const framesPayload = await framesRes.json() as { ok?: boolean; frames?: AdminFrameDefinition[] };
+            if (eventsPayload.ok && Array.isArray(eventsPayload.events) && eventsPayload.events.length > 0) {
+                setEvents(eventsPayload.events);
+                const targetEventId = eventsPayload.events.some((e) => e.eventId === eventId) ? eventId : eventsPayload.events[0].eventId;
+                if (targetEventId !== selectedEventId) {
+                    setSelectedEventId(targetEventId);
+                }
+            } else {
+                setEvents([{ eventId: "event_hoi_an_heritage", name: "Phố Cổ Hội An", status: "active" }]);
+            }
+
+            if (framesPayload.ok && Array.isArray(framesPayload.frames)) {
+                setAllDefinitions(framesPayload.frames);
+                return;
+            }
+        } catch {
+            // Fallback to LocalFrameRegistry if server API fails
+        }
+
+        const fallbackEvent = { eventId, name: "Local Dev Event", status: "active" as const };
+        setEvents([fallbackEvent]);
+        setAllDefinitions(LocalFrameRegistry.getAllDefinitions().map((definition) => ({ ...definition, eventId })));
     };
 
     useEffect(() => {
         void refreshAdminRegistry();
-        void LocalFrameRegistry.migrateLocalStorageFramesToAdminDb("event_hoi_an_heritage").then(() => refreshAdminRegistry());
     }, []);
 
     useEffect(() => {
@@ -142,45 +238,85 @@ export function FrameImportPanel() {
     };
 
     const handleCreateEvent = async () => {
-        const headers = buildAdminHeaders(true);
-        const response = await fetch("/api/admin/events", {
-            method: "POST",
-            headers,
-            body: JSON.stringify({ name: newEventName }),
-        });
-        const payload = await response.json() as { ok?: boolean; event?: AdminEventRecord; error?: string };
-        if (!payload.ok || !payload.event) {
-            window.alert(payload.error || "Không tạo được event.");
+        const trimmed = newEventName.trim();
+        if (!trimmed) return;
+        const bridge = getAdminBridge();
+        const result = await bridge?.events?.create(trimmed);
+        if (result?.ok && result.value) {
+            setNewEventName("");
+            setSelectedEventId(result.value.eventId);
+            await refreshAdminRegistry(result.value.eventId);
             return;
         }
+        if (isElectronAdminRequired()) {
+            window.alert(mapBridgeError(result?.error, "Không tạo được event qua Electron admin preload."));
+            return;
+        }
+
+        try {
+            const res = await fetch("/api/admin/events", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: trimmed }),
+            });
+            const payload = await res.json() as { ok?: boolean; event?: AdminEventRecord; error?: string };
+            if (payload.ok && payload.event) {
+                setNewEventName("");
+                setSelectedEventId(payload.event.eventId);
+                await refreshAdminRegistry(payload.event.eventId);
+                return;
+            }
+            if (payload.error) {
+                window.alert(`Không tạo được sự kiện: ${payload.error}`);
+                return;
+            }
+        } catch {
+            // Fallback to local state if fetch fails
+        }
+
+        const localEvent = { eventId: `event_${trimmed.toLowerCase().replace(/[^a-z0-9]+/g, "_") || "local"}`, name: trimmed || "Local Event", status: "active" as const };
+        setEvents((prev) => [...prev, localEvent]);
         setNewEventName("");
-        setSelectedEventId(payload.event.eventId);
-        await refreshAdminRegistry(payload.event.eventId);
+        setSelectedEventId(localEvent.eventId);
     };
 
-    const saveFrameToSelectedEvent = async (definition: FrameDefinition) => {
+    const saveFrameToSelectedEvent = async (definition: FrameDefinition, targetEventId?: string) => {
+        const eventIdToUse = targetEventId || selectedEventId;
+        const cleanId = String(definition.id || "").replace(/[^a-zA-Z0-9_-]/g, "_").replace(/^_+|_+$/g, "") || "frame_id";
+        const cleanEventId = String(eventIdToUse || "").replace(/[^a-zA-Z0-9_-]/g, "_").replace(/^_+|_+$/g, "") || "event";
         const definitionWithEvent = {
             ...definition,
-            eventId: selectedEventId,
+            id: cleanId,
+            eventId: cleanEventId,
             status: "published" as const,
         };
-        const headers = buildAdminHeaders(true);
-        const response = await fetch("/api/admin/frames", {
-            method: "POST",
-            headers,
-            body: JSON.stringify({ eventId: selectedEventId, frame: definitionWithEvent }),
-        });
-        const payload = await response.json() as { ok?: boolean; error?: string };
-        if (!payload.ok) {
-            throw new Error(payload.error || "Không lưu được khung vào database.");
+        const bridge = getAdminBridge();
+        const result = await bridge?.templates?.save?.(cleanEventId, definitionWithEvent);
+        if (result?.ok) {
+            LocalFrameRegistry.notifyExternalChange();
+            await refreshAdminRegistry(cleanEventId);
+            return;
         }
+        if (isElectronAdminRequired()) {
+            throw new Error(mapBridgeError(result?.error, "Không lưu được khung qua Electron admin preload."));
+        }
+        try {
+            await fetch("/api/admin/frames", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ eventId: cleanEventId, frame: definitionWithEvent }),
+            });
+        } catch {
+            // Ignore web fetch failures in local storage fallback mode
+        }
+        LocalFrameRegistry.registerFrame(definitionWithEvent);
         LocalFrameRegistry.notifyExternalChange();
-        await refreshAdminRegistry(selectedEventId);
+        await refreshAdminRegistry(cleanEventId);
     };
 
-    const handlePublish = async (definition: FrameDefinition, fileName: string) => {
+    const handlePublish = async (definition: FrameDefinition, fileName: string, targetEventId?: string) => {
         try {
-            await saveFrameToSelectedEvent(definition);
+            await saveFrameToSelectedEvent(definition, targetEventId);
             setFileStates((prev) =>
                 prev.map((s) => (s.file.name === fileName ? { ...s, isPublished: true } : s)),
             );
@@ -191,49 +327,56 @@ export function FrameImportPanel() {
 
     const handleToggleFrameStatus = async (frame: AdminFrameDefinition) => {
         const nextStatus = frame.status === "private" ? "published" : "private";
-        const headers = buildAdminHeaders(true);
-        const response = await fetch("/api/admin/frames", {
-            method: "PATCH",
-            headers,
-            body: JSON.stringify({ eventId: selectedEventId, frameId: frame.id, status: nextStatus }),
-        });
-        const payload = await response.json() as { ok?: boolean; error?: string };
-        if (!payload.ok) {
-            window.alert(payload.error || "Không đổi được trạng thái khung.");
+        const bridge = getAdminBridge();
+        const result = nextStatus === "published"
+            ? await bridge?.templates?.publish(frame.id, selectedEventId)
+            : await bridge?.templates?.archive(frame.id, selectedEventId);
+        if (result?.ok) {
+            LocalFrameRegistry.notifyExternalChange();
+            await refreshAdminRegistry(selectedEventId);
             return;
         }
+        if (isElectronAdminRequired()) {
+            window.alert(mapBridgeError(result?.error, "Không đổi được trạng thái khung qua Electron admin preload."));
+            return;
+        }
+        LocalFrameRegistry.toggleFrameStatus(frame.id);
         LocalFrameRegistry.notifyExternalChange();
         await refreshAdminRegistry(selectedEventId);
     };
 
     const handleDeleteFrame = async (frame: AdminFrameDefinition) => {
         if (!window.confirm(`Bạn có muốn xoá khung "${frame.name}" khỏi SQLite Registry?`)) return;
-        const headers = buildAdminHeaders();
-        const response = await fetch(`/api/admin/frames?eventId=${encodeURIComponent(selectedEventId)}&frameId=${encodeURIComponent(frame.id)}`, {
-            method: "DELETE",
-            headers,
-        });
-        const payload = await response.json() as { ok?: boolean; error?: string };
-        if (!payload.ok) {
-            window.alert(payload.error || "Không xoá được khung.");
-            return;
+        try {
+            const bridge = getAdminBridge();
+            if (bridge?.templates?.remove) {
+                await bridge.templates.remove(selectedEventId, frame.id).catch(() => undefined);
+            }
+            await fetch(`/api/admin/frames?eventId=${encodeURIComponent(selectedEventId)}&frameId=${encodeURIComponent(frame.id)}`, {
+                method: "DELETE",
+            });
+        } catch (err) {
+            console.warn("Error deleting frame:", err);
         }
+        LocalFrameRegistry.removeFrame(frame.id);
         LocalFrameRegistry.notifyExternalChange();
         await refreshAdminRegistry(selectedEventId);
     };
 
     const handleClearSelectedEventFrames = async () => {
         if (!window.confirm("Bạn có chắc chắn muốn xoá TOÀN BỘ khung trong event đang chọn khỏi SQLite Registry?")) return;
-        const headers = buildAdminHeaders();
-        const response = await fetch(`/api/admin/frames?eventId=${encodeURIComponent(selectedEventId)}`, {
-            method: "DELETE",
-            headers,
-        });
-        const payload = await response.json() as { ok?: boolean; error?: string };
-        if (!payload.ok) {
-            window.alert(payload.error || "Không xoá được danh sách khung.");
-            return;
+        try {
+            const bridge = getAdminBridge();
+            if (bridge?.templates?.clear) {
+                await bridge.templates.clear(selectedEventId).catch(() => undefined);
+            }
+            await fetch(`/api/admin/frames?eventId=${encodeURIComponent(selectedEventId)}`, {
+                method: "DELETE",
+            });
+        } catch (err) {
+            console.warn("Error clearing frames:", err);
         }
+        LocalFrameRegistry.clear();
         LocalFrameRegistry.notifyExternalChange();
         await refreshAdminRegistry(selectedEventId);
     };
@@ -249,67 +392,76 @@ export function FrameImportPanel() {
                 (item.result.status === "auto-approved" || item.result.status === "needs-review") &&
                 !item.isPublished
             ) {
-                const defaultName = item.file.name
-                    .replace(/\.[^/.]+$/, "")
-                    .replace(/[-_]/g, " ")
-                    .replace(/\b\w/g, (c) => c.toUpperCase());
+                try {
+                    const defaultName = item.file.name
+                        .replace(/\.[^/.]+$/, "")
+                        .replace(/[-_]/g, " ")
+                        .replace(/\b\w/g, (c) => c.toUpperCase());
 
-                const photoViewportOrientation: "portrait" | "landscape" =
-                    item.result.image.width > item.result.image.height ? "landscape" : "portrait";
-                const photoAspectRatio = photoViewportOrientation === "landscape" ? "3:2" : "2:3";
+                    const photoViewportOrientation: "portrait" | "landscape" =
+                        item.result.image.width > item.result.image.height ? "landscape" : "portrait";
+                    const photoAspectRatio = photoViewportOrientation === "landscape" ? "3:2" : "2:3";
 
-                const supportedShotCounts = [1, 2, 4, 6, 8] as const;
-                const detectedShotCount = supportedShotCounts.find((count) => count === item.result!.slots.length);
-                if (!detectedShotCount) {
-                    continue;
+                    const supportedShotCounts = [1, 2, 4, 6, 8] as const;
+                    const detectedShotCount = (supportedShotCounts.find((count) => count === item.result!.slots.length) || item.result!.slots.length || 1) as 1 | 2 | 4 | 6 | 8;
+
+                    const definitionSlots = item.result.slots.map((s) => ({
+                        id: s.id,
+                        index: s.order,
+                        x: s.normalizedBounds.x,
+                        y: s.normalizedBounds.y,
+                        width: s.normalizedBounds.width,
+                        height: s.normalizedBounds.height,
+                        photoViewportOrientation,
+                        shape: s.shape ?? "rect",
+                        points: s.points,
+                    }));
+
+                    const transparentAssetUrl = item.objectUrl ? await punchOutFrameSlots(item.objectUrl, definitionSlots) : item.objectUrl;
+
+                    const definition: FrameDefinition = {
+                        id: `imported-${item.result.importId}`,
+                        name: defaultName,
+                        description: "Canva imported frame overlay",
+                        kind: "png-overlay",
+                        source: "canva",
+                        assetUrl: transparentAssetUrl,
+                        shotCount: detectedShotCount,
+                        photoViewportOrientation,
+                        photoAspectRatio,
+                        photoFit: "contain",
+                        outputWidth: item.result.image.width,
+                        outputHeight: item.result.image.height,
+                        slots: definitionSlots,
+                        status: "published",
+                    };
+
+                    await saveFrameToSelectedEvent(definition);
+                    setFileStates((prev) =>
+                        prev.map((s) => (s.file.name === item.file.name ? { ...s, isPublished: true } : s)),
+                    );
+                } catch (err) {
+                    console.warn(`Lỗi khi publish khung ${item.file.name}:`, err);
                 }
-
-                const definitionSlots = item.result.slots.map((s) => ({
-                    id: s.id,
-                    index: s.order,
-                    x: s.normalizedBounds.x,
-                    y: s.normalizedBounds.y,
-                    width: s.normalizedBounds.width,
-                    height: s.normalizedBounds.height,
-                    photoViewportOrientation,
-                    shape: s.shape ?? "rect",
-                    points: s.points,
-                }));
-
-                const transparentAssetUrl = await punchOutFrameSlots(item.objectUrl, definitionSlots);
-
-                const definition: FrameDefinition = {
-                    id: `imported-${item.result.importId}`,
-                    name: defaultName,
-                    description: "Canva imported frame overlay",
-                    kind: "png-overlay",
-                    source: "canva",
-                    assetUrl: transparentAssetUrl,
-                    shotCount: detectedShotCount,
-                    photoViewportOrientation,
-                    photoAspectRatio,
-                    photoFit: "contain",
-                    outputWidth: item.result.image.width,
-                    outputHeight: item.result.image.height,
-                    slots: definitionSlots,
-                    status: "published",
-                };
-
-                await saveFrameToSelectedEvent(definition);
             }
         }
-
-        setFileStates((prev) =>
-            prev.map((s) =>
-                s.result && s.result.status !== "rejected" ? { ...s, isPublished: true } : s,
-            ),
-        );
     };
 
     const handleClearList = () => {
         fileStates.forEach((s) => URL.revokeObjectURL(s.objectUrl));
         setFileStates([]);
     };
+
+    const filteredStates = fileStates.filter((s) => {
+        if (filterStatus === "all") return true;
+        return s.result?.status === filterStatus;
+    });
+
+    const filteredDefinitions = allDefinitions.filter((d) => {
+        if (registryFilter === "all") return true;
+        if (registryFilter === "published") return d.status !== "private";
+        return d.status === "private";
+    });
 
     const counts = {
         total: fileStates.length,
@@ -318,382 +470,150 @@ export function FrameImportPanel() {
         rejected: fileStates.filter((s) => s.result?.status === "rejected").length,
     };
 
-    const filteredStates = fileStates.filter((s) => {
-        if (!s.result) return true;
-        if (filterStatus === "all") return true;
-        return s.result.status === filterStatus;
-    });
-
-    const filteredDefinitions = allDefinitions.filter((d) => {
-        if (registryFilter === "published") return d.status !== "private";
-        if (registryFilter === "private") return d.status === "private";
-        return true;
-    });
-
     return (
-        <div className="space-y-6 max-w-5xl mx-auto p-4 sm:p-6">
-            <header className="border-b border-pink-100 pb-5 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="space-y-6">
+            <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-xs">
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                     <div>
-                        <h1 className="text-2xl font-black text-pink-950 uppercase tracking-wide">
-                            Canva Frame Import & Registry Tool
-                        </h1>
-                        <p className="text-xs text-neutral-600 mt-0.5">
-                            Phân tích tự động khung Canva PNG và quản lý danh sách Khung Đã Đăng Ký (Local Registry).
+                        <p className="text-xs font-black uppercase tracking-[0.24em] text-pink-600">Frame Import Console</p>
+                        <h2 className="mt-2 text-3xl font-black tracking-tight text-neutral-950">Canva frame registry</h2>
+                        <p className="mt-2 max-w-3xl text-sm font-medium leading-6 text-neutral-600">
+                            Import PNG overlay frames, detect transparent photo slots, and publish them through the Electron admin preload boundary.
                         </p>
                     </div>
-
-                    {/* Navigation Tabs */}
-                    <div className="flex items-center gap-1.5 bg-neutral-200/70 p-1 rounded-xl">
-                        <button
-                            type="button"
-                            onClick={() => setActiveTab("import")}
-                            className={`rounded-lg px-3.5 py-1.5 text-xs font-black transition-all cursor-pointer ${
-                                activeTab === "import"
-                                    ? "bg-white text-pink-950 shadow-sm"
-                                    : "text-neutral-600 hover:text-neutral-900"
-                            }`}
-                        >
-                            📥 Nhập Canva PNG
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setActiveTab("registry")}
-                            className={`rounded-lg px-3.5 py-1.5 text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
-                                activeTab === "registry"
-                                    ? "bg-white text-pink-950 shadow-sm"
-                                    : "text-neutral-600 hover:text-neutral-900"
-                            }`}
-                        >
-                            <span>🖼️ Đã Đăng Ký</span>
-                            <span className="rounded-full bg-pink-500 text-white px-2 py-0.2 text-[10px] font-bold">
-                                {allDefinitions.length}
-                            </span>
-                        </button>
+                    <div className="rounded-2xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-bold text-neutral-700">
+                        Event: <span className="text-neutral-950">{selectedEvent?.name ?? selectedEventId}</span>
                     </div>
                 </div>
-            </header>
+            </div>
 
-            <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm space-y-3">
-                <div className="flex flex-wrap items-end justify-between gap-3">
-                    <div>
-                        <h2 className="text-sm font-black uppercase tracking-wider text-amber-950">Event folders</h2>
-                        <p className="text-[11px] font-medium text-amber-900/75">
-                            Tạo event thủ công, chọn folder event trước khi publish khung. Khung sẽ được lưu SQLite theo event đã chọn.
-                        </p>
+            <div className="rounded-3xl border border-neutral-200 bg-white p-4 shadow-xs">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex gap-2">
+                        <button type="button" onClick={() => setActiveTab("import")} className={`rounded-2xl px-4 py-2 text-sm font-black ${activeTab === "import" ? "bg-neutral-950 text-white" : "bg-neutral-100 text-neutral-700"}`}>Import</button>
+                        <button type="button" onClick={() => setActiveTab("registry")} className={`rounded-2xl px-4 py-2 text-sm font-black ${activeTab === "registry" ? "bg-neutral-950 text-white" : "bg-neutral-100 text-neutral-700"}`}>Registry ({allDefinitions.length})</button>
                     </div>
-                    <div className="flex min-w-[280px] flex-1 items-center gap-2 sm:max-w-md">
-                        <input
-                            type="text"
-                            value={newEventName}
-                            onChange={(event) => setNewEventName(event.target.value)}
-                            placeholder="Tên event mới..."
-                            className="min-w-0 flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-950 focus:border-amber-600 focus:outline-none"
-                        />
-                        <button
-                            type="button"
-                            onClick={() => void handleCreateEvent()}
-                            className="rounded-lg bg-amber-700 px-3.5 py-2 text-xs font-black text-white shadow-sm hover:bg-amber-800 active:scale-95 cursor-pointer"
-                        >
-                            + Tạo event
-                        </button>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <select value={selectedEventId} onChange={(event) => setSelectedEventId(event.target.value)} className="rounded-2xl border border-neutral-300 bg-white px-3 py-2 text-sm font-bold text-neutral-800">
+                            {events.map((event) => <option key={event.eventId} value={event.eventId}>{event.name}</option>)}
+                        </select>
+                        <input value={newEventName} onChange={(event) => setNewEventName(event.target.value)} placeholder="New event name" className="rounded-2xl border border-neutral-300 bg-white px-3 py-2 text-sm font-bold text-neutral-800" />
+                        <button type="button" onClick={() => void handleCreateEvent()} className="rounded-2xl bg-pink-600 px-4 py-2 text-sm font-black text-white disabled:opacity-50" disabled={newEventName.trim().length < 2}>Create event</button>
                     </div>
                 </div>
-                <div className="flex flex-wrap gap-2" aria-label="Danh sách event folders">
-                    {events.map((event) => {
-                        const active = event.eventId === selectedEventId;
-                        return (
-                            <button
-                                key={event.eventId}
-                                type="button"
-                                onClick={() => setSelectedEventId(event.eventId)}
-                                className={`rounded-xl border px-3 py-2 text-left text-xs font-black transition-all cursor-pointer ${
-                                    active
-                                        ? "border-amber-800 bg-white text-amber-950 shadow-sm"
-                                        : "border-amber-200 bg-amber-100/70 text-amber-900 hover:border-amber-500"
-                                }`}
-                            >
-                                <span className="block">📁 {event.name}</span>
-                                <span className="block pt-0.5 font-mono text-[10px] opacity-65">{event.eventId}</span>
-                            </button>
-                        );
-                    })}
-                </div>
-                <p className="text-[11px] font-bold text-amber-950">
-                    Đang chọn: {selectedEvent?.name ?? selectedEventId} • {allDefinitions.length} frame trong event này
-                </p>
-            </section>
+            </div>
 
-            {/* TAB 1: IMPORT CANVA PNG */}
-            {activeTab === "import" && (
-                <div className="space-y-6 animate-fade-in">
-                    <div className="rounded-2xl border-2 border-dashed border-pink-300 bg-pink-50/50 p-8 text-center transition-all hover:bg-pink-50 hover:border-pink-400">
-                        <input
-                            type="file"
-                            accept="image/png"
-                            multiple
-                            onChange={handleFileChange}
-                            className="hidden"
-                            id="frame-import-file-input"
-                        />
-                        <label
-                            htmlFor="frame-import-file-input"
-                            className="cursor-pointer space-y-3 block"
-                        >
-                            <div className="mx-auto w-12 h-12 rounded-full bg-pink-100 flex items-center justify-center text-pink-600 text-xl font-bold">
-                                ↑
-                            </div>
-                            <div className="space-y-1">
-                                <span className="text-sm font-extrabold text-pink-950 block">
-                                    Chọn hoặc kéo thả file Canva PNG (Tối đa 25 file)
-                                </span>
-                                <span className="text-xs text-neutral-500 block">
-                                    Hệ thống sẽ tự động quét kênh Alpha để phát hiện số ô ảnh, tọa độ và thứ tự ô.
-                                </span>
-                            </div>
-                        </label>
+            {activeTab === "import" ? (
+                <div className="space-y-5">
+                    <div className="rounded-3xl border-2 border-dashed border-neutral-300 bg-white p-8 text-center shadow-xs">
+                        <input type="file" multiple accept="image/png" onChange={handleFileChange} className="mx-auto block max-w-sm rounded-2xl border border-neutral-200 bg-neutral-50 p-3 text-sm font-bold" />
+                        <p className="mt-4 text-sm font-semibold text-neutral-600">PNG only · max 25 files per batch · analysis happens in renderer memory</p>
                     </div>
 
-                    {fileStates.length > 0 && (
-                        <div className="space-y-4">
-                            <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-xl border border-neutral-200 shadow-sm">
-                                <div className="flex items-center gap-2">
-                                    {(["all", "auto-approved", "needs-review", "rejected"] as const).map((status) => (
-                                        <button
-                                            key={status}
-                                            type="button"
-                                            onClick={() => setFilterStatus(status)}
-                                            className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all cursor-pointer ${
-                                                filterStatus === status
-                                                    ? "bg-pink-600 text-white shadow-sm"
-                                                    : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
-                                            }`}
-                                        >
-                                            {status === "all" && `Tất cả (${counts.total})`}
-                                            {status === "auto-approved" && `Auto-approved (${counts.autoApproved})`}
-                                            {status === "needs-review" && `Needs review (${counts.needsReview})`}
-                                            {status === "rejected" && `Rejected (${counts.rejected})`}
-                                        </button>
-                                    ))}
-                                </div>
+                    <div className="grid gap-3 md:grid-cols-4">
+                        <Stat label="Total" value={counts.total} />
+                        <Stat label="Auto approved" value={counts.autoApproved} />
+                        <Stat label="Needs review" value={counts.needsReview} />
+                        <Stat label="Rejected" value={counts.rejected} />
+                    </div>
 
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            void handlePublishAllApproved();
-                                        }}
-                                        className="rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 text-xs font-extrabold shadow-sm active:scale-95 cursor-pointer"
-                                    >
-                                        Publish All Approved
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={handleClearList}
-                                        className="rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50 text-neutral-700 px-3 py-1.5 text-xs font-bold cursor-pointer"
-                                    >
-                                        Clear List
-                                    </button>
-                                </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        {(["all", "auto-approved", "needs-review", "rejected"] as const).map((status) => (
+                            <button key={status} type="button" onClick={() => setFilterStatus(status)} className={`rounded-full px-4 py-2 text-xs font-black uppercase tracking-wide ${filterStatus === status ? "bg-neutral-950 text-white" : "bg-neutral-100 text-neutral-700"}`}>{status}</button>
+                        ))}
+                        <button type="button" onClick={() => void handlePublishAllApproved()} disabled={!fileStates.some((s) => s.result && s.result.status !== "rejected" && !s.isPublished)} className="ml-auto rounded-full bg-emerald-600 px-4 py-2 text-xs font-black uppercase tracking-wide text-white disabled:opacity-40">Publish approved</button>
+                        <button type="button" onClick={handleClearList} className="rounded-full bg-neutral-100 px-4 py-2 text-xs font-black uppercase tracking-wide text-neutral-700">Clear list</button>
+                    </div>
+
+                    {isAnalyzing && <div className="rounded-2xl bg-amber-50 p-4 text-sm font-bold text-amber-900">Analyzing frame transparency and slot geometry…</div>}
+
+                    <div className="flex flex-col gap-6 w-full">
+                        {filteredStates.map((item) => item.result ? (
+                            <FrameImportResultCard
+                                key={item.file.name}
+                                imageUrl={item.objectUrl}
+                                result={item.result}
+                                events={events}
+                                selectedEventId={selectedEventId}
+                                isPublished={item.isPublished}
+                                onPublish={(definition, targetEventId) => void handlePublish(definition, item.file.name, targetEventId)}
+                                onReject={handleReject}
+                            />
+                        ) : (
+                            <div key={item.file.name} className="rounded-3xl border border-neutral-200 bg-white p-5 text-sm font-bold text-neutral-600">
+                                {item.error ? `Không phân tích được ${item.file.name}: ${item.error}` : `Đang chờ phân tích ${item.file.name}...`}
                             </div>
-
-                            {isAnalyzing && (
-                                <div className="flex items-center justify-center p-6 bg-pink-50 rounded-xl border border-pink-200 text-pink-900 font-bold text-xs animate-pulse">
-                                    Đang phân tích kênh Alpha và ô ảnh...
-                                </div>
-                            )}
-
-                            <div className="space-y-4">
-                                {filteredStates.map((item) => {
-                                    if (!item.result) {
-                                        return (
-                                            <div
-                                                key={item.file.name}
-                                                className="rounded-xl border border-neutral-200 bg-white p-4 text-xs font-medium text-neutral-500"
-                                            >
-                                                Đang xử lý {item.file.name}...
-                                            </div>
-                                        );
-                                    }
-
-                                    return (
-                                        <FrameImportResultCard
-                                            key={item.result.importId}
-                                            result={item.result}
-                                            imageUrl={item.objectUrl}
-                                            isPublished={item.isPublished}
-                                            onPublish={(def) => handlePublish(def, item.file.name)}
-                                            onReject={handleReject}
-                                        />
-                                    );
-                                })}
+                        ))}
+                    </div>
+                </div>
+            ) : (
+                <div className="space-y-5">
+                    <div className="rounded-3xl border border-neutral-200 bg-white p-5 shadow-xs">
+                        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                            <div>
+                                <h3 className="text-xl font-black text-neutral-950">Published registry</h3>
+                                <p className="mt-1 text-sm font-semibold text-neutral-600">Published: {publishedCount} · Private: {privateCount}</p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {(["all", "published", "private"] as const).map((status) => (
+                                    <button key={status} type="button" onClick={() => setRegistryFilter(status)} className={`rounded-full px-4 py-2 text-xs font-black uppercase tracking-wide ${registryFilter === status ? "bg-neutral-950 text-white" : "bg-neutral-100 text-neutral-700"}`}>{status}</button>
+                                ))}
+                                <button type="button" onClick={() => void handleClearSelectedEventFrames()} className="rounded-full bg-rose-100 px-4 py-2 text-xs font-black uppercase tracking-wide text-rose-700">Clear event frames</button>
                             </div>
                         </div>
-                    )}
-                </div>
-            )}
-
-            {/* TAB 2: LOCAL REGISTRY MANAGER */}
-            {activeTab === "registry" && (
-                <div className="space-y-5 animate-fade-in">
-                    {/* Header bar for Registry */}
-                    <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-xl border border-neutral-200 shadow-sm">
-                        <div className="flex items-center gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setRegistryFilter("all")}
-                                className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all cursor-pointer ${
-                                    registryFilter === "all"
-                                        ? "bg-pink-600 text-white shadow-sm"
-                                        : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
-                                }`}
-                            >
-                                Tất cả ({allDefinitions.length})
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setRegistryFilter("published")}
-                                className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all cursor-pointer ${
-                                    registryFilter === "published"
-                                        ? "bg-emerald-600 text-white shadow-sm"
-                                        : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
-                                }`}
-                            >
-                                🟢 Published ({publishedCount})
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setRegistryFilter("private")}
-                                className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all cursor-pointer ${
-                                    registryFilter === "private"
-                                        ? "bg-amber-600 text-white shadow-sm"
-                                        : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200"
-                                }`}
-                            >
-                                🔒 Private ({privateCount})
-                            </button>
-                        </div>
-
-                        {allDefinitions.length > 0 && (
-                            <button
-                                type="button"
-                                onClick={() => void handleClearSelectedEventFrames()}
-                                className="rounded-lg border border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-800 px-3.5 py-1.5 text-xs font-bold cursor-pointer"
-                            >
-                                🧹 Xoá Tất Cả Khung
-                            </button>
-                        )}
                     </div>
 
                     {filteredDefinitions.length === 0 ? (
-                        <div className="rounded-2xl border border-neutral-200 bg-white p-12 text-center space-y-3">
-                            <span className="text-3xl block">🖼️</span>
-                            <span className="text-sm font-extrabold text-neutral-800 block">
-                                Chức năng Local Registry chưa có khung nào
-                            </span>
-                            <p className="text-xs text-neutral-500 max-w-md mx-auto">
-                                Chuyển qua tab &quot;Nhập Canva PNG&quot; để tải file khung Canva PNG của bạn lên và xuất bản (Publish) vào Registry!
-                            </p>
-                        </div>
+                        <div className="rounded-3xl border border-neutral-200 bg-white p-8 text-center text-sm font-bold text-neutral-500">No frames in this registry view.</div>
                     ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid gap-4 xl:grid-cols-2">
                             {filteredDefinitions.map((def) => {
                                 const isPrivate = def.status === "private";
-                                const isLandscape = def.outputWidth >= def.outputHeight;
-
                                 return (
-                                    <div
-                                        key={def.id}
-                                        className={`rounded-2xl border p-4 bg-white shadow-sm transition-all space-y-3 ${
-                                            isPrivate ? "border-amber-300/80 bg-amber-50/20" : "border-neutral-200 hover:border-pink-300"
-                                        }`}
-                                    >
-                                        <div className="flex items-start justify-between gap-2 border-b border-neutral-100 pb-2.5">
-                                            <div className="space-y-0.5">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-sm font-black text-neutral-900 truncate max-w-[200px]">
-                                                        {def.name}
-                                                    </span>
-                                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border ${
-                                                        isLandscape ? "bg-amber-100 text-amber-900 border-amber-300" : "bg-purple-100 text-purple-900 border-purple-300"
-                                                    }`}>
-                                                        {isLandscape ? "1800x1200" : "1200x1800"}
-                                                    </span>
-                                                </div>
-                                                <p className="text-[11px] text-neutral-500 truncate max-w-[240px]">
-                                                    {def.description || "Canva imported frame overlay"}
-                                                </p>
+                                    <div key={def.id} className="rounded-3xl border border-neutral-200 bg-white p-4 shadow-xs">
+                                        <div className="mb-3 flex items-start justify-between gap-3">
+                                            <div>
+                                                <h4 className="font-black text-neutral-950">{def.name}</h4>
+                                                <p className="text-xs font-bold text-neutral-500">{def.id}</p>
                                             </div>
-
-                                            {isPrivate ? (
-                                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-black text-amber-900 border border-amber-300 shrink-0">
-                                                    🔒 Private
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="inline-flex items-center gap-1 rounded-full border border-pink-200 bg-pink-50 px-2.5 py-0.5 text-xs font-bold text-pink-950">
+                                                    🏷️ {events.find((e) => e.eventId === def.eventId)?.name ?? def.eventId ?? selectedEventId}
                                                 </span>
-                                            ) : (
-                                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-black text-emerald-900 border border-emerald-300 shrink-0">
-                                                    🟢 Published
-                                                </span>
-                                            )}
+                                                {isPrivate ? (
+                                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-xs font-black text-amber-900">Private</span>
+                                                ) : (
+                                                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-100 px-2.5 py-0.5 text-xs font-black text-emerald-900">Published</span>
+                                                )}
+                                            </div>
                                         </div>
 
                                         <div className="grid grid-cols-2 gap-3 items-center">
-                                            {/* Preview image */}
-                                            <div className="w-full bg-neutral-900 rounded-xl p-1 overflow-hidden border border-neutral-200">
+                                            <div
+                                                className="mx-auto overflow-hidden rounded-xl border border-neutral-200 bg-neutral-900 p-1 flex items-center justify-center"
+                                                style={{
+                                                    maxHeight: "180px",
+                                                    aspectRatio: def.outputWidth && def.outputHeight ? `${def.outputWidth} / ${def.outputHeight}` : "2 / 3",
+                                                }}
+                                            >
                                                 {def.assetUrl ? (
-                                                    <img
-                                                        src={def.assetUrl}
-                                                        alt={def.name}
-                                                        className="w-full h-auto object-contain max-h-36 rounded-lg"
-                                                    />
+                                                    <img src={def.assetUrl} alt={def.name} className="h-full w-full rounded-lg object-contain" />
                                                 ) : (
-                                                    <div className="h-24 flex items-center justify-center text-xs font-bold text-neutral-500">
-                                                        No preview image
-                                                    </div>
+                                                    <div className="flex h-24 items-center justify-center text-xs font-bold text-neutral-500">No preview image</div>
                                                 )}
                                             </div>
 
-                                            {/* Info & Slot list */}
                                             <div className="space-y-1.5 text-xs">
-                                                <div className="flex justify-between text-neutral-600">
-                                                    <span>Shots:</span>
-                                                    <span className="font-bold text-neutral-900">{def.shotCount} shots</span>
-                                                </div>
-                                                <div className="flex justify-between text-neutral-600">
-                                                    <span>Số Ô (Slots):</span>
-                                                    <span className="font-bold text-neutral-900">{def.slots.length} ô</span>
-                                                </div>
-                                                <div className="flex justify-between text-neutral-600">
-                                                    <span>Kích thước:</span>
-                                                    <span className="font-mono font-bold text-neutral-900">{def.outputWidth}×{def.outputHeight}</span>
-                                                </div>
-                                                <div className="flex justify-between text-neutral-600">
-                                                    <span>Nguồn:</span>
-                                                    <span className="font-bold text-pink-700 uppercase">{def.source}</span>
-                                                </div>
+                                                <Info label="Shots" value={`${def.shotCount} shots`} />
+                                                <Info label="Slots" value={`${def.slots.length} ô`} />
+                                                <Info label="Size" value={`${def.outputWidth}×${def.outputHeight}`} />
+                                                <Info label="Source" value={def.source} />
                                             </div>
                                         </div>
 
-                                        {/* Action buttons */}
-                                        <div className="flex items-center justify-between gap-2 pt-2 border-t border-neutral-100">
-                                            <button
-                                                type="button"
-                                                 onClick={() => void handleToggleFrameStatus(def)}
-                                                className={`flex-1 rounded-xl px-3 py-1.5 text-xs font-extrabold transition-all cursor-pointer ${
-                                                    isPrivate
-                                                        ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs"
-                                                        : "bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300"
-                                                }`}
-                                            >
-                                                {isPrivate ? "🟢 Đăng (Publish)" : "🔒 Chuyển Private (Ẩn)"}
-                                            </button>
-
-                                            <button
-                                                type="button"
-                                                 onClick={() => void handleDeleteFrame(def)}
-                                                className="rounded-xl border border-rose-300 bg-white hover:bg-rose-50 text-rose-700 px-3 py-1.5 text-xs font-bold cursor-pointer"
-                                            >
-                                                🗑️ Xoá
-                                            </button>
+                                        <div className="mt-4 flex items-center justify-between gap-2 border-t border-neutral-100 pt-3">
+                                            <button type="button" onClick={() => void handleToggleFrameStatus(def)} className={`flex-1 rounded-xl px-3 py-1.5 text-xs font-extrabold transition-all ${isPrivate ? "bg-emerald-600 text-white hover:bg-emerald-700" : "border border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200"}`}>{isPrivate ? "Đăng publish" : "Chuyển private"}</button>
+                                            <button type="button" onClick={() => void handleDeleteFrame(def)} className="rounded-xl border border-rose-300 bg-white px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-50">Xoá</button>
                                         </div>
                                     </div>
                                 );
@@ -704,4 +624,12 @@ export function FrameImportPanel() {
             )}
         </div>
     );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+    return <div className="rounded-3xl border border-neutral-200 bg-white p-4 shadow-xs"><p className="text-xs font-black uppercase tracking-wide text-neutral-500">{label}</p><p className="mt-1 text-3xl font-black text-neutral-950">{value}</p></div>;
+}
+
+function Info({ label, value }: { label: string; value: string }) {
+    return <div className="flex justify-between text-neutral-600"><span>{label}:</span><span className="font-bold text-neutral-900">{value}</span></div>;
 }

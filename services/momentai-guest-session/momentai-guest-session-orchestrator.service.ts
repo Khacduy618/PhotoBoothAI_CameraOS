@@ -1,3 +1,5 @@
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+
 import type {
     MomentAICaptureFormat,
     MomentAICaptureFormatId,
@@ -12,6 +14,62 @@ import type {
 import { createMomentAIGuestSession, MOMENTAI_CAPTURE_FORMATS } from "@/types/momentai-guest-session";
 
 const EVENT_ID = "event_hoi_an_heritage";
+const LOCAL_SHARE_TOKEN_SECRET = process.env.MOMENTAI_LOCAL_SHARE_TOKEN_SECRET || randomBytes(32).toString("hex");
+
+export type MomentAIReadinessStatus = "READY" | "DEGRADED" | "BLOCKED";
+export type MomentAIComponentHealth = "ready" | "degraded" | "blocked";
+
+export interface MomentAIEventConfig {
+    eventId: string;
+    name: string;
+    status: "active" | "archived";
+    enabledShotFormats: readonly MomentAICaptureFormatId[];
+    timeoutSeconds: number;
+    printPolicy: "GUEST_CONFIRM";
+    shareMode: "LOCAL_NETWORK_URL" | "DISABLED";
+    allowGuestRetake: false;
+    maxRetakesPerShot: 0;
+}
+
+export interface MomentAIHealthSnapshot {
+    camera: MomentAIComponentHealth;
+    storage: MomentAIComponentHealth;
+    database: MomentAIComponentHealth;
+    composition: MomentAIComponentHealth;
+    printer: MomentAIComponentHealth;
+    shareNetwork: MomentAIComponentHealth;
+}
+
+export interface MomentAIReadinessSnapshot {
+    status: MomentAIReadinessStatus;
+    activeEvent: MomentAIEventConfig | null;
+    health: MomentAIHealthSnapshot;
+    reasons: string[];
+}
+
+const DEFAULT_EVENT_CONFIG: MomentAIEventConfig = {
+    eventId: EVENT_ID,
+    name: "Phố Cổ Hội An",
+    status: "active",
+    enabledShotFormats: ["format_1shot", "format_2shot", "format_4shot", "format_6shot"],
+    timeoutSeconds: 120,
+    printPolicy: "GUEST_CONFIRM",
+    shareMode: "LOCAL_NETWORK_URL",
+    allowGuestRetake: false,
+    maxRetakesPerShot: 0,
+};
+
+const DEFAULT_HEALTH: MomentAIHealthSnapshot = {
+    camera: "ready",
+    storage: "ready",
+    database: "ready",
+    composition: "ready",
+    printer: "degraded",
+    shareNetwork: "degraded",
+};
+
+let activeEventConfig: MomentAIEventConfig | null = DEFAULT_EVENT_CONFIG;
+let healthSnapshot: MomentAIHealthSnapshot = DEFAULT_HEALTH;
 
 export const MOMENTAI_TEMPLATES: readonly MomentAITemplate[] = [
     {
@@ -88,7 +146,47 @@ function touch(session: MomentAIGuestSession, status?: MomentAIGuestSession["sta
     return updated;
 }
 
-export function startMomentAIGuestSession(eventId = EVENT_ID): MomentAIGuestSession {
+export function getMomentAIEventConfig(): MomentAIEventConfig | null {
+    return activeEventConfig ? { ...activeEventConfig, enabledShotFormats: [...activeEventConfig.enabledShotFormats] } : null;
+}
+
+export function setMomentAIEventConfigForTesting(config: MomentAIEventConfig | null): void {
+    activeEventConfig = config;
+}
+
+export function setMomentAIHealthForTesting(health: Partial<MomentAIHealthSnapshot>): void {
+    healthSnapshot = { ...DEFAULT_HEALTH, ...health };
+}
+
+export function resetMomentAIReadinessForTesting(): void {
+    activeEventConfig = DEFAULT_EVENT_CONFIG;
+    healthSnapshot = DEFAULT_HEALTH;
+}
+
+export function getMomentAIReadiness(): MomentAIReadinessSnapshot {
+    const reasons: string[] = [];
+    if (!activeEventConfig || activeEventConfig.status !== "active") reasons.push("NO_ACTIVE_EVENT");
+    for (const [component, status] of Object.entries(healthSnapshot)) {
+        if (status === "blocked") reasons.push(`${component.toUpperCase()}_BLOCKED`);
+    }
+    const degradedComponents = Object.entries(healthSnapshot).filter(([, status]) => status === "degraded").map(([component]) => `${component.toUpperCase()}_DEGRADED`);
+    const activeEvent = getMomentAIEventConfig();
+    const health = { ...healthSnapshot };
+    if (reasons.length > 0) return { status: "BLOCKED", activeEvent, health, reasons };
+    if (degradedComponents.length > 0) return { status: "DEGRADED", activeEvent, health, reasons: degradedComponents };
+    return { status: "READY", activeEvent, health, reasons: [] };
+}
+
+function readinessAllowsGuestStart(readiness: MomentAIReadinessSnapshot): boolean {
+    if (readiness.status === "BLOCKED" || !readiness.activeEvent) return false;
+    const criticalDegraded = ["camera", "storage", "database", "composition"].some((component) => readiness.health[component as keyof MomentAIHealthSnapshot] === "degraded");
+    return !criticalDegraded;
+}
+
+export function startMomentAIGuestSession(eventId = activeEventConfig?.eventId ?? EVENT_ID): MomentAIGuestSession {
+    const readiness = getMomentAIReadiness();
+    if (!readinessAllowsGuestStart(readiness)) throw new Error(`Guest start blocked: ${readiness.reasons.join(",") || "NO_ACTIVE_EVENT"}`);
+    if (!readiness.activeEvent || eventId !== readiness.activeEvent.eventId) throw new Error("Requested event is not active.");
     const session = createMomentAIGuestSession(eventId);
     sessions.set(session.sessionId, session);
     return session;
@@ -99,12 +197,13 @@ export function getMomentAIGuestSession(sessionId: string): MomentAIGuestSession
 }
 
 export function listMomentAICaptureFormats(): readonly MomentAICaptureFormat[] {
-    return MOMENTAI_CAPTURE_FORMATS;
+    const enabled = activeEventConfig?.enabledShotFormats ?? [];
+    return MOMENTAI_CAPTURE_FORMATS.filter((format) => enabled.includes(format.id));
 }
 
 export function selectMomentAICaptureFormat(sessionId: string, formatId: MomentAICaptureFormatId): MomentAIGuestSession {
     const session = requireSession(sessionId);
-    const captureFormat = MOMENTAI_CAPTURE_FORMATS.find((format) => format.id === formatId);
+    const captureFormat = listMomentAICaptureFormats().find((format) => format.id === formatId);
     if (!captureFormat) throw new Error("Invalid capture format.");
     return touch({ ...session, captureFormat, photos: [], selectedTemplate: null, slotAssignments: [], outputs: { master: null, share: null, print: null } }, "READY_TO_CAPTURE");
 }
@@ -161,16 +260,19 @@ export function composeMomentAIOutputs(sessionId: string): MomentAIGuestSession 
     const safeToken = encodeURIComponent(session.sessionId);
     const outputs: MomentAIOutputs = {
         master: `/outputs/${safeToken}/final-master.png`,
-        share: `https://gallery.momentai.vn/s/${safeToken}`,
+        share: `/outputs/${safeToken}/final-share.jpg`,
         print: `/outputs/${safeToken}/final-print.jpg`,
     };
-    const qr = { url: outputs.share!, status: "ready" as const };
+    const localShareUrl = buildLocalShareUrl(session.sessionId);
+    const qr = localShareUrl
+        ? { url: localShareUrl, status: "ready" as const }
+        : { url: "", status: "failed" as const };
     return touch({ ...session, outputs, qr }, "RESULT_READY");
 }
 
-export function enqueueMomentAIAutoPrint(sessionId: string, copies = 1): MomentAIGuestSession {
+export function requestMomentAIPrint(sessionId: string, copies = 1): MomentAIGuestSession {
     const session = requireSession(sessionId);
-    if (!session.selectedTemplate || !session.outputs.print) throw new Error("Print output is required before auto print.");
+    if (!session.selectedTemplate || !session.outputs.print) throw new Error("Print output is required before guest-confirmed print request.");
     const idempotencyKey = `${session.sessionId}_${session.selectedTemplate.templateId}_${session.outputs.print}_${copies}`;
     const existing = processedPrintKeys.get(idempotencyKey);
     if (existing) return touch({ ...session, printJob: existing }, session.status);
@@ -195,6 +297,59 @@ export function completeMomentAIGuestSession(sessionId: string): MomentAIGuestSe
         throw new Error("Session can only complete from RESULT_READY.");
     }
     return touch({ ...session, completedAt: new Date().toISOString() }, "COMPLETED");
+}
+
+export function buildLocalShareUrl(sessionId: string, baseUrl = process.env.MOMENTAI_LOCAL_SHARE_BASE_URL): string | null {
+    if (!baseUrl) return null;
+    let parsed: URL;
+    try {
+        parsed = new URL(baseUrl);
+    } catch {
+        return null;
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    if (!isAllowedLocalShareHost(parsed.hostname)) return null;
+    parsed.pathname = `/s/${encodeURIComponent(sessionId)}`;
+    parsed.searchParams.set("token", createShareToken(sessionId));
+    return parsed.toString();
+}
+
+export function verifyLocalShareToken(sessionId: string, token: string | null | undefined): boolean {
+    if (!token) return false;
+    const expected = Buffer.from(createShareToken(sessionId));
+    const provided = Buffer.from(token);
+    return expected.length === provided.length && timingSafeEqual(expected, provided);
+}
+
+export function getLocalSharePayload(sessionId: string, token: string | null | undefined): { ok: true; dataUrl: string } | { ok: false; status: 403 | 404; error: string } {
+    if (!verifyLocalShareToken(sessionId, token)) {
+        return { ok: false, status: 403, error: "INVALID_SHARE_TOKEN" };
+    }
+    const session = sessions.get(sessionId);
+    if (!session?.outputs.share) {
+        return { ok: false, status: 404, error: "SHARE_OUTPUT_NOT_FOUND" };
+    }
+    if (!isAllowedShareOutput(session.outputs.share)) {
+        return { ok: false, status: 404, error: "SHARE_OUTPUT_UNAVAILABLE" };
+    }
+    return { ok: true, dataUrl: session.outputs.share };
+}
+
+function isAllowedShareOutput(output: string): boolean {
+    return output.startsWith("data:image/") || /^\/outputs\/[A-Za-z0-9_%.-]+\/final-share\.jpg$/.test(output);
+}
+
+function isAllowedLocalShareHost(hostname: string): boolean {
+    return hostname.endsWith(".local")
+        || /^10\./.test(hostname)
+        || /^192\.168\./.test(hostname)
+        || /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
+}
+
+function createShareToken(sessionId: string): string {
+    return createHmac("sha256", LOCAL_SHARE_TOKEN_SECRET)
+        .update(`local-share:${sessionId}`)
+        .digest("base64url");
 }
 
 function validatePhotoInput(

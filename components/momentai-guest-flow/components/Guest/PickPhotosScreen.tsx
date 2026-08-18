@@ -3,6 +3,7 @@ import { PhotoItem, SessionData, EventConfig } from '../../types';
 import { compositionEngine } from '../../services/compositionEngine';
 import { HOI_AN_SAMPLE_PHOTOS } from '../../data/hoianSamplePhotos';
 import { Check, Trash2, ArrowRight, Sparkles, ArrowLeft } from 'lucide-react';
+import { isStripTemplate } from '../UI/frame-previews/FramePreviewCard';
 
 interface PickPhotosScreenProps {
   session: SessionData;
@@ -201,22 +202,31 @@ export const PickPhotosScreen: React.FC<PickPhotosScreenProps> = ({
           </div>
 
           {/* Canvas Rendered Preview */}
-          <div className="relative w-full max-w-sm aspect-[2/3] bg-[#FDFCFB] overflow-hidden border border-[#1A1A1A]/20 flex items-center justify-center p-2 shadow-lg rounded-2xs">
-            {previewDataUrl ? (
-              <img
-                src={previewDataUrl}
-                alt="Live Composition Preview"
-                className="w-full h-full object-contain"
-              />
-            ) : (
-              <div className="flex flex-col items-center gap-2 text-[#1A1A1A]/50">
-                <Sparkles className="w-6 h-6 animate-spin text-[#1A1A1A]" />
-                <span className="text-[10px] font-mono uppercase tracking-widest">Đang tải bản xem trước...</span>
-              </div>
-            )}
+          {(() => {
+            const isLandscape = frame.orientation === 'landscape';
+            const isStrip = isStripTemplate(frame);
+            const containerAspect = isLandscape
+              ? 'aspect-[3/2] w-full max-w-[95%] max-h-[55vh]'
+              : isStrip
+              ? 'aspect-[1/3] h-[55vh]'
+              : 'aspect-[2/3] h-[55vh]';
+            return (
+              <div className={`relative w-full ${containerAspect} bg-[#FDFCFB] overflow-hidden border border-[#1A1A1A]/20 flex items-center justify-center p-2 shadow-lg rounded-2xs`}>
+                {previewDataUrl ? (
+                  <img
+                    src={previewDataUrl}
+                    alt="Live Composition Preview"
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center gap-2 text-[#1A1A1A]/50">
+                    <Sparkles className="w-6 h-6 animate-spin text-[#1A1A1A]" />
+                    <span className="text-[10px] font-mono uppercase tracking-widest">Đang tải bản xem trước...</span>
+                  </div>
+                )}
 
-            {/* Interactive Slot Touch Targets Overlaid */}
-            <div className="absolute inset-2 pointer-events-auto">
+                {/* Interactive Slot Touch Targets Overlaid */}
+                <div className="absolute inset-2 pointer-events-auto">
               {frame.slots.map((slot, sIdx) => {
                 const assignedPhoto = assignments[sIdx];
                 const isActive = activeSlotIndex === sIdx;
@@ -263,6 +273,8 @@ export const PickPhotosScreen: React.FC<PickPhotosScreenProps> = ({
               })}
             </div>
           </div>
+        );
+      })()}
 
           {/* Action Footer Button */}
           <div className="w-full mt-4 pt-4 border-t border-[#1A1A1A]/10 flex items-center justify-between gap-4">

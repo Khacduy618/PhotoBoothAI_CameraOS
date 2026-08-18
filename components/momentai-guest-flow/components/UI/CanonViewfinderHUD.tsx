@@ -35,14 +35,6 @@ export const CanonViewfinderHUD: React.FC<CanonViewfinderHUDProps> = ({
         </div>
       )}
 
-      {/* Center Focus Box */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className={`w-32 h-24 border transition-all duration-300 flex items-center justify-center ${
-          isCapturing ? 'border-rose-500 bg-rose-500/20 scale-105' : 'border-[#FDFCFB]/60 bg-[#FDFCFB]/5'
-        }`}>
-          <div className="w-1.5 h-1.5 bg-[#FDFCFB] rounded-full animate-ping"></div>
-        </div>
-      </div>
     </div>
   );
 };

@@ -1,9 +1,13 @@
 # MomentAI CameraOS — Guest Flow & Internal System Design
 ## Source of Truth for Product, UI/UX, Frontend, Camera Core, Backend & Printing
 
-**Version:** 1.0  
+**Version:** 1.2-production-brief-v3.1  
 **Target Camera:** Canon EOS 6D  
-**Host:** macOS  
+**Host:** Windows 10 x64 booth PC / Mini PC form factor  
+**Desktop shell:** Electron  
+**Renderer:** Vite React + TypeScript  
+**Admin:** Electron operator/admin surface, hidden from guest  
+**Printer:** Canon SELPHY CP1000 via Windows Print System  
 **Application:** MomentAI Photobooth  
 **Platform:** MomentAI CameraOS  
 
@@ -51,10 +55,10 @@ CUSTOMIZE
         ↓
 FINAL COMPOSITION
         ↓
-RESULT + QR
+RESULT + LOCAL QR/FALLBACK + GUEST-CONFIRMED PRINT
         │
-        ├── Digital Output
-        └── Auto Print
+        ├── Digital Output via LocalShareService
+        └── Optional PrintJob after guest confirmation
         ↓
 DONE hoặc TIMEOUT 2 PHÚT
         ↓
@@ -192,12 +196,14 @@ MomentAI V1 sử dụng 4 loại shot:
 
 ```text
 ┌─────────────────────────────┐
-│          Guest UI           │
+│ Electron React Renderer     │
+│ Guest UI + hidden Admin UI  │
 └──────────────┬──────────────┘
-               │ IPC / Local API
+               │ Preload API / IPC
                ▼
 ┌─────────────────────────────┐
-│      Session Controller     │
+│ Electron Main               │
+│ Session Controller          │
 └───────┬────────┬────────────┘
         │        │
         │        ├───────────────┐
@@ -209,16 +215,13 @@ CaptureManager TemplateService CompositionEngine
  CameraService                  ├── Share
         │                        └── Print
         ▼
- CanonAdapter
-        │
-        ▼
- Canon EDSDK
-        │
-        ▼
- Canon EOS 6D
+ Active CameraAdapter
+ ├── FakeCameraAdapter
+ ├── DeviceCameraAdapter
+ └── CanonAdapter → CanonCameraBridge → Canon EDSDK → Canon EOS 6D
 
-                      Share ──→ QR / Delivery
-                      Print ──→ Print Queue ──→ Printer
+                      Share ──→ LocalShareService ──→ Local QR/Fallback
+                      Print ──→ Guest Confirm ──→ Print Queue ──→ Printer
 ```
 
 ---
@@ -484,14 +487,15 @@ CaptureManager
    ↓
 CameraService
    ↓
-CanonEDSDKAdapter
-   ↓
-Canon EDSDK
-   ↓
-Canon EOS 6D
+Active CameraAdapter
+   ├── FakeCameraAdapter for tests
+   ├── DeviceCameraAdapter for development
+   └── CanonAdapter → CanonCameraBridge → Canon EDSDK → Canon EOS 6D after physical spike evidence
 ```
 
 Guest UI không được gọi camera trực tiếp.
+
+Canon Command Shadow Mode là development diagnostics: sau fake/device capture loop và trước physical Canon spike, CameraOS có thể phát `CANON:SHADOW` structured logs cho production-intent commands với cùng `sessionId`, `shotIndex` và `correlationId`. Shadow không được gọi Canon hardware/EDSDK/Bridge và không bao giờ thoả Canon hardware PASS.
 
 ---
 
@@ -509,17 +513,15 @@ Countdown
       ↓
 CameraService.capture()
       ↓
-Canon EOS 6D
+Active CameraAdapter: Fake / Device / Canon
       ↓
-Shutter
+Still image acquired
       ↓
-Camera object event
+If Canon: shutter + object event + JPEG download
       ↓
-Download JPEG
+Validate image
       ↓
-Validate JPEG
-      ↓
-StorageService.save()
+StorageService.saveOriginal()
       ↓
 Photo created
       ↓
@@ -1164,10 +1166,10 @@ final-share.jpg
 
 Dùng cho:
 
-- QR
-- gallery
-- cloud
-- social
+- Local QR
+- gallery/local retrieval
+- cloud only if PM later approves a provider
+- social only in a later approved phase
 
 ## Print
 
@@ -1221,67 +1223,78 @@ Paper Currently Loaded
 
 ---
 
-# 26. Screen 06 — RESULT + QR
+# 26. Screen 06 — RESULT + LOCAL QR/FALLBACK + GUEST-CONFIRMED PRINT
 
 Khi composition hoàn tất:
 
 ```text
 Composition Complete
         │
-        ├──────────────┐
-        │              │
-        ▼              ▼
- DeliveryService    PrintService
+        ├──────────────────────┐
+        │                      │
+        ▼                      ▼
+ LocalShareService      PrintService
+        │                      │
+        ▼                      ▼
+ Local QR/Fallback      Wait for guest confirmation
 ```
 
-Hai luồng chạy song song.
+Local QR/fallback được chuẩn bị trên Result screen. Print job chỉ được tạo khi V1 `PrintPolicy=GUEST_CONFIRM` và guest xác nhận in.
 
 ---
 
-# 27. QR / Digital flow
+# 27. Local QR / Digital flow
 
 ```text
 final-share.jpg
       ↓
-DeliveryService
+LocalShareService
       ↓
-Local / Cloud Storage
+Tokenized local network endpoint
       ↓
-Session Download URL
+Session Download URL reachable from guest phone
       ↓
 QR Generator
       ↓
-QRCodeCard
+QRCodeCard or QR unavailable fallback
 ```
 
-Ví dụ:
+Ví dụ local network URL:
 
 ```json
 {
   "qr": {
-    "url": "https://gallery.momentai.vn/s/abc123"
+    "url": "http://192.168.1.25:3789/s/abc123?token=redacted"
   }
 }
 ```
 
+Local QR phải dùng endpoint reachable từ điện thoại guest trên cùng network/booth hotspot. QR không được là `localhost`-only, không expose local absolute path và không log QR secret/token. Cloud URL provider deferred trừ khi PM approve riêng.
+
 ---
 
-# 28. Print flow
+# 28. Guest-confirmed print flow
 
 ```text
 final-print.jpg
       ↓
+ResultScreen Print action
+      ↓
+Guest confirms print
+      ↓
 PrintService
       ↓
-Create PrintJob
+Create durable PrintJob with idempotency key
       ↓
 Print Queue
       ↓
 Printer Worker
       ↓
-macOS Print System
+FakePrinterAdapter or WindowsPrintAdapter when CP1000 is available
       ↓
-Photo Printer
+If production hardware: Windows Print System
+      ↓
+Canon SELPHY CP1000
 ```
 
 Print Job:
@@ -1306,7 +1319,8 @@ Print Job:
 ResultScreen
 ├── SuccessHeading
 ├── FinalPhotoPreview
-├── QRCodeCard
+├── QRCodeCard or QRUnavailableFallback
+├── PrintConfirmButton when GUEST_CONFIRM print is enabled
 ├── PrintStatus
 ├── SessionCountdown
 └── DoneButton
@@ -1317,11 +1331,13 @@ Guest thấy:
 ```text
 Final Photo
 
-QR Code
+Local QR hoặc QR unavailable fallback
 
-"Quét để tải ảnh"
+"Quét để tải ảnh" hoặc "QR chưa khả dụng"
 
-"Ảnh đang được in..."
+[ IN ẢNH ] nếu GUEST_CONFIRM print được bật
+
+Print status: idle / queued / submitted / failed
 
 01:42
 
@@ -1340,7 +1356,9 @@ SessionController trả về:
 {
   "finalImageUrl": "output/final-share.jpg",
   "qrCode": "...",
-  "printStatus": "printing",
+  "qrStatus": "available",
+  "canConfirmPrint": true,
+  "printStatus": "idle",
   "timeoutSeconds": 120
 }
 ```
@@ -1424,9 +1442,11 @@ DO NOT DISCONNECT CANON EOS 6D
 ```text
 CameraOS Start
       ↓
-Connect Canon EOS 6D
+Initialize CameraService with active adapter
       ↓
-Keep Camera Session Alive
+Use Fake/Device in dev or Canon after physical spike evidence
+      ↓
+Keep healthy CameraService session/live-view policy alive
       ↓
 Guest Session A
       ↓
@@ -1488,7 +1508,8 @@ Disconnect Camera
         CameraService
               │
               ▼
-       Canon EOS 6D
+   Active CameraAdapter
+   Fake / Device / Canon
               │
               ▼
          Raw Photos
@@ -1534,15 +1555,15 @@ Disconnect Camera
     Master   Share   Print
               │      │
               ▼      ▼
-             QR   PrintQueue
+      Local QR/Fallback  Print available after guest confirmation
               │      │
               ▼      ▼
 ┌───────────────────────────┐
 │    FINAL RESULT SCREEN    │
 │                           │
 │ Final Image               │
-│ QR                        │
-│ Print Status              │
+│ Local QR / Fallback       │
+│ Print Confirm + Status    │
 │ 2-minute Timeout          │
 └─────────────┬─────────────┘
               │
@@ -1578,7 +1599,7 @@ Disconnect Camera
 | Master Output | CompositionEngine |
 | Share Output | CompositionEngine |
 | Print Output | CompositionEngine |
-| QR URL | DeliveryService |
+| QR URL | LocalShareService / ShareService |
 | Print Job | PrintService |
 | Session State | SessionController |
 
@@ -1629,13 +1650,16 @@ CameraOS Core
 ├── CaptureFormatService
 ├── CaptureManager
 ├── CameraService
-│   └── CanonEDSDKAdapter
+│   ├── FakeCameraAdapter
+│   ├── DeviceCameraAdapter
+│   └── CanonAdapter / CanonCameraBridge / CanonEDSDKAdapter after physical spike
+├── CanonCommandShadowLogger
 ├── PhotoStorage
 ├── TemplateService
 ├── AssignmentEngine
 ├── PreviewRenderer
 ├── CompositionEngine
-├── DeliveryService
+├── LocalShareService / ShareService
 └── PrintService
 ```
 
@@ -1690,8 +1714,8 @@ final-master.png
 final-share.jpg
 final-print.jpg
  ↓
-share.jpg → QR
-print.jpg → Print Queue
+share.jpg → Local QR/Fallback
+print.jpg → Print available after guest confirmation
  ↓
 Result Screen
  ↓
@@ -1758,7 +1782,10 @@ Guest UI
 → SessionController
 → CaptureManager
 → CameraService
-→ CanonAdapter
+→ Active CameraAdapter
+   ├── FakeCameraAdapter
+   ├── DeviceCameraAdapter
+   └── CanonAdapter after physical spike evidence
 ```
 
 ## 40.2 Template không chứa ảnh Guest
@@ -1850,8 +1877,8 @@ Một session chỉ được coi là hoàn thành khi:
 - Final composition render thành công.
 - Share output đã tạo.
 - Print output đã tạo.
-- QR đã tạo hoặc có fallback.
-- Print job đã được enqueue nếu Auto Print bật.
+- Local QR đã tạo hoặc có fallback.
+- Print job đã được enqueue nếu V1 `GUEST_CONFIRM` print được bật và guest xác nhận in.
 - Session state = `COMPLETED`.
 - Guest UI được reset.
 - Camera vẫn ở trạng thái READY cho Guest tiếp theo.
@@ -1875,7 +1902,7 @@ TYPE / DRAW NẾU TEMPLATE CHO PHÉP
 ↓
 FINAL COMPOSITION
 ↓
-RESULT + QR + AUTO PRINT
+RESULT + LOCAL QR/FALLBACK + OPTIONAL GUEST-CONFIRMED PRINT
 ↓
 DONE / 2-MINUTE TIMEOUT
 ↓

@@ -1,11 +1,13 @@
-export const HOI_AN_SAMPLE_PHOTOS = [
-  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 1
-  'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 2
-  'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 3
-  'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 4
-  'https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 5
-  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 6
-  'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 7
-  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=800&q=80', // Aesthetic photobooth portrait 8
-];
+const samplePhoto = (label: string, start: string, end: string) =>
+  `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${start}"/><stop offset="1" stop-color="${end}"/></linearGradient></defs><rect width="800" height="1000" fill="url(#g)"/><circle cx="400" cy="330" r="130" fill="rgba(255,255,255,.86)"/><ellipse cx="400" cy="690" rx="255" ry="190" fill="rgba(255,255,255,.78)"/><text x="400" y="930" text-anchor="middle" font-family="serif" font-size="44" fill="white">${label}</text></svg>`)}`;
 
+export const HOI_AN_SAMPLE_PHOTOS = [
+  samplePhoto('MOMENTAI 01', '#4f46e5', '#ec4899'),
+  samplePhoto('MOMENTAI 02', '#f97316', '#7c3aed'),
+  samplePhoto('MOMENTAI 03', '#0f766e', '#38bdf8'),
+  samplePhoto('MOMENTAI 04', '#be123c', '#f59e0b'),
+  samplePhoto('MOMENTAI 05', '#4338ca', '#a855f7'),
+  samplePhoto('MOMENTAI 06', '#0891b2', '#84cc16'),
+  samplePhoto('MOMENTAI 07', '#ea580c', '#eab308'),
+  samplePhoto('MOMENTAI 08', '#1d4ed8', '#9333ea'),
+];

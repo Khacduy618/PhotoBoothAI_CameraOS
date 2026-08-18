@@ -346,7 +346,7 @@ export const CustomizeScreen: React.FC<CustomizeScreenProps> = ({
                   className="block font-serif italic text-base font-bold"
                   style={{ color: template.assets.textColor || '#1A1A1A' }}
                 >
-                  {template.eventBranding?.text || 'PHỐ CỔ HỘI AN'}
+                  {template.eventBranding?.text || ''}
                 </span>
                 {typedText ? (
                   <span

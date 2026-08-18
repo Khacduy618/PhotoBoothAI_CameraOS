@@ -21,6 +21,8 @@ export interface FrameTemplate {
   category: string;
   shotCount?: number; // 1, 2, 4, 6
   orientation?: 'portrait' | 'landscape';
+  outputWidth?: number;
+  outputHeight?: number;
   allowTyping?: boolean;
   allowDraw?: boolean;
   textPlaceholder?: string;
@@ -53,6 +55,8 @@ export interface PhotoItem {
   dataUrl: string;
   timestamp: string;
   isRetaken?: boolean;
+  width?: number;
+  height?: number;
 }
 
 export interface SessionData {

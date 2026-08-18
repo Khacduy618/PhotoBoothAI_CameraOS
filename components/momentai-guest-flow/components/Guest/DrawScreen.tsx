@@ -1169,14 +1169,14 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
                           isDark ? 'text-[#FDFCFB]' : 'text-[#1A1A1A]'
                         }`}
                       >
-                        {template.eventBranding?.text || 'PHỐ CỔ HỘI AN'}
+                        {template.eventBranding?.text || ''}
                       </span>
                       <span
                         className={`block text-[9px] font-mono uppercase tracking-widest opacity-70 mt-0.5 ${
                           isDark ? 'text-[#FDFCFB]' : 'text-[#1A1A1A]'
                         }`}
                       >
-                        {template.eventBranding?.subtext || 'Tiệm Ảnh Di Sản • 2026'}
+                        {template.eventBranding?.subtext || ''}
                       </span>
                     </div>
                   )}

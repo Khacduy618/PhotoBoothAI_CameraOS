@@ -133,6 +133,8 @@ function runDatabaseMigrations(db: Database): void {
         // Ignore legacy migration error
     }
 
+
+
     const now = new Date().toISOString();
     const insertStmt = db.prepare(`
         INSERT INTO events (event_id, name, status, created_at, updated_at)

@@ -13,8 +13,49 @@ import type {
 } from "@/types/momentai-guest-session";
 import { createMomentAIGuestSession, MOMENTAI_CAPTURE_FORMATS } from "@/types/momentai-guest-session";
 
+import { listPublishedFrames } from "@/services/admin/server/admin-registry-store";
+import type { FrameDefinition } from "@/services/frame-import/frame-import.types";
+
 const EVENT_ID = "event_hoi_an_heritage";
 const LOCAL_SHARE_TOKEN_SECRET = process.env.MOMENTAI_LOCAL_SHARE_TOKEN_SECRET || randomBytes(32).toString("hex");
+
+function mapFrameDefinitionToMomentAITemplate(frame: FrameDefinition, eventId: string): MomentAITemplate {
+    const shotCount = frame.shotCount || frame.slots?.length || 4;
+    const captureFormatId: MomentAICaptureFormatId = `format_${shotCount}shot` as MomentAICaptureFormatId;
+    const width = frame.outputWidth || 1800;
+    const height = frame.outputHeight || 2700;
+    
+    return {
+        templateId: frame.id,
+        eventId: eventId || frame.eventId || "event_hoi_an_heritage",
+        captureFormatId,
+        name: frame.name,
+        status: "PUBLISHED",
+        canvas: { width, height },
+        slots: (frame.slots || []).map((s, idx) => ({
+            slotIndex: typeof s.index === 'number' && s.index > 0 ? s.index : idx + 1,
+            x: s.x <= 1 ? s.x * 100 : s.x,
+            y: s.y <= 1 ? s.y * 100 : s.y,
+            width: s.width <= 1 ? s.width * 100 : s.width,
+            height: s.height <= 1 ? s.height * 100 : s.height,
+        })),
+        assets: {
+            background: frame.assets?.background || "#ffffff",
+            overlay: frame.assetUrl || frame.assets?.overlay,
+            overlayColor: "#1A1A1A",
+            textColor: "#1A1A1A",
+        },
+        customization: {
+            allowTyping: Boolean((frame as { allowTyping?: boolean }).allowTyping),
+            allowDraw: frame.allowDraw !== undefined ? Boolean(frame.allowDraw) : true,
+        },
+        printProfile: {
+            paper: frame.outputPaper === "5x15" ? "2x6-double" : "4x6",
+            orientation: frame.orientation || (width > height ? "landscape" : "portrait"),
+            dpi: 300,
+        },
+    };
+}
 
 export type MomentAIReadinessStatus = "READY" | "DEGRADED" | "BLOCKED";
 export type MomentAIComponentHealth = "ready" | "degraded" | "blocked";
@@ -231,13 +272,41 @@ export function addMomentAIGuestPhoto(sessionId: string, photo: Omit<MomentAIGue
 }
 
 export function listMomentAITemplates(eventId: string, captureFormatId: MomentAICaptureFormatId): readonly MomentAITemplate[] {
-    return MOMENTAI_TEMPLATES.filter((template) => template.eventId === eventId && template.captureFormatId === captureFormatId && template.status === "PUBLISHED");
+    const staticTemplates = MOMENTAI_TEMPLATES.filter((template) => template.eventId === eventId && template.captureFormatId === captureFormatId && template.status === "PUBLISHED");
+    try {
+        const sqliteFrames = listPublishedFrames(eventId);
+        const sqliteTemplates = sqliteFrames
+            .map((f) => mapFrameDefinitionToMomentAITemplate(f, eventId))
+            .filter((t) => t.captureFormatId === captureFormatId);
+
+        if (sqliteTemplates.length > 0) {
+            const combinedMap = new Map<string, MomentAITemplate>();
+            [...staticTemplates, ...sqliteTemplates].forEach((t) => combinedMap.set(t.templateId, t));
+            return Array.from(combinedMap.values());
+        }
+    } catch {
+        // Fall back to static templates
+    }
+    return staticTemplates;
 }
 
 export function selectMomentAITemplate(sessionId: string, templateId: string): MomentAIGuestSession {
     const session = requireSession(sessionId);
     if (!session.captureFormat) throw new Error("Capture format is required before template selection.");
-    const template = MOMENTAI_TEMPLATES.find((item) => item.templateId === templateId && item.eventId === session.eventId && item.captureFormatId === session.captureFormat?.id && item.status === "PUBLISHED");
+    let template = MOMENTAI_TEMPLATES.find((item) => item.templateId === templateId && item.eventId === session.eventId && item.captureFormatId === session.captureFormat?.id && item.status === "PUBLISHED");
+
+    if (!template) {
+        try {
+            const sqliteFrames = listPublishedFrames(session.eventId);
+            const foundFrame = sqliteFrames.find((f) => f.id === templateId);
+            if (foundFrame) {
+                template = mapFrameDefinitionToMomentAITemplate(foundFrame, session.eventId);
+            }
+        } catch {
+            // Ignore
+        }
+    }
+
     if (!template) throw new Error("Template is not compatible with this session.");
     const slotAssignments = assignSlots(session.photos, template);
     const nextStatus = template.customization.allowTyping || template.customization.allowDraw ? "CUSTOMIZING" : "COMPOSING";

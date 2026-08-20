@@ -9,6 +9,12 @@ export default defineConfig({
         environment: "jsdom",
         globals: false,
         passWithNoTests: true,
+        exclude: [
+            "**/node_modules/**",
+            "**/dist/**",
+            "**/*.electron.spec.ts",
+            "**/apps/desktop/tests/e2e/**",
+        ],
     },
     resolve: {
         alias: {

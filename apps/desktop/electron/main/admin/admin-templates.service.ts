@@ -31,6 +31,7 @@ export class WindowMiniAdminTemplatesService {
   async list(eventId?: string): Promise<Result<AdminTemplateSummary[]>> {
     const scopedEventId = eventId ? assertAdminId(eventId, 'event id') : undefined;
     const templates = listAdminFrames(scopedEventId).map((frame) => ({
+      ...frame,
       templateId: frame.id,
       eventId: frame.eventId,
       name: frame.name,

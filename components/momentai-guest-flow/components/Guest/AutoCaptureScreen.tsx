@@ -32,7 +32,8 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
   const [captureStep, setCaptureStep] = useState<CaptureStep>('ready');
   const [isFlashing, setIsFlashing] = useState<boolean>(false);
   const [capturedPool, setCapturedPool] = useState<PhotoItem[]>([]);
-  const [videoReady, setVideoReady] = useState<boolean>(cameraSettings.mode === 'webcam');
+  const [evfDataUrl, setEvfDataUrl] = useState<string | null>(null);
+  const [videoReady, setVideoReady] = useState<boolean>(cameraSettings.mode === 'webcam' || cameraSettings.mode === 'canon');
   const videoRef = useRef<HTMLVideoElement>(null);
   const isCapturingRef = useRef(false);
   const gestureLockedRef = useRef(false);
@@ -43,13 +44,29 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
 
   useEffect(() => {
     let cancelled = false;
+    let unsubscribeEvf: (() => void) | undefined;
+
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { onEvfFrame?: (cb: (frame: { dataUrl: string }) => void) => () => void } } } }).momentai?.guest?.camera?.onEvfFrame) {
+      unsubscribeEvf = (window as unknown as { momentai: { guest: { camera: { onEvfFrame: (cb: (frame: { dataUrl: string }) => void) => () => void } } } }).momentai.guest.camera.onEvfFrame((frame) => {
+        if (!cancelled && frame?.dataUrl) {
+          setEvfDataUrl(frame.dataUrl);
+          setVideoReady(true);
+        }
+      });
+    }
+
     void cameraService.startWebcam().then((started) => {
       if (cancelled) return;
-      if (videoRef.current) cameraService.attachToVideo(videoRef.current);
-      setVideoReady(started || cameraService.getSettings().mode === 'webcam');
+      const currentMode = cameraService.getSettings().mode;
+      if (currentMode !== 'canon' && videoRef.current) {
+        cameraService.attachToVideo(videoRef.current);
+      }
+      setVideoReady(started || currentMode === 'webcam' || currentMode === 'canon');
     });
+
     return () => {
       cancelled = true;
+      if (unsubscribeEvf) unsubscribeEvf();
       cameraService.stopWebcam();
     };
   }, []);
@@ -177,7 +194,9 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
       <div className="w-full max-w-[98%] mx-auto flex-1 grid grid-cols-1 lg:grid-cols-20 gap-5 items-stretch overflow-hidden my-auto py-2">
         {/* Left Viewport Camera Live (85% width) */}
         <div className="lg:col-span-17 relative w-full h-[76vh] xl:h-[80vh] bg-[#1A1A1A] shadow-2xl overflow-hidden flex items-center justify-center rounded-xl border border-[#1A1A1A]/20">
-          {cameraSettings.mode === 'webcam' ? (
+          {(cameraSettings.mode === 'canon' || cameraService.getSettings().mode === 'canon') && evfDataUrl ? (
+            <img src={evfDataUrl} alt="Canon 6D Live View" className="w-full h-full object-cover" />
+          ) : cameraSettings.mode === 'webcam' ? (
             <video ref={videoRef} autoPlay playsInline muted onLoadedMetadata={markVideoReady} onCanPlay={markVideoReady} className="w-full h-full object-cover -scale-x-100" />
           ) : (
             <div className="w-full h-full relative bg-[#1A1A1A] text-[#FDFCFB] flex flex-col items-center justify-center">

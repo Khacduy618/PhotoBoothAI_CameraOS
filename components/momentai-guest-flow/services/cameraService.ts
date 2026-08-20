@@ -45,9 +45,20 @@ export class CameraService {
   }
 
   public async startWebcam(): Promise<boolean> {
-    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { status: () => Promise<unknown> } } } }).momentai?.guest?.camera?.status) {
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { status: () => Promise<{ provider?: string; model?: string }>; startLiveView?: () => Promise<unknown> } } } }).momentai?.guest?.camera?.status) {
       try {
-        await (window as unknown as { momentai: { guest: { camera: { status: () => Promise<unknown> } } } }).momentai.guest.camera.status();
+        const st = await (window as unknown as { momentai: { guest: { camera: { status: () => Promise<{ provider?: string; model?: string }>; startLiveView?: () => Promise<unknown> } } } }).momentai.guest.camera.status();
+        if (st && st.provider === 'canon') {
+          console.log('[CameraService] Canon provider is ACTIVE on hardware:', st.model);
+          this.settings.connected = true;
+          this.settings.mode = 'canon';
+          this.settings.model = st.model || 'Canon EOS 6D';
+          this.settings.liveViewRunning = true;
+          if ((window as unknown as { momentai: { guest: { camera: { startLiveView?: () => Promise<unknown> } } } }).momentai.guest.camera.startLiveView) {
+            await (window as unknown as { momentai: { guest: { camera: { startLiveView: () => Promise<unknown> } } } }).momentai.guest.camera.startLiveView();
+          }
+          return true;
+        }
       } catch (err) {
         console.warn('IPC camera status call failed:', err);
       }
@@ -78,6 +89,9 @@ export class CameraService {
     if (this.mediaStream) {
       this.mediaStream.getTracks().forEach((track) => track.stop());
       this.mediaStream = null;
+    }
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { stopLiveView?: () => Promise<unknown> } } } }).momentai?.guest?.camera?.stopLiveView) {
+      void (window as unknown as { momentai: { guest: { camera: { stopLiveView: () => Promise<unknown> } } } }).momentai.guest.camera.stopLiveView();
     }
   }
 
@@ -139,13 +153,18 @@ export class CameraService {
   public async capturePhoto(shotIndex: number, sessionId?: string): Promise<string> {
     this.playShutterSound();
 
-    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { capture: (ctx: unknown) => Promise<unknown> } } } }).momentai?.guest?.camera?.capture) {
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { capture: (ctx: unknown) => Promise<{ provider?: string; photo?: { dataUrl?: string; width?: number; height?: number; size?: number } }> } } } }).momentai?.guest?.camera?.capture) {
       try {
-        await (window as unknown as { momentai: { guest: { camera: { capture: (ctx: unknown) => Promise<unknown> } } } }).momentai.guest.camera.capture({
+        const res = await (window as unknown as { momentai: { guest: { camera: { capture: (ctx: unknown) => Promise<{ provider?: string; photo?: { dataUrl?: string; width?: number; height?: number; size?: number } }> } } } }).momentai.guest.camera.capture({
           sessionId: sessionId || 'desktop_session',
           shotIndex: shotIndex + 1,
           correlationId: `capture_${Date.now()}_${shotIndex + 1}`,
         });
+        if (res && res.provider === 'canon' && res.photo?.dataUrl) {
+          console.log(`[CameraService] Real Canon 6D photo captured: ${res.photo.width}x${res.photo.height} (${res.photo.size} bytes)`);
+          this.settings.shutterCount += 1;
+          return res.photo.dataUrl;
+        }
       } catch (err) {
         console.warn('IPC camera capture call failed:', err);
       }

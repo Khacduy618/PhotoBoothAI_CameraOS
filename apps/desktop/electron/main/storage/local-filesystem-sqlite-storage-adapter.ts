@@ -111,6 +111,39 @@ export class LocalFilesystemSQLiteStorageAdapter implements StorageAdapter {
     }
   }
 
+  async deleteSession(sessionId: string): Promise<Result<void>> {
+    try {
+      const safeSessionId = assertSafeId(sessionId, 'session id');
+      this.ensureInitialized();
+      this.db!.prepare('DELETE FROM stored_files WHERE session_id = ?').run(safeSessionId);
+      this.db!.prepare('DELETE FROM sessions WHERE session_id = ?').run(safeSessionId);
+      return { ok: true, value: undefined };
+    } catch (cause) {
+      return storageError(cause, 'STORAGE_SESSION_DELETE_FAILED', 'Unable to delete local storage session record.');
+    }
+  }
+
+  async listSessions(): Promise<Result<{ sessionId: string; createdAt: string; updatedAt: string; payloadJson?: string | null }[]>> {
+    try {
+      this.ensureInitialized();
+      const rows = this.db!.prepare('SELECT session_id, created_at, updated_at, payload_json FROM sessions').all() as {
+        session_id: string;
+        created_at: string;
+        updated_at: string;
+        payload_json?: string | null;
+      }[];
+      const items = rows.map((r) => ({
+        sessionId: r.session_id,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+        payloadJson: r.payload_json,
+      }));
+      return { ok: true, value: items };
+    } catch (cause) {
+      return storageError(cause, 'STORAGE_SESSION_LIST_FAILED', 'Unable to list sessions.');
+    }
+  }
+
   async writeSession<TSession>(session: TSession): Promise<Result<void>> {
     try {
       this.ensureInitialized();

@@ -1,7 +1,6 @@
 import { FrameTemplate, PhotoItem, EventConfig, PaperSize } from '../types';
-import { HOI_AN_SAMPLE_PHOTOS } from '../data/hoianSamplePhotos';
 import { isStripTemplate } from '../components/UI/frame-previews/FramePreviewCard';
-import { calculatePhotoLayerGeometry } from '../../../services/layout/frameGeometry';
+import { renderFrameComposition, loadImage } from '@/services/render/frame-compositor.service';
 
 export class CompositionEngine {
   public async renderComposition(
@@ -14,86 +13,20 @@ export class CompositionEngine {
     targetHeight: number = 2700,
     options?: { allowSampleFallback?: boolean; debugScale?: number }
   ): Promise<{ master: string; share: string; print: string }> {
-    const actualWidth = (frame as any).outputWidth || (frame as any).canvas?.width || targetWidth;
-    const actualHeight = (frame as any).outputHeight || (frame as any).canvas?.height || targetHeight;
-    const canvas = document.createElement('canvas');
-    canvas.width = actualWidth;
-    canvas.height = actualHeight;
-    const ctx = canvas.getContext('2d')!;
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-
-    // 1. Draw Frame Background
-    const bg = frame.assets.background;
-    ctx.fillStyle = (bg && bg !== 'transparent') ? bg : '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
     const isProduction = process.env.NODE_ENV === 'production' || (typeof window !== 'undefined' && (window as any).isProductionMode);
     const allowFallback = options?.allowSampleFallback ?? !isProduction;
 
-    // 2. Draw Captured Photo Layers BEHIND Frame PNG (Layer 0)
-    for (let i = 0; i < frame.slots.length; i++) {
-      const slot = frame.slots[i];
-      const photo = slotPhotos[i];
+    // Unified authoritative composition engine (Shared with Large Preview)
+    const compositionResult = await renderFrameComposition({
+      frame,
+      photos: slotPhotos,
+      allowSampleFallback: allowFallback,
+    });
 
-      if ((!photo || !photo.dataUrl) && !allowFallback) {
-        throw new Error(`[CompositionEngine] Missing required customer photo for slot ${i + 1}`);
-      }
-
-      const imgUrl = (photo && photo.dataUrl) ? photo.dataUrl : HOI_AN_SAMPLE_PHOTOS[i % HOI_AN_SAMPLE_PHOTOS.length];
-      try {
-        const img = await this.loadImage(imgUrl);
-        const imageW = photo?.width || (img as HTMLImageElement).naturalWidth || img.width || 1920;
-        const imageH = photo?.height || (img as HTMLImageElement).naturalHeight || img.height || 1080;
-
-        const geom = calculatePhotoLayerGeometry({
-          canvasWidth: canvas.width,
-          canvasHeight: canvas.height,
-          slot,
-          imageWidth: imageW,
-          imageHeight: imageH,
-          debugScale: options?.debugScale,
-        });
-
-        ctx.drawImage(img, geom.photoX, geom.photoY, geom.photoWidth, geom.photoHeight);
-      } catch {
-        try {
-          const fallbackImg = await this.loadImage(HOI_AN_SAMPLE_PHOTOS[i % HOI_AN_SAMPLE_PHOTOS.length]);
-          const geom = calculatePhotoLayerGeometry({
-            canvasWidth: canvas.width,
-            canvasHeight: canvas.height,
-            slot,
-            imageWidth: fallbackImg.width || 1920,
-            imageHeight: fallbackImg.height || 1080,
-          });
-
-          ctx.drawImage(fallbackImg, geom.photoX, geom.photoY, geom.photoWidth, geom.photoHeight);
-        } catch {
-          const geom = calculatePhotoLayerGeometry({
-            canvasWidth: canvas.width,
-            canvasHeight: canvas.height,
-            slot,
-            imageWidth: 1920,
-            imageHeight: 1080,
-          });
-          this.drawSlotPlaceholder(ctx, geom.slotX, geom.slotY, geom.slotWidth, geom.slotHeight, i + 1);
-        }
-      }
-    }
-
-    // 3. Draw Frame Overlay Image if present (check all potential overlay property names)
+    const canvas = compositionResult.canvas;
+    const ctx = canvas.getContext('2d')!;
     const overlayUrl = frame.assets?.overlay || (frame as any).assetUrl;
-    let hasOverlayImage = false;
-
-    if (overlayUrl) {
-      try {
-        const overlayImg = await this.loadImage(overlayUrl);
-        ctx.drawImage(overlayImg, 0, 0, canvas.width, canvas.height);
-        hasOverlayImage = true;
-      } catch (err) {
-        console.warn('Failed to load frame overlay image:', err);
-      }
-    }
+    const hasOverlayImage = !!overlayUrl;
 
     // 4. Draw Branding Fallback Text ONLY if NO overlay image is present
     if (!hasOverlayImage) {

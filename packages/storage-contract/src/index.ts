@@ -27,17 +27,75 @@ export interface MediaRetentionConfig {
   mode: 'audit_minimal' | 'privacy_strict';
   deferWhilePrintActive: boolean;
   printCleanupGraceMinutes: number;
+  devTtlMs?: number;
 }
 
-export type MediaCleanupStatus = 'pending' | 'eligible' | 'deleting' | 'deleted' | 'failed' | 'skipped_active' | 'deferred_print_active';
+export type MediaCleanupStatus =
+  | 'pending'
+  | 'eligible'
+  | 'deleting'
+  | 'deleted'
+  | 'failed'
+  | 'skipped_active'
+  | 'deferred_print_active'
+  | 'deferred_upload_active';
+
+export type SessionCleanupStatus =
+  | 'ACTIVE'
+  | 'COMPLETED'
+  | 'ABORTED'
+  | 'EXPIRED'
+  | 'active'
+  | 'completed'
+  | 'aborted'
+  | 'expired'
+  | 'abandoned'
+  | 'failed';
+
+export type SessionUploadState =
+  | 'NONE'
+  | 'PENDING'
+  | 'UPLOADING'
+  | 'RETRYING'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'none'
+  | 'pending'
+  | 'uploading'
+  | 'retrying'
+  | 'completed'
+  | 'failed';
+
+export type SessionPrintStatus =
+  | 'NONE'
+  | 'QUEUED'
+  | 'VALIDATING'
+  | 'PRINTING'
+  | 'RETRYING'
+  | 'COMPLETED'
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'FAILED_FINAL'
+  | 'CANCELLED'
+  | 'none'
+  | 'queued'
+  | 'validating'
+  | 'printing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
 
 export interface MediaCleanupSessionSnapshot {
   sessionId: string;
-  status: 'active' | 'completed' | 'expired' | 'abandoned' | 'failed';
+  status: SessionCleanupStatus;
+  createdAt?: string;
+  lastActivityAt?: string;
   completedAt?: string;
-  printStatus?: 'none' | 'queued' | 'validating' | 'printing' | 'completed' | 'failed' | 'cancelled';
+  uploadState?: SessionUploadState;
+  printStatus?: SessionPrintStatus;
   mediaRetentionUntil?: string;
   mediaDeletedAt?: string;
+  sessionPath?: string;
 }
 
 export interface MediaCleanupJob {
@@ -57,13 +115,21 @@ export interface MediaCleanupSummary {
   eligible: number;
   deleted: number;
   failed: number;
+  skippedActive: number;
+  deferredPrint: number;
+  deferredUpload: number;
+  bytesFreed?: number;
   lastRunAt?: string;
 }
 
 export interface MediaCleanupResult {
   job: MediaCleanupJob;
+  sessionId: string;
   deletedFiles: string[];
+  bytesFreed: number;
   redactedRows: number;
+  success: boolean;
+  error?: string;
 }
 
 export interface StorageAdapter {

@@ -27,6 +27,11 @@ contextBridge.exposeInMainWorld('momentai', {
       stopLiveView: (context) => invoke('cameraos:camera:liveview:stop', context),
       startRecording: (context) => invoke('cameraos:camera:recording:start', context),
       stopRecording: (context) => invoke('cameraos:camera:recording:stop', context),
+      onEvfFrame: (callback) => {
+        const handler = (_event, frame) => callback(frame);
+        ipcRenderer.on('cameraos:camera:evf:frame', handler);
+        return () => ipcRenderer.removeListener('cameraos:camera:evf:frame', handler);
+      },
     },
     storage: {
       health: () => invoke('cameraos:storage:health'),

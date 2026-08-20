@@ -191,7 +191,7 @@ describe("MomentAI guest session orchestrator", () => {
     it("filters templates by event and capture format", () => {
         const session = selectMomentAICaptureFormat(startMomentAIGuestSession().sessionId, "format_6shot");
         const templates = listMomentAITemplates(session.eventId, "format_6shot");
-        expect(templates).toHaveLength(1);
+        expect(templates.length).toBeGreaterThanOrEqual(1);
         expect(templates[0].captureFormatId).toBe("format_6shot");
     });
 

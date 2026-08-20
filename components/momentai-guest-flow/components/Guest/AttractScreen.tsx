@@ -2,7 +2,6 @@ import React from 'react';
 import { EventConfig } from '../../types';
 import { Camera, MapPin, ArrowRight } from 'lucide-react';
 import { motion } from 'motion/react';
-import hoianSceneryImg from '../../assets/images/hoian_ancient_town_scenery_1786437274938.jpg';
 
 interface AttractScreenProps {
   eventConfig: EventConfig;

@@ -36,9 +36,6 @@ function checkRepoHygiene() {
   const violations = [];
 
   for (const file of trackedFiles) {
-    // Exceptions for explicit safe files
-    if (file === 'docs/momentai-cameraos/.env.example') continue;
-
     for (const { pattern, reason } of FORBIDDEN_PATTERNS) {
       if (pattern.test(file)) {
         violations.push({ file, reason });

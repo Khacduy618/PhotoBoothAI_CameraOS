@@ -60,33 +60,6 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
 
   const isThumbnailMode = mode === 'thumbnail' || className.includes('max-h-full');
 
-  // ── 1. Thumbnail Mode: Raw Frame PNG ONLY (Zero customer photos, zero slots) ──
-  if (isThumbnailMode) {
-    return (
-      <div
-        className={`mx-auto relative overflow-hidden rounded-xs flex items-center justify-center border border-[#1A1A1A]/15 h-full max-h-full w-auto max-w-full shadow-[0_4px_16px_rgba(0,0,0,0.14)] ${className}`}
-        style={{
-          aspectRatio: `${width} / ${height}`,
-          backgroundColor: template.assets?.background && template.assets.background !== '#FDFCFB' ? template.assets.background : 'transparent',
-        }}
-      >
-        {overlayUrl ? (
-          <img
-            src={overlayUrl}
-            alt={template.name}
-            className="w-full h-full object-contain pointer-events-none"
-            loading="lazy"
-          />
-        ) : (
-          <div className="w-full h-full bg-[#f4f2ee] flex items-center justify-center text-xs text-[#1a1a1a]/40">
-            {template.name}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // ── 2. Large Selected Preview Mode: Shared Canvas renderFrameComposition ──
   const photosList = session.slotAssignments && session.slotAssignments.length > 0
     ? session.slotAssignments
     : session.photos;
@@ -96,6 +69,7 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
   const requestIdRef = useRef<number>(0);
 
   useEffect(() => {
+    if (isThumbnailMode) return;
     const currentRequestId = ++requestIdRef.current;
     const abortController = new AbortController();
 
@@ -123,14 +97,14 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
       signal: abortController.signal,
     })
       .then((result) => {
-        if (requestIdRef.current !== currentRequestId) return; // Stale async protection
+        if (requestIdRef.current !== currentRequestId || abortController.signal.aborted) return;
         const dataUrl = result.toDataURL('image/jpeg', 0.90);
         compositionCache.set(cacheKey, dataUrl);
         setComposedDataUrl(dataUrl);
         setIsComposing(false);
       })
       .catch((err) => {
-        if (requestIdRef.current !== currentRequestId) return;
+        if (requestIdRef.current !== currentRequestId || abortController.signal.aborted) return;
         if (err?.name === 'AbortError') return;
         console.warn('[FramePreviewCard] Composition error:', err);
         setIsComposing(false);
@@ -139,7 +113,35 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
     return () => {
       abortController.abort();
     };
-  }, [template, photosList, overlayUrl]);
+  }, [template, photosList, drawDataUrl, overlayUrl, isThumbnailMode]);
+
+  // ── 1. Thumbnail Mode: Raw Frame PNG ONLY (Zero customer photos, zero slots) ──
+  if (isThumbnailMode) {
+    return (
+      <div
+        className={`mx-auto relative overflow-hidden rounded-xs flex items-center justify-center border border-[#1A1A1A]/15 h-full max-h-full w-auto max-w-full shadow-[0_4px_16px_rgba(0,0,0,0.14)] ${className}`}
+        style={{
+          aspectRatio: `${width} / ${height}`,
+          backgroundColor: template.assets?.background && template.assets.background !== '#FDFCFB' ? template.assets.background : 'transparent',
+        }}
+      >
+        {overlayUrl ? (
+          <img
+            src={overlayUrl}
+            alt={template.name}
+            className="w-full h-full object-contain pointer-events-none"
+            loading="lazy"
+          />
+        ) : (
+          <div className="w-full h-full bg-[#f4f2ee] flex items-center justify-center text-xs text-[#1a1a1a]/40">
+            {template.name}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── 2. Large Selected Preview Mode: Shared Canvas renderFrameComposition ──
 
   return (
     <div

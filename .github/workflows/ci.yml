@@ -1,0 +1,63 @@
+name: CI - MomentAI CameraOS
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify & Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.0
+
+      - name: Setup Node.js (LTS)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Repository Hygiene
+        run: pnpm ci:repo
+
+      - name: Check Architecture Invariants
+        run: pnpm ci:architecture
+
+      - name: TypeScript Typecheck
+        run: pnpm typecheck
+
+      - name: ESLint Code Quality
+        run: pnpm lint
+
+      - name: Run Unit & Integration Tests (Mocked Hardware)
+        run: pnpm test
+
+      - name: Build Next.js Admin Web
+        run: pnpm build:web
+
+      - name: Build Electron Desktop Renderer
+        run: pnpm build:desktop

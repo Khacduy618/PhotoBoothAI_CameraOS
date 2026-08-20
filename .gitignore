@@ -64,3 +64,10 @@ apps/desktop/renderer/dist/
 playwright-report/
 test-results/
 artifacts/
+
+# Local native binaries and proprietary SDK bundles
+apps/desktop/electron/main/camera/canon/bin/canon_bridge_mac
+apps/desktop/electron/main/camera/canon/bin/Frameworks
+apps/desktop/electron/main/camera/canon/bin/CHHLLite.bundle
+apps/desktop/electron/main/camera/canon/bin/EdsImage.bundle
+apps/desktop/electron/main/camera/canon/bin/*.dSYM

@@ -1,6 +1,0 @@
-{
-  "name": "MomentAI CameraOS",
-  "description": "MomentAI Photobooth & CameraOS Platform — Canon EOS 6D Photobooth application with live view, auto capture, photo review, frame templates, photo pick assignment, print management & operator controls.",
-  "requestFramePermissions": ["camera", "microphone"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

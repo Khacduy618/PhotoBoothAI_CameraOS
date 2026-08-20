@@ -18,7 +18,7 @@ import {
   X,
   Delete,
 } from 'lucide-react';
-import { isStripTemplate } from '../UI/frame-previews/FramePreviewCard';
+import { FramePreviewCard, isStripTemplate } from '../UI/frame-previews/FramePreviewCard';
 import { GuestBottomNavigation } from '../UI/GuestBottomNavigation';
 
 interface DrawScreenProps {
@@ -188,10 +188,14 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
   // Check if point (x, y) falls inside any photo slot to PREVENT drawing over photos
   const isInsidePhotoSlot = (canvasX: number, canvasY: number, cW: number, cH: number) => {
     return template.slots.some((slot) => {
-      const sx = (slot.x / 100) * cW;
-      const sy = (slot.y / 100) * cH;
-      const sw = (slot.width / 100) * cW;
-      const sh = (slot.height / 100) * cH;
+      const unitX = slot.x <= 1 ? slot.x : slot.x / 100;
+      const unitY = slot.y <= 1 ? slot.y : slot.y / 100;
+      const unitW = slot.width <= 1 ? slot.width : slot.width / 100;
+      const unitH = slot.height <= 1 ? slot.height : slot.height / 100;
+      const sx = unitX * cW;
+      const sy = unitY * cH;
+      const sw = unitW * cW;
+      const sh = unitH * cH;
       return canvasX >= sx && canvasX <= sx + sw && canvasY >= sy && canvasY <= sy + sh;
     });
   };
@@ -1126,40 +1130,10 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
                   className={`${aspectClass} mx-auto relative border border-[#1A1A1A]/15 shadow-2xl overflow-hidden rounded-sm transition-all duration-300`}
                   style={{ backgroundColor: template.assets?.background || '#FDFCFB' }}
                 >
-                  {/* Photo Slots */}
-                  {template.slots.map((slot, i) => {
-                    const assignedPhoto = session.slotAssignments?.[i] || session.photos?.[i];
-                    const photoUrl = assignedPhoto ? assignedPhoto.dataUrl : HOI_AN_SAMPLE_PHOTOS[i % HOI_AN_SAMPLE_PHOTOS.length];
-
-                    return (
-                      <div
-                        key={slot.id || i}
-                        className="absolute z-0 overflow-hidden bg-[#E8E6E1] flex items-center justify-center pointer-events-none transition-all duration-300 shadow-2xs"
-                        style={{
-                          left: `${normalizePercent(slot.x)}%`,
-                          top: `${normalizePercent(slot.y)}%`,
-                          width: `${normalizePercent(slot.width)}%`,
-                          height: `${normalizePercent(slot.height)}%`,
-                          borderRadius: slot.borderRadius ? `${slot.borderRadius}px` : undefined,
-                        }}
-                      >
-                        <img
-                          src={photoUrl}
-                          alt={`Slot ${i + 1}`}
-                          className="w-full h-full object-cover object-center"
-                        />
-                      </div>
-                    );
-                  })}
-
-                  {/* Synchronized Frame Overlay Image */}
-                  {frameOverlay && (
-                    <img
-                      src={frameOverlay}
-                      alt="Khung mẫu overlay"
-                      className="absolute inset-0 z-10 h-full w-full object-contain pointer-events-none"
-                    />
-                  )}
+                  {/* Shared Base Composed Frame (Layer 10 & 20) */}
+                  <div className="absolute inset-0 w-full h-full pointer-events-none z-0">
+                    <FramePreviewCard template={template} session={session} mode="default" className="w-full h-full border-none shadow-none" />
+                  </div>
 
                   {/* Default Branding Text if no Overlay */}
                   {!frameOverlay && (

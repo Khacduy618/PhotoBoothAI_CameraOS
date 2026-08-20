@@ -7,6 +7,41 @@ import { motion } from 'motion/react';
 import { FramePreviewCard, isStripTemplate } from '../UI/frame-previews/FramePreviewCard';
 import { GuestBottomNavigation } from '../UI/GuestBottomNavigation';
 import { HOI_AN_SAMPLE_PHOTOS } from '../../data/hoianSamplePhotos';
+import { DEFAULT_FRAME_TEMPLATES } from '../../data/defaultTemplates';
+
+export function getSelectFrameLayoutPolicy(
+  productType?: string,
+  isStripFormat?: boolean,
+  isPremiumProduct?: boolean
+) {
+  if (isStripFormat || productType === 'STRIP_2' || productType === 'STRIP_4') {
+    return {
+      leftPanelClass: 'lg:col-span-4 xl:col-span-4',
+      rightPanelClass: 'lg:col-span-8 xl:col-span-8',
+      gridColsClass: 'grid-cols-3 sm:grid-cols-6 lg:grid-cols-6 gap-2 sm:gap-2.5',
+      targetPreviewRatio: 0.31,
+      targetRightRatio: 0.69,
+    };
+  }
+
+  if (isPremiumProduct) {
+    return {
+      leftPanelClass: 'lg:col-span-7 xl:col-span-6',
+      rightPanelClass: 'lg:col-span-5 xl:col-span-6',
+      gridColsClass: 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-3.5 sm:gap-4',
+      targetPreviewRatio: 0.43,
+      targetRightRatio: 0.57,
+    };
+  }
+
+  return {
+    leftPanelClass: 'lg:col-span-5 xl:col-span-5',
+    rightPanelClass: 'lg:col-span-7 xl:col-span-7',
+    gridColsClass: 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-3.5 sm:gap-4',
+    targetPreviewRatio: 0.38,
+    targetRightRatio: 0.62,
+  };
+}
 
 interface SelectFrameScreenProps {
   session: SessionData;
@@ -21,34 +56,43 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
   onSelectFrame,
   onBackToShots,
 }) => {
-  const [registryTemplates, setRegistryTemplates] = useState<FrameTemplate[]>([]);
+  const currentEventId = session.eventId || 'event_hoi_an_heritage';
+
+  const [registryTemplates, setRegistryTemplates] = useState<FrameTemplate[]>(() => {
+    const initialDefs = LocalFrameRegistry.getPublishedDefinitions();
+    const eventDefs = initialDefs.filter((d) => !d.eventId || d.eventId === currentEventId);
+    return eventDefs.map(mapImportedFrameDefinitionToFrameTemplate);
+  });
 
   useEffect(() => {
     const updateFromRegistry = async () => {
-      await LocalFrameRegistry.refreshFromAdminDb().catch(() => undefined);
+      await LocalFrameRegistry.refreshFromAdminDb(currentEventId).catch(() => undefined);
       const defs = LocalFrameRegistry.getPublishedDefinitions();
-      const mapped = defs.map(mapImportedFrameDefinitionToFrameTemplate);
-      setRegistryTemplates(mapped);
+      const eventDefs = defs.filter((d) => !d.eventId || d.eventId === currentEventId);
+      setRegistryTemplates(eventDefs.map(mapImportedFrameDefinitionToFrameTemplate));
     };
 
     void updateFromRegistry();
     return LocalFrameRegistry.subscribe(() => {
       const defs = LocalFrameRegistry.getPublishedDefinitions();
-      const mapped = defs.map(mapImportedFrameDefinitionToFrameTemplate);
-      setRegistryTemplates(mapped);
+      const eventDefs = defs.filter((d) => !d.eventId || d.eventId === currentEventId);
+      setRegistryTemplates(eventDefs.map(mapImportedFrameDefinitionToFrameTemplate));
     });
-  }, []);
+  }, [currentEventId]);
 
   const isPremiumProduct = session.product?.premium === true || session.product?.id === 'PREMIUM_POSTCARD';
 
-  // Build combined available frame templates list from imported Admin DB definitions
+  // Build combined available frame templates list from imported Admin DB definitions + fallback default seeds if DB is empty
   const allTemplates = useMemo(() => {
     const custom = customTemplates || [];
-    const map = new Map<string, FrameTemplate>();
-    [...registryTemplates, ...custom].forEach((t) => {
-      map.set(t.id, t);
-    });
-    return Array.from(map.values());
+    if (registryTemplates.length > 0 || custom.length > 0) {
+      const map = new Map<string, FrameTemplate>();
+      [...registryTemplates, ...custom].forEach((t) => {
+        map.set(t.id, t);
+      });
+      return Array.from(map.values());
+    }
+    return DEFAULT_FRAME_TEMPLATES;
   }, [customTemplates, registryTemplates]);
 
   const isStripProduct =
@@ -67,62 +111,72 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
 
   const requiredShots = session.product?.requiredShots || session.captureCount || 4;
 
-  // Filter templates matching current product specs strictly!
+  // Filter templates matching current product — targetProduct is the primary source of truth.
   const validTemplates = useMemo(() => {
     const filtered = allTemplates.filter((t) => {
-      const isTemplateStrip = isStripTemplate(t);
       const templateSlotCount = t.slots?.length || t.shotCount || t.layout?.slotCount || 4;
       const targetProduct = (t as { targetProduct?: string }).targetProduct;
 
       if (isPremiumProduct) {
-        return (targetProduct === 'PREMIUM_POSTCARD' || !isTemplateStrip) && templateSlotCount === 1;
+        // Primary: targetProduct match. Fallback: slotCount===1 (only unambiguous case)
+        if (targetProduct) return targetProduct === 'PREMIUM_POSTCARD';
+        return templateSlotCount === 1;
       }
 
-      if (isStripProduct) {
-        return (targetProduct === session.product?.id || isTemplateStrip) && templateSlotCount === requiredShots;
-      }
-
-      if (isSheetProduct) {
-        return (targetProduct === session.product?.id || !isTemplateStrip) && templateSlotCount === requiredShots;
+      if (isStripProduct || isSheetProduct) {
+        // Slot count must match regardless
+        if (templateSlotCount !== requiredShots) return false;
+        // Primary: targetProduct match
+        if (targetProduct) return targetProduct === session.product?.id;
+        // Legacy fallback: use isStripTemplate metadata signals (no geometry)
+        const isTemplateStrip = isStripTemplate(t);
+        return isStripProduct ? isTemplateStrip : !isTemplateStrip;
       }
 
       return templateSlotCount === requiredShots;
     });
 
-    if (filtered.length > 0) return filtered;
+    // If no templates found, show all slot-count matches with a console warning
+    if (filtered.length === 0) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('[SelectFrameScreen] No templates matched product filter. Product:', session.product?.id, 'Required shots:', requiredShots);
+      }
+      return allTemplates.filter(
+        (t) => (t.slots?.length || t.shotCount || t.layout?.slotCount) === requiredShots,
+      );
+    }
 
-    return allTemplates.filter((t) => (t.slots?.length || t.shotCount || t.layout?.slotCount) === requiredShots);
-  }, [allTemplates, isPremiumProduct, isStripProduct, isSheetProduct, requiredShots]);
+    return filtered;
+  }, [allTemplates, isPremiumProduct, isStripProduct, isSheetProduct, requiredShots, session.product?.id]);
 
-  const [selectedFrameId, setSelectedFrameId] = useState<string | null>(
-    validTemplates.length > 0 ? validTemplates[0].id : null
-  );
+  const [selectedFrameId, setSelectedFrameId] = useState<string>(() => {
+    return session.selectedFrame?.id || validTemplates[0]?.id || '';
+  });
   const [selectedPhotoIdx, setSelectedPhotoIdx] = useState<number>(session.selectedPhotoIndex ?? 0);
-  const [activeCategory, setActiveCategory] = useState<string>('ALL');
 
-  const categoryFilters = useMemo(
-    () => ['ALL', ...Array.from(new Set(validTemplates.map((template) => template.category)))],
-    [validTemplates]
-  );
+  const visibleTemplates = validTemplates;
 
-  const filteredTemplates = useMemo(
-    () =>
-      activeCategory === 'ALL'
-        ? validTemplates
-        : validTemplates.filter((template) => template.category === activeCategory),
-    [validTemplates, activeCategory]
-  );
+  useEffect(() => {
+    if (visibleTemplates.length > 0 && (!selectedFrameId || !visibleTemplates.some((t) => t.id === selectedFrameId))) {
+      setSelectedFrameId(visibleTemplates[0].id);
+    }
+  }, [visibleTemplates, selectedFrameId]);
 
-  const visibleTemplates = filteredTemplates.length > 0 ? filteredTemplates : validTemplates;
-  const selectedTemplate =
-    validTemplates.find((t) => t.id === selectedFrameId) || visibleTemplates[0] || validTemplates[0];
+  const selectedTemplate = useMemo(() => {
+    return visibleTemplates.find((t) => t.id === selectedFrameId) || visibleTemplates[0] || allTemplates[0];
+  }, [visibleTemplates, selectedFrameId, allTemplates]);
 
-  // Update session slotAssignments for preview if Premium
+  const isStripFormat = selectedTemplate ? isStripTemplate(selectedTemplate) : isStripProduct;
+  const layoutPolicy = useMemo(() => {
+    return getSelectFrameLayoutPolicy(session.product?.id, isStripFormat, isPremiumProduct);
+  }, [session.product?.id, isStripFormat, isPremiumProduct]);
+
   const sessionForPreview: SessionData = useMemo(() => {
     if (!isPremiumProduct || session.photos.length === 0) return session;
     const chosenPhoto = session.photos[selectedPhotoIdx] || session.photos[0];
     return {
       ...session,
+      photos: [chosenPhoto],
       slotAssignments: [chosenPhoto],
     };
   }, [session, isPremiumProduct, selectedPhotoIdx]);
@@ -134,153 +188,92 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
   };
 
   return (
-    <div className="w-full h-screen flex flex-col justify-between px-4 py-3 sm:px-8 sm:py-5 bg-[#FDFCFB] text-[#1A1A1A] select-none overflow-hidden">
+    <div className="w-full h-screen bg-[#FDFCFB] flex flex-col justify-between p-3 sm:p-5 select-none overflow-hidden">
       {/* Top Header - Left Aligned */}
-      <div className="w-full max-w-[98%] mx-auto flex flex-col items-start text-left mb-1">
-        <h2 className="text-3xl sm:text-5xl font-serif tracking-tight text-[#1A1A1A]">CHỌN MẪU KHUNG</h2>
-        <p className="text-xs sm:text-sm opacity-75 mt-0.5 font-sans max-w-2xl">
+      <div className="w-full max-w-[99%] mx-auto flex flex-col items-start text-left flex-none mb-2">
+        <h2 className="text-2xl sm:text-4xl font-serif tracking-tight text-[#1A1A1A]">CHỌN MẪU KHUNG</h2>
+        <p className="text-xs sm:text-sm text-[#1A1A1A]/70 font-sans mt-0.5">
           {isPremiumProduct
             ? 'Gói Premium Postcard: Chọn 1 ảnh đẹp nhất trong 3 ảnh đã chụp & Mẫu bưu thiếp 10×15.'
-            : `Gói đã chọn: ${session.product?.name || 'Đã chọn'} (${
+            : `Gói đã chọn: ${session.product?.name || 'Photo Strip'} (${
                 isStripProduct ? `${requiredShots} Ô Dải Strip 5x15cm` : `${requiredShots} Ô Tấm Sheet 10x15cm`
               }).`}
         </p>
       </div>
 
-      {/* Main Grid: 50%/50% for Premium Postcard, 5:7 (41.6%/58.3%) for Strip & Sheet products */}
-      <div
-        className={`w-full max-w-[98%] mx-auto flex-1 grid grid-cols-1 lg:grid-cols-12 my-auto py-1 items-center overflow-hidden ${
-          isPremiumProduct ? 'gap-6 xl:gap-8' : 'gap-4 xl:gap-5'
-        }`}
-      >
-        {/* Live Preview Display Card */}
+      {/* MAIN TWO-COLUMN WORKSPACE CONTAINER */}
+      <div className="flex-1 max-w-[99%] w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-4 items-start overflow-hidden min-h-0">
+        {/* LEFT PREVIEW PANEL: Clean, No Gray BG, No Border, Only Soft Shadow */}
         <div
-          className={`${
-            isPremiumProduct ? 'lg:col-span-6 xl:col-span-6' : 'lg:col-span-5 xl:col-span-5'
-          } w-full h-full flex flex-col items-center justify-center order-2 lg:order-1 p-1`}
+          className={`${layoutPolicy.leftPanelClass} h-full flex flex-col items-center justify-center bg-transparent p-1 overflow-hidden relative`}
         >
-          {selectedTemplate && (
-            <motion.div
-              key={selectedTemplate.id}
-              initial={{ opacity: 0, scale: 0.99 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.2 }}
-              className="w-full h-full flex flex-col items-center justify-center relative"
-            >
-              <FramePreviewCard template={selectedTemplate} session={sessionForPreview} />
-            </motion.div>
+          {selectedTemplate ? (
+            <FramePreviewCard key={selectedTemplate.id} template={selectedTemplate} session={sessionForPreview} mode="default" className={`shadow-lg drop-shadow-sm ${isPremiumProduct ? 'scale-[1]' : 'scale-[1.04]'}`} />
+          ) : (
+            <div className="text-center opacity-50 font-sans text-sm">Chưa chọn mẫu khung</div>
           )}
         </div>
 
-        {/* Right column: premium photo picker, filter, template list */}
+        {/* RIGHT PANEL: TEMPLATE LIST GRID (FILTERED BY EVENT & PRODUCT) */}
         <div
-          className={`${
-            isPremiumProduct ? 'lg:col-span-6 xl:col-span-6' : 'lg:col-span-7 xl:col-span-7'
-          } order-1 lg:order-2 flex min-h-[68vh] flex-col justify-between`}
+          className={`${layoutPolicy.rightPanelClass} h-full flex flex-col justify-start overflow-hidden`}
         >
-          <div>
-            {/* PREMIUM 1-OF-3 PHOTO SELECTOR STRIP */}
-            {isPremiumProduct && session.photos.length > 0 && (
-              <div className="mb-2 p-2 rounded-md bg-[#FFF9F0] border border-[#f59e0b]/40">
-                <div className="mb-1 text-[11px] font-black uppercase text-[#f59e0b] tracking-wider">
-                  CHỌN 1 ẢNH CHÍNH CHO BƯU THIẾP (3 SHOTS)
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {session.photos.map((photo, index) => {
-                    const isPhotoSelected = selectedPhotoIdx === index;
-                    return (
-                      <button
-                        key={photo.id || index}
-                        type="button"
-                        onClick={() => setSelectedPhotoIdx(index)}
-                        className={`relative aspect-[3/2] rounded-xs overflow-hidden border transition-all cursor-pointer bg-black/5 ${
-                          isPhotoSelected
-                            ? 'border-[#f59e0b] ring-2 ring-[#f59e0b]/40 shadow-xs scale-[1.01]'
-                            : 'border-[#1A1A1A]/15 opacity-75 hover:opacity-100'
-                        }`}
-                      >
-                        <img
-                          src={photo.dataUrl}
-                          alt={`Shot ${index + 1}`}
-                          className="w-full h-full object-contain bg-black/10"
-                        />
-                        {isPhotoSelected && (
-                          <div className="absolute top-1 right-1 p-0.5 rounded-full bg-[#f59e0b] text-[#FDFCFB] shadow-xs">
-                            <Check className="w-3 h-3 stroke-[3]" />
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+          {isPremiumProduct && session.photos.length > 0 && (
+            <div className="mb-3 flex-none bg-[#F4F2EE] p-2.5 rounded-xs border border-[#1A1A1A]/10">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-[#D97706] mb-2 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>CHỌN 1 ẢNH CHÍNH CHO BƯU THIẾP ({session.photos.length} SHOTS)</span>
               </div>
-            )}
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5">
+                {session.photos.map((photo, index) => {
+                  const isPhotoSelected = selectedPhotoIdx === index;
+                  return (
+                    <button
+                      key={photo.id || index}
+                      type="button"
+                      onClick={() => setSelectedPhotoIdx(index)}
+                      className={`relative aspect-[3/2] overflow-hidden rounded-xs border-2 transition-all cursor-pointer ${
+                        isPhotoSelected ? 'border-[#D97706] ring-2 ring-[#D97706]/40 scale-[1.02] shadow-sm' : 'border-transparent opacity-75 hover:opacity-100'
+                      }`}
+                    >
+                      <img src={photo.dataUrl} alt={`Shot #${index + 1}`} className="w-full h-full object-cover" />
+                      {isPhotoSelected && (
+                        <div className="absolute top-1 right-1 bg-[#D97706] text-white rounded-full p-0.5 shadow-xs"><Check className="w-3 h-3 stroke-[3]" /></div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-            {/* Category Filter Nav Bar (Only show if multiple categories exist in valid list) */}
-            {categoryFilters.length > 2 && (
-              <nav
-                className="mb-3 flex flex-wrap justify-start lg:justify-end gap-2 border-y border-[#1A1A1A]/10 py-2.5"
-                aria-label="Lọc mẫu khung"
-              >
-                {categoryFilters.map((category) => (
-                  <button
-                    key={category}
-                    type="button"
-                    onClick={() => setActiveCategory(category)}
-                    className={`px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] border transition-colors rounded-xs cursor-pointer ${
-                      activeCategory === category
-                        ? 'bg-[#1A1A1A] text-[#FDFCFB] border-[#1A1A1A]'
-                        : 'bg-[#F4F2EE] text-[#1A1A1A] border-[#1A1A1A]/15 hover:border-[#1A1A1A]/50'
-                    }`}
-                  >
-                    {category}
-                  </button>
-                ))}
-              </nav>
-            )}
-          </div>
-
-          {/* Template Grid List - Taller height (max-h 64-72vh) ONLY for Non-Premium products */}
           <div
-            className={`grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-3.5 sm:gap-4 items-start overflow-y-auto pr-1 flex-1 ${
-              isPremiumProduct ? 'max-h-[46vh] xl:max-h-[56vh]' : 'max-h-[64vh] xl:max-h-[72vh]'
+            className={`flex flex-wrap items-start justify-start gap-3.5 overflow-y-auto pt-3.5 pb-3 pl-[10px] pr-2 flex-1 ${
+              isPremiumProduct ? 'max-h-[50vh] xl:max-h-[60vh]' : 'max-h-[76vh] xl:max-h-[82vh]'
             }`}
           >
             {visibleTemplates.map((frame) => {
               const isSelected = selectedFrameId === frame.id;
-              const isStrip = isStripTemplate(frame);
+              const isLandscape = (frame.outputWidth || 1800) > (frame.outputHeight || 2700);
 
               return (
                 <motion.button
                   type="button"
                   key={frame.id}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
                   onClick={() => setSelectedFrameId(frame.id)}
-                  aria-label={frame.name}
-                  className={`relative overflow-hidden border-2 transition-all cursor-pointer rounded-xs p-1.5 flex flex-col items-center justify-start bg-transparent text-[#1A1A1A] ${
-                    isSelected
-                      ? 'border-[#10b981] shadow-lg ring-2 ring-[#10b981]'
-                      : 'border-[#1A1A1A]/15 hover:border-[#1A1A1A]/60'
-                  }`}
+                  className="cursor-pointer flex items-center justify-start bg-transparent p-0.5 focus:outline-none flex-none"
                 >
-                  <div className="w-full h-36 sm:h-40 relative flex items-center justify-center p-2 bg-[#1A1A1A]/5 rounded-xs overflow-hidden pointer-events-none">
-                    <FramePreviewCard template={frame} session={sessionForPreview} mode="thumbnail" className="pointer-events-none shadow-xs" />
+                  <div
+                    className={`relative flex items-center justify-center overflow-hidden rounded-xs transition-all border border-[#1A1A1A]/15 ${
+                      isStripFormat
+                        ? 'h-64 sm:h-72 xl:h-[68vh]'
+                        : isLandscape
+                        ? 'h-40 sm:h-48 xl:h-52'
+                        : 'h-52 sm:h-60 xl:h-64'
+                    } ${isSelected ? 'ring-3 ring-[#10b981] shadow-[0_10px_28px_rgba(16,185,129,0.35)] z-10 scale-[1.02]' : 'shadow-[0_6px_20px_rgba(0,0,0,0.16)] opacity-85 hover:opacity-100 hover:scale-[1.01] hover:shadow-[0_10px_25px_rgba(0,0,0,0.22)]'}`}
+                  >
+                    <FramePreviewCard template={frame} session={sessionForPreview} mode="thumbnail" className="h-full w-auto max-w-full max-h-full pointer-events-none object-contain" />
                   </div>
-
-                  <div className="mt-2 w-full text-left">
-                    <div className="text-[11px] font-serif font-bold truncate">{frame.name}</div>
-                    <div className="text-[9px] opacity-70 font-mono flex items-center justify-between mt-0.5">
-                      <span>{isStrip ? '5x15cm Strip' : '10x15cm Sheet'}</span>
-                      <span>{frame.slots.length} Slots</span>
-                    </div>
-                  </div>
-
-                  {isSelected && (
-                    <div className="absolute top-2 right-2 p-1 rounded-full bg-[#10b981] text-white shadow-xs z-30">
-                      <Check className="w-3.5 h-3.5 stroke-[3]" />
-                    </div>
-                  )}
                 </motion.button>
               );
             })}
@@ -288,10 +281,9 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
         </div>
       </div>
 
-      {/* FIXED BOTTOM NAVIGATION AT SCREEN ROOT */}
       <GuestBottomNavigation
         onBack={onBackToShots}
-        backText="QUAY LẠI CHỌN GÓI"
+        backText="QUAY LẠI"
         onNext={handleContinue}
         nextText="TIẾP TỤC TRANG TRÍ"
         nextDisabled={!selectedTemplate}

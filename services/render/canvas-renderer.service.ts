@@ -5,6 +5,7 @@ import type { PreparedAssets } from "./render-asset-loader.service";
 import type { PreparedTextLayouts } from "./text-layout.service";
 import { resolveStickerConfig } from "@/config/sticker.config";
 import { calculateObjectFitRect } from "./object-fit.service";
+import { calculatePhotoLayerGeometry } from "@/services/layout/frameGeometry";
 import { resolveRenderPlan } from "./render-plan.service";
 
 export interface CanvasRendererOptions {
@@ -142,20 +143,20 @@ export class CanvasRenderer {
                 }
                 if (context.clip) context.clip();
 
-                const imgWidth = (img as HTMLImageElement).naturalWidth || img.width || 800;
-                const imgHeight = (img as HTMLImageElement).naturalHeight || img.height || 600;
-                const drawRect = calculateObjectFitRect({
+                const imgWidth = (img as HTMLImageElement).naturalWidth || img.width || 1920;
+                const imgHeight = (img as HTMLImageElement).naturalHeight || img.height || 1080;
+                const fitMode = renderConfig.frame.photoFit === "contain" ? "contain" : "cover";
+                const geom = calculatePhotoLayerGeometry({
+                    canvasWidth: canvas.width,
+                    canvasHeight: canvas.height,
+                    slot: { x: slotX, y: slotY, width: slotWidth, height: slotHeight },
                     imageWidth: imgWidth,
                     imageHeight: imgHeight,
-                    targetX: slotX,
-                    targetY: slotY,
-                    targetWidth: slotWidth,
-                    targetHeight: slotHeight,
-                    fit: renderConfig.frame.photoFit ?? "contain",
+                    fitMode,
                 });
 
                 if (context.drawImage) {
-                    context.drawImage(img as CanvasImageSource, drawRect.x, drawRect.y, drawRect.width, drawRect.height);
+                    context.drawImage(img as CanvasImageSource, geom.photoX, geom.photoY, geom.photoWidth, geom.photoHeight);
                 }
                 if (context.restore) context.restore();
             } else {

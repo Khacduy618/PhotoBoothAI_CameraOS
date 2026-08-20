@@ -103,12 +103,21 @@ export function shouldClearFrameSlotPixel({
     return isCanvaWhiteSlotPixel(r, g, b, a);
 }
 
+const punchOutCache = new Map<string, string>();
+
 export async function punchOutFrameSlots(
     imageUrl: string,
     slots: readonly PunchOutSlot[],
 ): Promise<string> {
     if (typeof window === "undefined" || !imageUrl || slots.length === 0) {
         return imageUrl;
+    }
+
+    const slotSig = slots.map((s) => `${s.x.toFixed(3)},${s.y.toFixed(3)},${s.width.toFixed(3)},${s.height.toFixed(3)}`).join(";");
+    const cacheKey = `${imageUrl.slice(0, 120)}_${imageUrl.length}_${slots.length}_${slotSig}`;
+    const cached = punchOutCache.get(cacheKey);
+    if (cached) {
+        return cached;
     }
 
     return new Promise((resolve) => {
@@ -166,7 +175,9 @@ export async function punchOutFrameSlots(
                 });
 
                 ctx.putImageData(imageData, 0, 0);
-                resolve(canvas.toDataURL("image/png"));
+                const resultUrl = canvas.toDataURL("image/png");
+                punchOutCache.set(cacheKey, resultUrl);
+                resolve(resultUrl);
             } catch {
                 resolve(imageUrl);
             }

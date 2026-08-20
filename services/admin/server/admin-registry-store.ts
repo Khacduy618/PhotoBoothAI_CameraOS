@@ -3,6 +3,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 
 import type { FrameDefinition } from "@/services/frame-import/frame-import.types";
+import { resolveTargetProduct } from "@/services/frame/resolveTargetProduct";
 
 export interface AdminEventRecord {
     eventId: string;
@@ -133,7 +134,10 @@ function runDatabaseMigrations(db: Database): void {
         // Ignore legacy migration error
     }
 
-
+    db.exec(`
+        DROP TABLE IF EXISTS admin_events;
+        DROP TABLE IF EXISTS frame_definitions;
+    `);
 
     const now = new Date().toISOString();
     const insertStmt = db.prepare(`
@@ -178,8 +182,10 @@ function getStoredFrameId(eventId: string, frameId: string): string {
 
 function mapFrameRow(row: FrameRow): AdminFrameRecord {
     const parsed = JSON.parse(row.definition_json) as FrameDefinition;
+    const targetProduct = parsed.targetProduct || resolveTargetProduct(parsed) || undefined;
     return {
         ...parsed,
+        targetProduct,
         id: parsed.id || row.frame_id,
         eventId: row.event_id,
         status: (row.status === "private" ? "private" : "published") as "published" | "private",
@@ -258,6 +264,7 @@ export function saveAdminFrame(definition: FrameDefinition, eventId?: string): A
     const createdAt = existing?.created_at ?? definition.createdAt ?? now;
     const itemToSave: FrameDefinition = {
         ...definition,
+        targetProduct: definition.targetProduct || resolveTargetProduct(definition) || undefined,
         id: frameId,
         status: definition.status || "published",
         createdAt,

@@ -1,9 +1,10 @@
 import type { FrameConfig } from "@/types/theme";
-import type { FrameDefinition } from "@/services/frame-import/frame-import.types";
+import type { FrameDefinition, FrameDefinitionSlot } from "@/services/frame-import/frame-import.types";
 import { convertFrameDefinitionToRuntimeFrame } from "@/services/frame-import/frame-definition.adapter";
-import { punchOutFrameSlots } from "@/services/frame-import/transparent-punchout.service";
+import { normalizeSlotToUnit } from "@/services/frame/resolveTargetProduct";
 
-const STORAGE_KEY = "photobooth_imported_frames";
+// v3: Immutable original frame PNGs with canonical 0..1 normalized slot geometry.
+const STORAGE_KEY = "photobooth_imported_frames_v3";
 const REGISTRY_CHANGED_EVENT = "cameraos-frame-registry-changed";
 
 type RegistryListener = () => void;
@@ -14,6 +15,31 @@ function getFrameTimestamp(definition: FrameDefinition): number {
 
 function sortByLatestUpdate(definitions: readonly FrameDefinition[]): FrameDefinition[] {
     return [...definitions].sort((a, b) => getFrameTimestamp(b) - getFrameTimestamp(a));
+}
+
+function normalizeFrameDefinition(definition: FrameDefinition): FrameDefinition {
+    const width = definition.outputWidth > 0 ? definition.outputWidth : 1800;
+    const height = definition.outputHeight > 0 ? definition.outputHeight : 2700;
+
+    const normalizedSlots: FrameDefinitionSlot[] = (definition.slots || []).map((slot, index) => {
+        const unitBounds = normalizeSlotToUnit(slot, width, height);
+        return {
+            ...slot,
+            id: slot.id || `slot_${index + 1}`,
+            index: typeof slot.index === "number" ? slot.index : index + 1,
+            x: unitBounds.x,
+            y: unitBounds.y,
+            width: unitBounds.width,
+            height: unitBounds.height,
+        };
+    });
+
+    return {
+        ...definition,
+        outputWidth: width,
+        outputHeight: height,
+        slots: normalizedSlots,
+    };
 }
 
 function isValidFrameDefinition(definition: FrameDefinition): boolean {
@@ -40,9 +66,7 @@ function isValidFrameDefinition(definition: FrameDefinition): boolean {
         slot.x >= 0 &&
         slot.y >= 0 &&
         slot.width > 0 &&
-        slot.height > 0 &&
-        slot.x + slot.width <= 100.1 &&
-        slot.y + slot.height <= 100.1
+        slot.height > 0
     ));
 }
 
@@ -67,10 +91,8 @@ class LocalFrameRegistryService {
                 const parsed = JSON.parse(raw);
                 if (Array.isArray(parsed)) {
                     this.inMemoryDefinitions = sortByLatestUpdate(
-                        parsed.filter(isValidFrameDefinition),
+                        parsed.filter(isValidFrameDefinition).map(normalizeFrameDefinition),
                     );
-                    // Asynchronously ensure all loaded definitions have transparent slot cutouts
-                    void this.ensureTransparentCutouts();
                 }
             }
         } catch {
@@ -97,30 +119,6 @@ class LocalFrameRegistryService {
         window.addEventListener(REGISTRY_CHANGED_EVENT, () => {
             this.notify();
         });
-    }
-
-    private async ensureTransparentCutouts(): Promise<void> {
-        if (typeof window === "undefined") return;
-
-        let changed = false;
-        const updated = await Promise.all(
-            this.inMemoryDefinitions.map(async (def) => {
-                if (def.assetUrl && def.slots && def.slots.length > 0) {
-                    const transparentUrl = await punchOutFrameSlots(def.assetUrl, def.slots);
-                    if (transparentUrl !== def.assetUrl) {
-                        changed = true;
-                        return { ...def, assetUrl: transparentUrl };
-                    }
-                }
-                return def;
-            })
-        );
-
-        if (changed) {
-            this.inMemoryDefinitions = sortByLatestUpdate(updated);
-            this.saveToStorage();
-            this.notify();
-        }
     }
 
     private saveToStorage(): void {
@@ -152,14 +150,115 @@ class LocalFrameRegistryService {
         }
     }
 
+    private hasDefinitionsChanged(incoming: FrameDefinition[]): boolean {
+        if (incoming.length !== this.inMemoryDefinitions.length) return true;
+        for (let i = 0; i < incoming.length; i += 1) {
+            const a = incoming[i];
+            const b = this.inMemoryDefinitions[i];
+            if (
+                a.id !== b.id ||
+                a.updatedAt !== b.updatedAt ||
+                a.status !== b.status ||
+                a.targetProduct !== b.targetProduct ||
+                a.outputWidth !== b.outputWidth ||
+                a.outputHeight !== b.outputHeight ||
+                a.assetUrl !== b.assetUrl ||
+                a.slots?.length !== b.slots?.length
+            ) {
+                return true;
+            }
+            if (a.slots && b.slots) {
+                for (let s = 0; s < a.slots.length; s++) {
+                    const sa = a.slots[s];
+                    const sb = b.slots[s];
+                    if (
+                        Math.abs(sa.x - sb.x) > 0.0001 ||
+                        Math.abs(sa.y - sb.y) > 0.0001 ||
+                        Math.abs(sa.width - sb.width) > 0.0001 ||
+                        Math.abs(sa.height - sb.height) > 0.0001
+                    ) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     public async refreshFromAdminDb(eventId?: string): Promise<void> {
         if (typeof window === "undefined") return;
+
+        const windowAdmin = (window as unknown as { momentai?: { admin?: { templates?: { list(eventId?: string): Promise<{ ok?: boolean; value?: FrameDefinition[] }> } } } }).momentai?.admin;
+        if (windowAdmin?.templates?.list) {
+            try {
+                const res = await windowAdmin.templates.list(eventId);
+                if (res?.ok && Array.isArray(res.value) && res.value.length > 0) {
+                    const definitions = res.value
+                        .map((t: unknown) => {
+                            const item = t as Partial<FrameDefinition> & { templateId?: string };
+                            if (!item.id && item.templateId) item.id = item.templateId;
+                            if (!item.kind) item.kind = "png-overlay";
+                            if (!item.source) item.source = "canva";
+                            if (!item.assetUrl && item.assets?.overlay) item.assetUrl = item.assets.overlay;
+                            if (!item.assets && item.assetUrl) item.assets = { overlay: item.assetUrl };
+                            if (!item.shotCount && item.slots) item.shotCount = item.slots.length as FrameDefinition["shotCount"];
+                            return item as FrameDefinition;
+                        })
+                        .filter(isValidFrameDefinition)
+                        .map(normalizeFrameDefinition);
+
+                    const incomingSorted = sortByLatestUpdate(definitions);
+                    let nextDefs: FrameDefinition[];
+                    if (eventId) {
+                        const otherEventDefs = this.inMemoryDefinitions.filter(
+                            (d) => d.eventId && d.eventId !== eventId,
+                        );
+                        nextDefs = sortByLatestUpdate([...otherEventDefs, ...incomingSorted]);
+                    } else {
+                        nextDefs = incomingSorted;
+                    }
+
+                    if (!this.hasDefinitionsChanged(nextDefs)) {
+                        return; // Smart cache match!
+                    }
+
+                    this.inMemoryDefinitions = nextDefs;
+                    this.saveToStorage();
+                    this.notify();
+                    return;
+                }
+            } catch {
+                // Ignore IPC error and fall back to web fetch
+            }
+        }
+
         const query = eventId ? `?eventId=${encodeURIComponent(eventId)}&published=1` : "?published=1";
-        const response = await fetch(`/api/admin/frames${query}`);
-        const payload = await response.json() as { ok?: boolean; frames?: FrameDefinition[] };
-        if (payload.ok && Array.isArray(payload.frames)) {
-            this.inMemoryDefinitions = sortByLatestUpdate(payload.frames.filter(isValidFrameDefinition));
-            this.notify();
+        try {
+            const response = await fetch(`/api/admin/frames${query}`);
+            const payload = await response.json() as { ok?: boolean; frames?: FrameDefinition[] };
+            if (payload.ok && Array.isArray(payload.frames)) {
+                const incomingSorted = sortByLatestUpdate(
+                    payload.frames.filter(isValidFrameDefinition).map(normalizeFrameDefinition)
+                );
+                let nextDefs: FrameDefinition[];
+                if (eventId) {
+                    const otherEventDefs = this.inMemoryDefinitions.filter(
+                        (d) => d.eventId && d.eventId !== eventId,
+                    );
+                    nextDefs = sortByLatestUpdate([...otherEventDefs, ...incomingSorted]);
+                } else {
+                    nextDefs = incomingSorted;
+                }
+
+                if (!this.hasDefinitionsChanged(nextDefs)) {
+                    return; // Smart cache match!
+                }
+                this.inMemoryDefinitions = nextDefs;
+                this.saveToStorage();
+                this.notify();
+            }
+        } catch {
+            // Ignore fetch failure in standalone IPC mode
         }
     }
 

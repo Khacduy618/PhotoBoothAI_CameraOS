@@ -8,6 +8,7 @@ import { AutoCaptureScreen } from './components/Guest/AutoCaptureScreen';
 import { SelectFrameScreen } from './components/Guest/SelectFrameScreen';
 import { DrawScreen } from './components/Guest/DrawScreen';
 import { PrintQRScreen } from './components/Guest/PrintQRScreen';
+import { DoneScreen } from './components/Guest/DoneScreen';
 import { compositionEngine } from './services/compositionEngine';
 import { isStripTemplate } from './components/UI/frame-previews/FramePreviewCard';
 import { cameraService } from './services/cameraService';
@@ -16,6 +17,7 @@ import type { FrameDefinition } from '@/services/frame-import/frame-import.types
 import type { CameraSettings, CaptureConfig, EventConfig, FrameTemplate, LayoutType, PhotoItem, PrinterSettings, SessionData, GuestScreenState } from './types';
 import type { MomentAICaptureFormat, MomentAICaptureFormatId, MomentAIGuestSession, MomentAITemplate } from '@/types/momentai-guest-session';
 import type { GuestProductConfig } from '@/types/guest-product';
+import { resolveTargetProduct, isStripProduct as isStripProductId, canonicalLayoutType, canonicalPreferredPaper, canonicalRenderMode, getCanonicalSlots, normalizeSlotToUnit } from '@/services/frame/resolveTargetProduct';
 
 const EVENT_CONFIG: EventConfig = {
   eventName: 'PHỐ CỔ HỘI AN',
@@ -149,6 +151,7 @@ export function MomentAIGuestFlowController() {
     const nextBackendSession = await api('start-session', { eventId: latestReadiness.activeEvent.eventId });
     const nextSession: SessionData = {
       sessionId: nextBackendSession.sessionId,
+      eventId: nextBackendSession.eventId,
       createdAt: new Date(nextBackendSession.createdAt).toLocaleTimeString('vi-VN'),
       captureCount: CAPTURE_CONFIG.defaultCount,
       photos: [],
@@ -208,12 +211,23 @@ export function MomentAIGuestFlowController() {
     }
     if (!updatedBackend.captureFormat) return;
     const templates = await listGuestTemplates(updatedBackend.eventId, updatedBackend.captureFormat.id);
-    await LocalFrameRegistry.refreshFromAdminDb().catch(() => undefined);
+    await LocalFrameRegistry.refreshFromAdminDb(updatedBackend.eventId).catch(() => undefined);
     const latestImportedDefinitions = LocalFrameRegistry.getPublishedDefinitions();
     const isPremiumProduct = currentSession.product?.premium === true || currentSession.product?.id === 'PREMIUM_POSTCARD' || currentSession.product?.group === 'Premium';
     const targetShotCount = currentSession.product?.requiredShots || updatedBackend.captureFormat?.shotCount || 4;
+    const currentEventId = updatedBackend.eventId || 'event_hoi_an_heritage';
     const importedTemplates = latestImportedDefinitions
-      .filter((definition) => isPremiumProduct ? (definition.shotCount === 1 || definition.slots?.length === 1) : (definition.shotCount === targetShotCount))
+      .filter((definition) => {
+        const matchesEvent = !definition.eventId || definition.eventId === currentEventId;
+        if (!matchesEvent) return false;
+        if (isPremiumProduct) {
+          return definition.targetProduct === 'PREMIUM_POSTCARD' || definition.shotCount === 1 || definition.slots?.length === 1;
+        }
+        if (definition.targetProduct) {
+          return definition.targetProduct === currentSession.product?.id;
+        }
+        return definition.shotCount === targetShotCount;
+      })
       .map(mapImportedFrameDefinitionToFrameTemplate);
     const backendTemplates = templates.map(mapTemplateToFrameTemplate);
     const allAvailableTemplates: FrameTemplate[] = importedTemplates.length > 0 ? importedTemplates : backendTemplates;
@@ -307,6 +321,7 @@ export function MomentAIGuestFlowController() {
     try {
       await api('request-print', { sessionId: backendSession.sessionId, copies: printCopies });
       setCurrentSession((prev) => prev ? { ...prev, printStatus: 'queued' } : prev);
+      setScreenState('G08_DONE');
     } catch {
       setCurrentSession((prev) => prev ? { ...prev, printStatus: 'failed' } : prev);
     }
@@ -338,6 +353,7 @@ export function MomentAIGuestFlowController() {
         {screenState === 'G04_SELECT_FRAME' && currentSession && <SelectFrameScreen session={currentSession} customTemplates={frameTemplates} onSelectFrame={(frame, photoIdx) => runNavigation(() => handleSelectFrame(frame, photoIdx))} onBackToShots={() => runNavigation(() => setScreenState('G02_SELECT_PRODUCT'))} />}
         {(screenState === 'G05_PREMIUM_CUSTOMIZE' || screenState === 'G05_DRAW') && currentSession?.selectedFrame && <DrawScreen session={currentSession} template={currentSession.selectedFrame} onConfirmDraw={(drawDataUrl) => runNavigation(() => handleConfirmDraw(drawDataUrl))} onBackToTemplate={() => runNavigation(() => setScreenState('G04_SELECT_FRAME'))} />}
         {(screenState === 'G06_RESULT' || screenState === 'G07_PRINTING' || screenState === 'G07_PRINT_QR' || screenState === 'G08_PRINT_SUCCESS') && resultSession && <PrintQRScreen session={resultSession} printerSettings={PRINTER_SETTINGS} onConfirmPrint={() => runNavigation(handleConfirmPrint)} onFinishSession={() => runNavigation(handleFinishSession)} />}
+        {screenState === 'G08_DONE' && <DoneScreen onAutoReset={() => runNavigation(handleFinishSession)} resetDelaySeconds={6} />}
       </main>
     </div>
   );
@@ -347,45 +363,86 @@ function normalizeSlotPercent(val: number): number {
   return val <= 1 && val > 0 ? val * 100 : val;
 }
 
-export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefinition): FrameTemplate {
-  const normSlots = definition.slots.map((slot) => ({
-    id: slot.index + 1,
-    x: normalizeSlotPercent(slot.x),
-    y: normalizeSlotPercent(slot.y),
-    width: normalizeSlotPercent(slot.width),
-    height: normalizeSlotPercent(slot.height),
-  }));
-
-  const count = definition.shotCount === 8 ? 6 : definition.shotCount;
-  const hasSecondColumn = normSlots.some((s) => s.x >= 35);
-
-  const isExplicitStrip =
-    definition.targetProduct === 'STRIP_2' ||
-    definition.targetProduct === 'STRIP_4' ||
-    definition.outputPaper === '5x15' ||
-    (definition.outputWidth && definition.outputHeight
-      ? definition.outputHeight / definition.outputWidth >= 2.1
-      : false) ||
-    definition.layoutFamily?.toLowerCase().includes('strip') ||
-    definition.name?.toLowerCase().includes('strip');
-
-  const isStrip =
-    (isExplicitStrip || (count === 2 && !hasSecondColumn) || (count === 4 && !hasSecondColumn)) &&
-    definition.targetProduct !== 'SHEET_4' &&
-    definition.targetProduct !== 'SHEET_6' &&
-    definition.targetProduct !== 'PREMIUM_POSTCARD';
-
-  let layoutType: LayoutType = '1x1';
-  if (definition.targetProduct === 'STRIP_2' || count === 2) {
-    layoutType = '1x2';
-  } else if (definition.targetProduct === 'STRIP_4' || (count === 4 && isStrip)) {
-    layoutType = '1x4';
-  } else if (definition.targetProduct === 'SHEET_4' || (count === 4 && !isStrip)) {
-    layoutType = '2x2';
-  } else if (definition.targetProduct === 'SHEET_6' || count === 6) {
-    layoutType = '2x3';
+function generateFallbackSlots(count: number, isStrip: boolean) {
+  if (count === 1) {
+    return [{ id: 1, x: 5, y: 5, width: 90, height: 90 }];
   }
+  if (count === 2) {
+    return [
+      { id: 1, x: 6, y: 5, width: 88, height: 42 },
+      { id: 2, x: 6, y: 51, width: 88, height: 42 },
+    ];
+  }
+  if (count === 4 && isStrip) {
+    return [
+      { id: 1, x: 6, y: 3.5, width: 88, height: 21 },
+      { id: 2, x: 6, y: 26.5, width: 88, height: 21 },
+      { id: 3, x: 6, y: 49.5, width: 88, height: 21 },
+      { id: 4, x: 6, y: 72.5, width: 88, height: 21 },
+    ];
+  }
+  if (count === 4) {
+    return [
+      { id: 1, x: 4, y: 4, width: 44, height: 43 },
+      { id: 2, x: 52, y: 4, width: 44, height: 43 },
+      { id: 3, x: 4, y: 51, width: 44, height: 43 },
+      { id: 4, x: 52, y: 51, width: 44, height: 43 },
+    ];
+  }
+  if (count === 6) {
+    return [
+      { id: 1, x: 4, y: 3, width: 44, height: 28 },
+      { id: 2, x: 52, y: 3, width: 44, height: 28 },
+      { id: 3, x: 4, y: 34, width: 44, height: 28 },
+      { id: 4, x: 52, y: 34, width: 44, height: 28 },
+      { id: 5, x: 4, y: 65, width: 44, height: 28 },
+      { id: 6, x: 52, y: 65, width: 44, height: 28 },
+    ];
+  }
+  return Array.from({ length: count }, (_, i) => ({
+    id: i + 1,
+    x: 5,
+    y: Number((i * (90 / count) + 2).toFixed(2)),
+    width: 90,
+    height: Number((85 / count).toFixed(2)),
+  }));
+}
 
+export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefinition): FrameTemplate {
+  const count = definition.shotCount === 8 ? 6 : definition.shotCount;
+
+  // ── Canonical product resolution ─────────────────────────────────────────
+  // Uses: persisted targetProduct → canvas aspect ratio → layout.type (legacy)
+  // NEVER uses: slot positions, hasSecondColumn, slot width/height
+  const resolvedProduct = resolveTargetProduct({
+    targetProduct: definition.targetProduct,
+    shotCount: count,
+    outputWidth: definition.outputWidth,
+    outputHeight: definition.outputHeight,
+    layout: (definition as unknown as { layout?: { type?: string } }).layout,
+    outputPaper: definition.outputPaper,
+  });
+
+  const targetProduct = resolvedProduct ?? 'STRIP_4'; // safe fallback only for truly unknown
+  const isStrip = isStripProductId(resolvedProduct);
+  const layoutType = canonicalLayoutType(resolvedProduct);
+
+  // ── Slot normalization (Canonical 0..1 range) ───────────────────────────
+  const outW = definition.outputWidth || 1800;
+  const outH = definition.outputHeight || 2700;
+
+  const rawNormSlots = (definition.slots || []).map((slot, index) => {
+    const unit = normalizeSlotToUnit(slot, outW, outH);
+    return {
+      id: slot.id || index + 1,
+      x: unit.x,
+      y: unit.y,
+      width: unit.width,
+      height: unit.height,
+    };
+  });
+
+  // ── Orientation ──────────────────────────────────────────────────────────
   const isLandscape =
     definition.orientation === 'landscape' ||
     definition.photoViewportOrientation === 'landscape' ||
@@ -393,20 +450,39 @@ export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefin
       ? definition.outputWidth > definition.outputHeight
       : false);
 
+  // Detect corrupted or dummy full-canvas slots (e.g. {x:0, y:0, w:1, h:1})
+  const isFullCanvasSlot = rawNormSlots.length === 1 && rawNormSlots[0].width >= 0.95 && rawNormSlots[0].height >= 0.95 && (rawNormSlots[0].x <= 0.02 && rawNormSlots[0].y <= 0.02);
+  const isOverlappingCorrupted = count > 1 && rawNormSlots.length > 1 && (
+    rawNormSlots.every((s) => (
+      Math.abs(s.x - rawNormSlots[0].x) < 0.005 &&
+      Math.abs(s.y - rawNormSlots[0].y) < 0.005 &&
+      Math.abs(s.width - rawNormSlots[0].width) < 0.005 &&
+      Math.abs(s.height - rawNormSlots[0].height) < 0.005
+    )) || (isStrip && rawNormSlots.some((s) => s.height >= 0.80))
+  );
+
+  const isCorrupted = isFullCanvasSlot || isOverlappingCorrupted || rawNormSlots.length !== count;
+
+  const normSlots = isCorrupted
+    ? getCanonicalSlots(resolvedProduct, isLandscape)
+    : rawNormSlots;
+
   return {
     id: definition.id,
     name: definition.name,
+    targetProduct,
     thumbnail: definition.thumbnailUrl || definition.assetUrl || '',
     category: getImportedFrameCategory(definition),
+    eventId: definition.eventId,
     shotCount: count,
     allowTyping: true,
     allowDraw: definition.allowDraw ?? true,
     orientation: isLandscape ? 'landscape' : 'portrait',
     outputWidth: definition.outputWidth || 1800,
     outputHeight: definition.outputHeight || 2700,
-    preferredPaper: isStrip ? '2x6-double' : '4x6',
+    preferredPaper: canonicalPreferredPaper(resolvedProduct),
     supportedPapers: isStrip ? ['2x6-double', '4x6'] : ['4x6'],
-    renderMode: isStrip ? 'double-strip' : 'standard',
+    renderMode: canonicalRenderMode(resolvedProduct),
     layout: {
       type: layoutType,
       slotCount: normSlots.length,
@@ -426,6 +502,7 @@ export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefin
     },
   };
 }
+
 
 function getImportedFrameCategory(definition: FrameDefinition): string {
   const categorized = definition as FrameDefinition & { category?: string; eventCategory?: string; eventName?: string };
@@ -632,7 +709,7 @@ function isLocalGuestFallbackAllowed() {
   if (typeof window === 'undefined') return false;
   const { hostname, port, protocol } = window.location;
   const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1';
-  return protocol === 'http:' && isLoopback && (port === '5173' || port === '5174');
+  return protocol === 'http:' && isLoopback && (port === '5173' || port === '5174' || port === '3000');
 }
 
 function normalizeSession(partial: Partial<MomentAIGuestSession>, previous: MomentAIGuestSession | null, action: string, body: Record<string, unknown>): MomentAIGuestSession {

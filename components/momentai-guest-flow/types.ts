@@ -5,7 +5,7 @@ export type LayoutType = '1x1' | '1x2' | '1x3' | '2x2' | '1x4' | '2x3';
 export type PaperSize = '4x6' | '6x8' | '2x6-double';
 
 export interface FrameSlot {
-  id: number;
+  id: number | string;
   x: number; // percentage (0-100) or pixel coordinate relative to canvas
   y: number; // percentage (0-100)
   width: number; // percentage (0-100)
@@ -19,10 +19,13 @@ export interface FrameTemplate {
   name: string;
   thumbnail: string;
   category: string;
+  targetProduct?: string;
+  eventId?: string;
   shotCount?: number; // 1, 2, 4, 6
   orientation?: 'portrait' | 'landscape';
   outputWidth?: number;
   outputHeight?: number;
+  updatedAt?: string | number;
   allowTyping?: boolean;
   allowDraw?: boolean;
   textPlaceholder?: string;
@@ -62,6 +65,7 @@ export interface PhotoItem {
 export interface SessionData {
   sessionId: string;
   createdAt: string;
+  eventId?: string;
   product?: GuestProductConfig;
   captureCount: number;
   photos: PhotoItem[];
@@ -95,7 +99,7 @@ export interface CameraSettings {
   batteryLevel: number;
   temperature: number;
   shutterCount: number;
-  mode: 'simulator' | 'webcam';
+  mode: 'simulator' | 'webcam' | 'canon';
   liveViewRunning: boolean;
 }
 

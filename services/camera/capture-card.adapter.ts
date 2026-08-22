@@ -39,6 +39,10 @@ export class CaptureCardAdapter
                   facingMode: "user",
               };
 
+        if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+            throw new Error('[CaptureCardAdapter] navigator.mediaDevices.getUserMedia is not available in this environment');
+        }
+
         try {
             console.log("[CaptureCardAdapter] Calling getUserMedia with constraints:", videoConstraints);
             this.stream = await navigator.mediaDevices.getUserMedia({

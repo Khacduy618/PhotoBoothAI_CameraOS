@@ -13,6 +13,7 @@ const FORBIDDEN_PATTERNS = [
   { pattern: /^coverage\//, reason: 'Test coverage reports should not be tracked' },
   { pattern: /^\.cameraos-data\//, reason: 'Runtime camera data should not be tracked' },
   { pattern: /^apps\/artifacts\/windowmini-storage\/sessions\//, reason: 'Runtime session media must not be tracked' },
+  { pattern: /^artifacts\/windowmini-storage\/sessions\//, reason: 'Runtime session media must not be tracked' },
   { pattern: /\.(sqlite|sqlite-wal|sqlite-shm)$/i, reason: 'Runtime SQLite database files must not be tracked' },
   { pattern: /(^|\/)\.env(\.(local|production|staging|test))?$/, reason: 'Secret environment files must not be tracked' },
   { pattern: /(^|\/)\.DS_Store$/, reason: 'macOS metadata files should not be tracked' },

@@ -31,6 +31,17 @@ export interface WindowMiniGuestApi {
   printer: {
     status(printerId: string): Promise<unknown>;
   };
+  media: {
+    startShotClip(sessionId: string, shotIndex: number, countdownStartedAt?: string): Promise<unknown>;
+    pushDeviceFrame(sessionId: string, shotIndex: number, bufferData: Uint8Array | Buffer, width?: number, height?: number): Promise<unknown>;
+    markShutter(sessionId: string, shotIndex: number, shutterAt?: string): Promise<unknown>;
+    stopShotClip(sessionId: string, shotIndex: number, persistedAt?: string, options?: { fallbackDataUrl?: string }): Promise<unknown>;
+    failShotClip(sessionId: string, shotIndex: number, error: string): Promise<unknown>;
+    getClips(sessionId: string): Promise<unknown>;
+    composeVideo(sessionId: string, frame: unknown, options?: unknown): Promise<unknown>;
+    getPackage(sessionId: string, origin?: string): Promise<unknown>;
+    getPublicToken(sessionId: string): Promise<unknown>;
+  };
 }
 
 export function createGuestApiPlaceholder(): WindowMiniGuestApi {
@@ -54,5 +65,16 @@ export function createGuestApiPlaceholder(): WindowMiniGuestApi {
     camera: { status: unavailable, capture: unavailable },
     storage: { health: unavailable, createSession: unavailable, saveOriginal: unavailable, saveOutput: unavailable },
     printer: { status: unavailable },
+    media: {
+      startShotClip: unavailable,
+      pushDeviceFrame: unavailable,
+      markShutter: unavailable,
+      stopShotClip: unavailable,
+      failShotClip: unavailable,
+      getClips: unavailable,
+      composeVideo: unavailable,
+      getPackage: unavailable,
+      getPublicToken: unavailable,
+    },
   };
 }

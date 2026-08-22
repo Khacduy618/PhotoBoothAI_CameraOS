@@ -65,7 +65,7 @@ function getGestureThreshold(
 }
 
 export function useGestureRecognizer(
-    videoRef: React.RefObject<HTMLVideoElement | null>,
+    mediaRef: React.RefObject<HTMLVideoElement | HTMLCanvasElement | null>,
     enabled: boolean,
 ) {
     const recognizerRef =
@@ -247,42 +247,46 @@ export function useGestureRecognizer(
                 return;
             }
 
-            const video = videoRef.current;
+            const media = mediaRef.current;
             const recognizer = recognizerRef.current;
 
-            const videoIsReady =
-                video !== null &&
+            const isCanvas = typeof HTMLCanvasElement !== 'undefined' && media instanceof HTMLCanvasElement;
+            const isVideo = typeof HTMLVideoElement !== 'undefined' && media instanceof HTMLVideoElement;
+
+            const mediaIsReady =
+                media !== null &&
                 recognizer !== null &&
-                video.readyState >=
-                HTMLMediaElement.HAVE_CURRENT_DATA &&
-                video.videoWidth > 0 &&
-                video.videoHeight > 0 &&
-                video.currentTime > 0 &&
-                !video.seeking &&
-                !video.paused &&
-                !video.ended;
+                (isCanvas
+                    ? media.width > 0 && media.height > 0
+                    : isVideo &&
+                      media.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+                      media.videoWidth > 0 &&
+                      media.videoHeight > 0 &&
+                      media.currentTime > 0 &&
+                      !media.seeking &&
+                      !media.paused &&
+                      !media.ended);
 
             const enoughTimePassed =
                 frameTimestamp -
                 lastInferenceAtRef.current >=
                 boothConfig.gesture.inferenceIntervalMs;
 
-            const isNewVideoFrame =
-                video !== null &&
-                video.currentTime !==
-                lastVideoTimeRef.current;
+            const isNewFrame = isCanvas || (isVideo && media.currentTime !== lastVideoTimeRef.current);
 
             if (
-                videoIsReady &&
+                mediaIsReady &&
                 enoughTimePassed &&
-                isNewVideoFrame &&
+                isNewFrame &&
                 !isDetectingRef.current
             ) {
                 lastInferenceAtRef.current =
                     frameTimestamp;
 
-                lastVideoTimeRef.current =
-                    video.currentTime;
+                if (isVideo) {
+                    lastVideoTimeRef.current =
+                        media.currentTime;
+                }
 
                 isDetectingRef.current = true;
 
@@ -296,7 +300,7 @@ export function useGestureRecognizer(
 
                     const recognition =
                         recognizer.recognizeForVideo(
-                            video,
+                            media,
                             timestampMs,
                         );
 
@@ -418,7 +422,7 @@ export function useGestureRecognizer(
         error,
         isLoading,
         resetGesture,
-        videoRef,
+        mediaRef,
     ]);
 
     return {

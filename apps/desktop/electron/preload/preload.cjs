@@ -42,7 +42,17 @@ contextBridge.exposeInMainWorld('momentai', {
     printer: {
       status: (printerId) => invoke('cameraos:printer:status', printerId),
     },
-    
+    media: {
+      startShotClip: (sessionId, shotIndex, countdownStartedAt) => invoke('cameraos:media:clip-recorder:start-shot', sessionId, shotIndex, countdownStartedAt),
+      pushDeviceFrame: (sessionId, shotIndex, bufferData, width, height) => invoke('cameraos:media:clip-recorder:push-device-frame', sessionId, shotIndex, bufferData, width, height),
+      markShutter: (sessionId, shotIndex, shutterAt) => invoke('cameraos:media:clip-recorder:mark-shutter', sessionId, shotIndex, shutterAt),
+      stopShotClip: (sessionId, shotIndex, persistedAt, options) => invoke('cameraos:media:clip-recorder:stop-shot', sessionId, shotIndex, persistedAt, options),
+      failShotClip: (sessionId, shotIndex, error) => invoke('cameraos:media:clip-recorder:fail-shot', sessionId, shotIndex, error),
+      getClips: (sessionId) => invoke('cameraos:media:clip-recorder:get-clips', sessionId),
+      composeVideo: (sessionId, frame, options) => invoke('cameraos:media:video:compose', sessionId, frame, options),
+      getPackage: (sessionId, origin) => invoke('cameraos:media:package:get', sessionId, origin),
+      getPublicToken: (sessionId) => invoke('cameraos:media:token:get', sessionId),
+    },
   },
   admin: {
     auth: {

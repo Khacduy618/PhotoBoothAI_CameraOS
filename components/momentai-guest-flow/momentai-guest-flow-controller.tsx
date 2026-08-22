@@ -308,8 +308,43 @@ export function MomentAIGuestFlowController() {
         console.warn('Storage saveOutput error:', e);
       }
     }
+
+    // Trigger background video composition for the FINAL selected frame
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { media?: { composeVideo: (sid: string, frame: unknown, opts: unknown) => Promise<unknown> } } } }).momentai?.guest?.media?.composeVideo) {
+      try {
+        void (window as unknown as { momentai: { guest: { media: { composeVideo: (sid: string, frame: unknown, opts: unknown) => Promise<unknown> } } } }).momentai.guest.media.composeVideo(
+          backend.sessionId,
+          session.selectedFrame,
+          {
+            drawDataUrl,
+            targetWidth,
+            targetHeight,
+          }
+        );
+      } catch (e) {
+        console.warn('Video compose trigger error:', e);
+      }
+    }
+
+    // Early QR reservation: get tokenized session share URL
+    let qrUrl = '';
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { media?: { getPublicToken: (sid: string) => Promise<{ ok: boolean; value?: { publicToken?: string } }> } } } }).momentai?.guest?.media?.getPublicToken) {
+      try {
+        const tokenRes = await (window as unknown as { momentai: { guest: { media: { getPublicToken: (sid: string) => Promise<{ ok: boolean; value?: { publicToken?: string } }> } } } }).momentai.guest.media.getPublicToken(backend.sessionId);
+        const token = tokenRes?.value?.publicToken;
+        if (token) {
+          const origin = window.location.origin.includes('5173') || window.location.origin.includes('5174')
+            ? `http://${window.location.hostname}:3000`
+            : window.location.origin;
+          qrUrl = `${origin}/s/${token}`;
+        }
+      } catch {}
+    }
+
     const composedBackend = await api('compose', { sessionId: backend.sessionId });
-    setCurrentSession({ ...session, drawDataUrl, outputs, qr: mapBackendQr(composedBackend), printStatus: 'idle' });
+    const qrData = qrUrl ? { status: 'ready' as const, url: qrUrl } : mapBackendQr(composedBackend);
+
+    setCurrentSession({ ...session, drawDataUrl, outputs, qr: qrData, printStatus: 'idle' });
     setBackendSession(composedBackend);
     setScreenState('G06_RESULT');
   };
@@ -714,7 +749,13 @@ function isLocalGuestFallbackAllowed() {
 
 function normalizeSession(partial: Partial<MomentAIGuestSession>, previous: MomentAIGuestSession | null, action: string, body: Record<string, unknown>): MomentAIGuestSession {
   const fallback = previous ?? createLocalSession(body.eventId as string | undefined);
-  return applyLocalGuestAction(action, body, { ...fallback, ...partial });
+  const localResult = applyLocalGuestAction(action, body, { ...fallback, ...partial });
+  return {
+    ...localResult,
+    ...partial,
+    sessionId: partial.sessionId || localResult.sessionId,
+    eventId: partial.eventId || localResult.eventId,
+  };
 }
 
 function applyLocalGuestAction(action: string, body: Record<string, unknown>, previous: MomentAIGuestSession | null): MomentAIGuestSession {
@@ -723,7 +764,7 @@ function applyLocalGuestAction(action: string, body: Record<string, unknown>, pr
 
   switch (action) {
     case 'start-session':
-      return createLocalSession(body.eventId as string | undefined);
+      return previous ? { ...previous, status: 'SELECTING_FORMAT', updatedAt: now } : createLocalSession(body.eventId as string | undefined);
     case 'select-format': {
       const format = LOCAL_CAPTURE_FORMATS.find((item) => item.id === body.formatId) ?? LOCAL_CAPTURE_FORMATS[2];
       return { ...session, captureFormat: format, status: 'READY_TO_CAPTURE', updatedAt: now };
@@ -780,8 +821,9 @@ function applyLocalGuestAction(action: string, body: Record<string, unknown>, pr
 function createLocalSession(eventId = 'event_hoi_an_heritage'): MomentAIGuestSession {
   localSessionSequence += 1;
   const now = new Date().toISOString();
+  const uniqueId = `desktop_session_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   return {
-    sessionId: `desktop_dev_session_${localSessionSequence}`,
+    sessionId: uniqueId,
     eventId,
     captureFormat: null,
     photos: [],

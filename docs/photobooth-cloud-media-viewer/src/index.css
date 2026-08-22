@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    background-color: #F9F8F6;
+    color: #1A1A1A;
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3, .font-serif-display {
+    font-family: 'Playfair Display', 'Cormorant Garamond', Georgia, serif;
+  }
+
+  .font-serif-sub {
+    font-family: 'Cormorant Garamond', Georgia, serif;
+  }
+
+  .font-mono-code {
+    font-family: 'Space Mono', monospace;
+  }
+}
+
+/* Custom Editorial Aesthetic Helpers */
+.bg-editorial-paper {
+  background-color: #F9F8F6;
+}
+
+.bg-editorial-linen {
+  background-color: #E5E2DD;
+}
+
+.bg-editorial-dark {
+  background-color: #1A1A1A;
+}
+
+.text-editorial-dark {
+  color: #1A1A1A;
+}
+
+.border-editorial {
+  border-color: rgba(26, 26, 26, 0.12);
+}
+
+.border-editorial-dark {
+  border-color: #1A1A1A;
+}

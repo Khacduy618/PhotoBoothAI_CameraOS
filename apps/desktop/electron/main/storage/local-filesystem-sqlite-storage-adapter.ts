@@ -68,7 +68,8 @@ export class LocalFilesystemSQLiteStorageAdapter implements StorageAdapter {
     try {
       const safeSessionId = assertSafeId(sessionId, 'session id');
       this.ensureInitialized();
-      fs.mkdirSync(path.join(this.rootDir, 'sessions', safeSessionId, 'originals'), { recursive: true });
+      fs.mkdirSync(path.join(this.rootDir, 'sessions', safeSessionId, 'photos'), { recursive: true });
+      fs.mkdirSync(path.join(this.rootDir, 'sessions', safeSessionId, 'clips'), { recursive: true });
       fs.mkdirSync(path.join(this.rootDir, 'sessions', safeSessionId, 'outputs'), { recursive: true });
       const now = this.now();
       this.db!.prepare(`
@@ -89,7 +90,7 @@ export class LocalFilesystemSQLiteStorageAdapter implements StorageAdapter {
       this.ensureInitialized();
       await this.createSession(safeSessionId);
       const extension = extensionForMime(photo.mimeType);
-      const relativePath = path.posix.join('sessions', safeSessionId, 'originals', `shot_${String(safeShotIndex).padStart(2, '0')}${extension}`);
+      const relativePath = path.posix.join('sessions', safeSessionId, 'photos', `shot_${String(safeShotIndex).padStart(2, '0')}${extension}`);
       return { ok: true, value: this.writeImageRecord(safeSessionId, `original_${safeSessionId}_${safeShotIndex}`, relativePath, photo, undefined, false) };
     } catch (cause) {
       return storageError(cause, 'STORAGE_ORIGINAL_SAVE_FAILED', 'Unable to save original image.');

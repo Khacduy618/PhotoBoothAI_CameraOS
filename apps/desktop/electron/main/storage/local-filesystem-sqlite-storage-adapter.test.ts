@@ -30,7 +30,7 @@ describe('LocalFilesystemSQLiteStorageAdapter', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.relativePath).toBe('sessions/session_1/originals/shot_01.jpg');
+    expect(result.value.relativePath).toBe('sessions/session_1/photos/shot_01.jpg');
     expect(fs.existsSync(path.join(rootDir, result.value.relativePath))).toBe(true);
     expect(fs.readFileSync(path.join(rootDir, result.value.relativePath))).toEqual(Buffer.from([1, 2, 3]));
     expect(fs.existsSync(path.join(rootDir, 'cameraos-storage.sqlite'))).toBe(true);
@@ -49,7 +49,7 @@ describe('LocalFilesystemSQLiteStorageAdapter', () => {
     expect(master.ok && master.value.relativePath).toBe('sessions/session_2/outputs/master.png');
     expect(share.ok && share.value.relativePath).toBe('sessions/session_2/outputs/share.jpg');
     expect(print.ok && print.value.relativePath).toBe('sessions/session_2/outputs/print.jpg');
-    expect(fs.readFileSync(path.join(rootDir, 'sessions/session_2/originals/shot_01.jpg'))).toEqual(Buffer.from([9]));
+    expect(fs.readFileSync(path.join(rootDir, 'sessions/session_2/photos/shot_01.jpg'))).toEqual(Buffer.from([9]));
   });
 
   it('rejects duplicate originals instead of overwriting the first capture', async () => {
@@ -62,7 +62,7 @@ describe('LocalFilesystemSQLiteStorageAdapter', () => {
 
     expect(first.ok).toBe(true);
     expect(duplicate.ok).toBe(false);
-    expect(fs.readFileSync(path.join(rootDir, 'sessions/session_4/originals/shot_01.jpg'))).toEqual(Buffer.from([7]));
+    expect(fs.readFileSync(path.join(rootDir, 'sessions/session_4/photos/shot_01.jpg'))).toEqual(Buffer.from([7]));
   });
 
   it('rejects empty bytes and unsupported MIME types', async () => {

@@ -45,24 +45,31 @@ export class CameraService {
   }
 
   public async startWebcam(): Promise<boolean> {
-    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { status: () => Promise<{ provider?: string; model?: string }>; startLiveView?: () => Promise<unknown> } } } }).momentai?.guest?.camera?.status) {
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { status: () => Promise<{ provider?: string; preferredProvider?: string; model?: string; hardwareStatus?: string; state?: string; fallbackActive?: boolean; fallbackReason?: string }> } } } }).momentai?.guest?.camera?.status) {
       try {
-        const st = await (window as unknown as { momentai: { guest: { camera: { status: () => Promise<{ provider?: string; model?: string }>; startLiveView?: () => Promise<unknown> } } } }).momentai.guest.camera.status();
+        const st = await (window as unknown as { momentai: { guest: { camera: { status: () => Promise<{ provider?: string; preferredProvider?: string; model?: string; hardwareStatus?: string; state?: string; fallbackActive?: boolean; fallbackReason?: string }> } } } }).momentai.guest.camera.status();
         if (st && st.provider === 'canon') {
-          console.log('[CameraService] Canon provider is ACTIVE on hardware:', st.model);
-          this.settings.connected = true;
+          console.log('[CameraService] Canon provider is ACTIVE/CONNECTING on hardware:', st.model, 'status:', st.hardwareStatus);
+          this.settings.connected = st.hardwareStatus === 'ready';
           this.settings.mode = 'canon';
           this.settings.model = st.model || 'Canon EOS 6D';
-          this.settings.liveViewRunning = true;
-          if ((window as unknown as { momentai: { guest: { camera: { startLiveView?: () => Promise<unknown> } } } }).momentai.guest.camera.startLiveView) {
-            await (window as unknown as { momentai: { guest: { camera: { startLiveView: () => Promise<unknown> } } } }).momentai.guest.camera.startLiveView();
-          }
+          this.settings.liveViewRunning = st.hardwareStatus === 'ready' || st.state === 'LIVEVIEW';
+          // Do NOT activate device camera or control physical LiveView when Canon is active
+          return true;
+        }
+
+        if (st && !st.fallbackActive) {
+          console.log('[CameraService] Canon hardware present; fallback not active.');
+          this.settings.mode = 'canon';
+          this.settings.connected = false;
           return true;
         }
       } catch (err) {
         console.warn('IPC camera status call failed:', err);
       }
     }
+
+    // Fallback only when Canon is not present or non-desktop environment
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -89,9 +96,6 @@ export class CameraService {
     if (this.mediaStream) {
       this.mediaStream.getTracks().forEach((track) => track.stop());
       this.mediaStream = null;
-    }
-    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { stopLiveView?: () => Promise<unknown> } } } }).momentai?.guest?.camera?.stopLiveView) {
-      void (window as unknown as { momentai: { guest: { camera: { stopLiveView: () => Promise<unknown> } } } }).momentai.guest.camera.stopLiveView();
     }
   }
 
@@ -153,21 +157,32 @@ export class CameraService {
   public async capturePhoto(shotIndex: number, sessionId?: string): Promise<string> {
     this.playShutterSound();
 
-    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { capture: (ctx: unknown) => Promise<{ provider?: string; photo?: { dataUrl?: string; width?: number; height?: number; size?: number } }> } } } }).momentai?.guest?.camera?.capture) {
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { capture: (ctx: unknown) => Promise<{ ok?: boolean; value?: { provider?: string; photo?: { dataUrl?: string; width?: number; height?: number; size?: number } }; provider?: string; photo?: { dataUrl?: string; width?: number; height?: number; size?: number } }> } } } }).momentai?.guest?.camera?.capture) {
       try {
-        const res = await (window as unknown as { momentai: { guest: { camera: { capture: (ctx: unknown) => Promise<{ provider?: string; photo?: { dataUrl?: string; width?: number; height?: number; size?: number } }> } } } }).momentai.guest.camera.capture({
+        const raw = await (window as unknown as { momentai: { guest: { camera: { capture: (ctx: unknown) => Promise<any> } } } }).momentai.guest.camera.capture({
           sessionId: sessionId || 'desktop_session',
           shotIndex: shotIndex + 1,
           correlationId: `capture_${Date.now()}_${shotIndex + 1}`,
         });
-        if (res && res.provider === 'canon' && res.photo?.dataUrl) {
+        const res = (raw && typeof raw === 'object' && 'value' in raw) ? raw.value : raw;
+        if (res && (res.provider === 'canon' || res.photo?.provider === 'canon') && res.photo?.dataUrl) {
           console.log(`[CameraService] Real Canon 6D photo captured: ${res.photo.width}x${res.photo.height} (${res.photo.size} bytes)`);
           this.settings.shutterCount += 1;
           return res.photo.dataUrl;
         }
+        if (this.settings.mode === 'canon') {
+          throw new Error(`Canon capture did not return valid photo data (provider: ${res?.provider || 'unknown'})`);
+        }
       } catch (err) {
-        console.warn('IPC camera capture call failed:', err);
+        console.error('[CameraService] Canon physical capture error:', err);
+        if (this.settings.mode === 'canon') {
+          throw err;
+        }
       }
+    }
+
+    if (this.settings.mode === 'canon') {
+      throw new Error('Canon mode is active: fallback placeholder media is forbidden.');
     }
 
     // Increment shutter count
@@ -196,7 +211,7 @@ export class CameraService {
       }
     }
 
-    // Fallback: Generate ultra-realistic Canon 6D simulated snapshot photo
+    // Fallback: Generate simulated snapshot photo only in explicit dev/webcam mock
     return this.generateSimulatedPhoto(shotIndex);
   }
 

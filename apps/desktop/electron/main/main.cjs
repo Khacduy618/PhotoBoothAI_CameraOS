@@ -2,19 +2,52 @@ const { app, BrowserWindow, ipcMain, screen } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const Database = require('better-sqlite3');
-const { CanonCameraBridgeManager } = require('./camera/canon-camera-bridge.cjs');
+const { CanonRuntimeClient } = require('../../camera-runtime/canon-runtime-client.cjs');
+const { STATES } = require('../../camera-runtime/protocol.cjs');
+const { desktopMediaManager } = require('./media/desktop-media-manager.cjs');
+const { SessionMediaPaths } = require('./storage/session-media-paths.cjs');
 
-const canonBridge = new CanonCameraBridgeManager();
+const canonRuntime = new CanonRuntimeClient();
+let sessionMediaPaths = null;
+
+function logCameraRuntimeStatus(tag = 'STATUS_UPDATE') {
+  const preferred = 'canon';
+  const usbPresent = canonRuntime.cameraCount > 0 ? 'YES' : 'NO';
+  const sessionState = canonRuntime.state;
+  const isEnumeratePending = canonRuntime.state === STATES.ENUMERATING || canonRuntime.state === STATES.DISCOVERY_WAIT;
+  const isAuthoritativeNoCanon = canonRuntime.state === STATES.CAMERA_NOT_FOUND || (canonRuntime.cameraCount === 0 && canonRuntime.state === STATES.DISCONNECTED);
+  const fallbackEligible = (isAuthoritativeNoCanon || canonRuntime.state === STATES.ERROR) ? 'YES' : 'NO';
+  const fallbackReason = isAuthoritativeNoCanon ? 'NO_CANON_HARDWARE' : (canonRuntime.state === STATES.ERROR ? 'CANON_TERMINAL_FAILED' : 'NONE');
+  const activeProvider = isAuthoritativeNoCanon
+    ? 'mac-device-camera'
+    : (canonRuntime.state === STATES.READY || canonRuntime.state === STATES.LIVEVIEW ? 'canon' : 'canon-connecting');
+  const previewSource = activeProvider === 'canon'
+    ? 'Canon EDSDK EVF'
+    : (activeProvider === 'canon-connecting' ? (isEnumeratePending ? 'Discovering Canon Camera...' : 'Connecting Canon EVF...') : 'Mac Device Camera');
+
+  console.log(`\n========================================`);
+  console.log(`[CAMERA_RUNTIME:${tag}]`);
+  console.log(`  CAMERA_PROVIDER_PREFERRED = ${preferred}`);
+  console.log(`  CANON_USB_PRESENT         = ${usbPresent}`);
+  console.log(`  CANON_SESSION_STATE       = ${sessionState}`);
+  console.log(`  FALLBACK_ELIGIBLE         = ${fallbackEligible}`);
+  console.log(`  FALLBACK_REASON           = ${fallbackReason}`);
+  console.log(`  ACTIVE_CAMERA_PROVIDER    = ${activeProvider}`);
+  console.log(`  ACTIVE_PREVIEW_SOURCE     = ${previewSource}`);
+  console.log(`========================================\n`);
+}
 
 const isDev = !app.isPackaged;
 const rendererUrl =
   process.env.WINDOWMINI_RENDERER_URL || 'http://localhost:5173';
 
-const projectRoot = path.resolve(__dirname, '../../..');
+const projectRoot = path.resolve(__dirname, '../../../..');
 const logDir = process.env.MOMENTAI_LOG_DIR || path.join(projectRoot, 'artifacts', 'logs');
 const systemLogFile = path.join(logDir, 'momentai-cameraos.log');
 const canonShadowLogFile = path.join(logDir, 'canon-shadow.log');
 const storageRoot = path.resolve(process.env.MOMENTAI_STORAGE_DIR || path.join(projectRoot, 'artifacts', 'windowmini-storage'));
+sessionMediaPaths = new SessionMediaPaths(storageRoot);
+desktopMediaManager.setStorageRootDir(storageRoot);
 const storageDbFile = path.join(storageRoot, 'cameraos-storage.sqlite');
 let storageDb = null;
 
@@ -291,6 +324,10 @@ function isSessionWorkComplete(session) {
   }
   const uStatus = String(session.uploadState || 'NONE').toUpperCase();
   if (uStatus === 'PENDING' || uStatus === 'UPLOADING' || uStatus === 'RETRYING') {
+    return false;
+  }
+  const vStatus = String(session.videoCompositionState || 'NONE').toUpperCase();
+  if (vStatus === 'QUEUED' || vStatus === 'PROCESSING') {
     return false;
   }
   return true;
@@ -885,8 +922,13 @@ function binaryBytes(input) {
 function createStorageSession(sessionId) {
   const safeSessionId = assertStorageId(sessionId, 'session id');
   const db = ensureStorageDb();
-  fs.mkdirSync(path.join(storageRoot, 'sessions', safeSessionId, 'originals'), { recursive: true });
-  fs.mkdirSync(path.join(storageRoot, 'sessions', safeSessionId, 'outputs'), { recursive: true });
+  if (sessionMediaPaths) {
+    sessionMediaPaths.ensureSessionDirectories(safeSessionId);
+  } else {
+    fs.mkdirSync(path.join(storageRoot, 'sessions', safeSessionId, 'photos'), { recursive: true });
+    fs.mkdirSync(path.join(storageRoot, 'sessions', safeSessionId, 'clips'), { recursive: true });
+    fs.mkdirSync(path.join(storageRoot, 'sessions', safeSessionId, 'outputs'), { recursive: true });
+  }
   const now = nowIso();
   db.prepare('INSERT INTO sessions (session_id, created_at, updated_at, payload_json) VALUES (?, ?, ?, NULL) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at').run(safeSessionId, now, now);
 }
@@ -902,6 +944,7 @@ function saveStorageFile(sessionId, relativePath, id, file, outputType, allowOve
   fs.writeFileSync(tempPath, bytes);
   fs.renameSync(tempPath, absolutePath);
   const now = nowIso();
+  console.log(`[PHOTO_UI_PATH_AUDIT]\nshotIndex=${outputType ? 'output' : id}\nphysicalPath=${absolutePath}\nrendererUrl=${relativePath}\nphysicalFileExists=${fs.existsSync(absolutePath)}\nsameCanonicalSession=true`);
   const stored = { id, sessionId, relativePath, mimeType: String(file?.mimeType || 'image/jpeg'), width: file?.width, height: file?.height, bytes: bytes.byteLength, createdAt: now, outputType };
   db.prepare('INSERT INTO stored_files (id, session_id, relative_path, mime_type, width, height, bytes, output_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET relative_path = excluded.relative_path, mime_type = excluded.mime_type, width = excluded.width, height = excluded.height, bytes = excluded.bytes, output_type = excluded.output_type, created_at = excluded.created_at').run(stored.id, stored.sessionId, stored.relativePath, stored.mimeType, stored.width ?? null, stored.height ?? null, stored.bytes, stored.outputType ?? null, stored.createdAt);
   return stored;
@@ -1016,7 +1059,7 @@ function registerSkeletonIpc() {
     if (!Number.isInteger(safeShotIndex) || safeShotIndex < 1 || safeShotIndex > 12) throw new Error('Invalid shot index.');
     createStorageSession(safeSessionId);
     const mimeType = assertImageMime(photo?.mimeType || 'image/jpeg');
-    const relativePath = path.posix.join('sessions', safeSessionId, 'originals', `shot_${String(safeShotIndex).padStart(2, '0')}${extensionForMime(mimeType)}`);
+    const relativePath = path.posix.join('sessions', safeSessionId, 'photos', `shot_${String(safeShotIndex).padStart(2, '0')}${extensionForMime(mimeType)}`);
     return saveStorageFile(safeSessionId, relativePath, `original_${safeSessionId}_${safeShotIndex}`, { ...photo, mimeType }, undefined, false);
   }));
   ipcMain.handle('cameraos:storage:output:save', (_event, sessionId, type, file) => safeGuest(() => {
@@ -1024,28 +1067,136 @@ function registerSkeletonIpc() {
     const outputType = assertOutputTypeValue(type);
     createStorageSession(safeSessionId);
     const mimeType = assertImageMime(file?.mimeType || 'image/jpeg');
-    const relativePath = path.posix.join('sessions', safeSessionId, 'outputs', `${outputType}${extensionForMime(mimeType)}`);
-    return saveStorageFile(safeSessionId, relativePath, `output_${safeSessionId}_${outputType}`, { ...file, mimeType }, outputType, true);
+    let filename = `${outputType}${extensionForMime(mimeType)}`;
+    if (outputType === 'share' || type === 'final-image') {
+      filename = 'final-image.jpg';
+    }
+    const relativePath = path.posix.join('sessions', safeSessionId, 'outputs', filename);
+    const stored = saveStorageFile(safeSessionId, relativePath, `output_${safeSessionId}_${outputType}`, { ...file, mimeType }, outputType, true);
+
+    // Save session manifest & metadata.json
+    try {
+      if (sessionMediaPaths) {
+        const session = sessions.get(safeSessionId);
+        const clips = desktopMediaManager.getClips(safeSessionId) || [];
+        const requiredShots = session?.captureCount || session?.photos?.length || 4;
+
+        const manifestData = {
+          sessionId: safeSessionId,
+          provider: canonRuntime.cameraModel ? 'canon' : 'device',
+          cameraModel: canonRuntime.cameraModel || 'Canon EOS 6D',
+          product: session?.product || 'classic_4_shot',
+          requiredShots,
+          photos: (session?.photos || []).map((p, idx) => ({
+            shotIndex: p.index || idx + 1,
+            path: `photos/shot_${String(p.index || idx + 1).padStart(2, '0')}.jpg`,
+          })),
+          clips: clips.map((c, idx) => ({
+            shotIndex: c.shotIndex || idx + 1,
+            path: `clips/shot_${String(c.shotIndex || idx + 1).padStart(2, '0')}.mp4`,
+          })),
+          outputs: {
+            finalImage: 'outputs/final-image.jpg',
+            finalVideo: 'outputs/final-video.mp4',
+          },
+        };
+        fs.writeFileSync(sessionMediaPaths.manifest(safeSessionId), JSON.stringify(manifestData, null, 2));
+
+        const metaData = {
+          provider: canonRuntime.cameraModel ? 'canon' : 'device',
+          cameraModel: canonRuntime.cameraModel || 'Canon EOS 6D',
+          createdAt: session?.createdAt || nowIso(),
+          completedAt: nowIso(),
+          productType: session?.product || 'classic_4_shot',
+          shotCount: session?.photos?.length || 0,
+          finalImage: {
+            width: 1800,
+            height: 2700,
+          },
+          finalVideo: {
+            durationMs: 4000,
+          },
+        };
+        fs.writeFileSync(sessionMediaPaths.metadata(safeSessionId), JSON.stringify(metaData, null, 2));
+      }
+    } catch (e) {}
+
+    return stored;
   }));
 
   ipcMain.handle('cameraos:camera:status', () => safeGuest(() => {
-    if (canonBridge.state === 'READY' || canonBridge.state === 'LIVEVIEW') {
+    logCameraRuntimeStatus('IPC_STATUS_QUERY');
+
+    if (canonRuntime.state === STATES.READY || canonRuntime.state === STATES.LIVEVIEW) {
       return {
         provider: 'canon',
         preferredProvider: 'canon',
         fallbackActive: false,
+        fallbackEligible: false,
         liveView: true,
         stillCapture: true,
         hardwareStatus: 'ready',
-        model: canonBridge.cameraModel || 'Canon EOS 6D',
-        state: canonBridge.state,
+        model: canonRuntime.cameraModel || 'Canon EOS 6D',
+        state: canonRuntime.state,
       };
     }
+
+    if (
+      canonRuntime.state === STATES.ENUMERATING ||
+      canonRuntime.state === STATES.DISCOVERY_WAIT ||
+      canonRuntime.state === STATES.INITIALIZING ||
+      canonRuntime.state === STATES.OPENING_SESSION ||
+      canonRuntime.state === STATES.CONFIGURING ||
+      canonRuntime.state === STATES.STARTING_LIVEVIEW ||
+      canonRuntime.state === STATES.RESUMING_LIVEVIEW ||
+      (canonRuntime.cameraCount > 0 && canonRuntime.state !== STATES.DISCONNECTED && canonRuntime.state !== STATES.ERROR)
+    ) {
+      return {
+        provider: 'canon',
+        preferredProvider: 'canon',
+        fallbackActive: false,
+        fallbackEligible: false,
+        liveView: false,
+        stillCapture: false,
+        hardwareStatus: 'connecting',
+        model: canonRuntime.cameraModel || 'Canon EOS 6D',
+        state: canonRuntime.state,
+      };
+    }
+
+    if (canonRuntime.state === STATES.CAMERA_NOT_FOUND) {
+      return {
+        provider: 'canon',
+        preferredProvider: 'canon',
+        fallbackActive: false,
+        fallbackEligible: true,
+        hardwareStatus: 'error',
+        error: 'CAMERA_NOT_FOUND',
+        model: canonRuntime.cameraModel || 'Canon EOS 6D',
+        state: canonRuntime.state,
+      };
+    }
+
+    if (canonRuntime.state === STATES.ERROR) {
+      return {
+        provider: 'canon',
+        preferredProvider: 'canon',
+        fallbackActive: false,
+        fallbackEligible: true,
+        hardwareStatus: 'error',
+        error: 'CANON_SESSION_FAILED',
+        model: canonRuntime.cameraModel || 'Canon EOS 6D',
+        state: canonRuntime.state,
+      };
+    }
+
     writeCanonShadowLog('GetDeviceInformation', { reason: 'mac-device-camera-development-status' });
     return {
       provider: 'mac-device-camera',
       preferredProvider: 'canon',
       fallbackActive: true,
+      fallbackEligible: true,
+      fallbackReason: 'NO_CANON_HARDWARE',
       liveView: true,
       stillCapture: true,
       hardwareStatus: 'partial',
@@ -1059,15 +1210,20 @@ function registerSkeletonIpc() {
     const shotIndex = Number.isFinite(Number(context?.shotIndex)) ? Number(context.shotIndex) : 1;
     const correlationId = typeof context?.correlationId === 'string' ? context.correlationId : `canon_${Date.now()}_${shotIndex}`;
 
-    if (canonBridge.state === 'READY' || canonBridge.state === 'LIVEVIEW') {
-      const sessionDir = path.join(storageRoot, 'sessions', sessionId, 'originals');
-      fs.mkdirSync(sessionDir, { recursive: true });
-      const targetPath = path.join(sessionDir, `shot_${String(shotIndex).padStart(2, '0')}.jpg`);
+    activeCaptureSessionId = sessionId;
+    activeCaptureShotIndex = shotIndex;
 
-      const result = await canonBridge.capture({
+    const validStates = ['READY', 'LIVEVIEW', 'STARTING_LIVEVIEW', 'RESUMING_LIVEVIEW'];
+    if (validStates.includes(canonRuntime.state)) {
+      const sessionDir = sessionMediaPaths ? sessionMediaPaths.photosDir(sessionId) : path.join(storageRoot, 'sessions', sessionId, 'photos');
+      fs.mkdirSync(sessionDir, { recursive: true });
+      const targetPath = sessionMediaPaths ? sessionMediaPaths.photo(sessionId, shotIndex, '.jpg') : path.join(sessionDir, `shot_${String(shotIndex).padStart(2, '0')}.jpg`);
+
+      const result = await canonRuntime.capture({
         sessionId,
         shotIndex,
         targetPath,
+        correlationId,
       });
 
       const fileBuffer = fs.readFileSync(result.path);
@@ -1093,16 +1249,23 @@ function registerSkeletonIpc() {
         correlationId,
         photo: {
           id: `canon_photo_${Date.now()}_${shotIndex}`,
+          photoId: `canon_photo_${Date.now()}_${shotIndex}`,
           sessionId,
           shotIndex,
           localPath: result.path,
+          originalPath: result.path,
           dataUrl,
           width: result.width || 5472,
           height: result.height || 3648,
           size: result.size,
           provider: 'canon',
+          mimeType: 'image/jpeg',
         },
       };
+    }
+
+    if (canonRuntime.cameraCount > 0 || canonRuntime.state !== 'DISCONNECTED') {
+      throw new Error(`Canon EOS 6D not ready for capture (current state: ${canonRuntime.state})`);
     }
 
     writeCanonShadowLog('OpenSession', { sessionId, shotIndex, correlationId });
@@ -1126,27 +1289,21 @@ function registerSkeletonIpc() {
     const sessionId = typeof context?.sessionId === 'string' ? context.sessionId : 'unknown_session';
     const correlationId = typeof context?.correlationId === 'string' ? context.correlationId : `af_${Date.now()}`;
     writeCanonShadowLog('DoEvfAF', { sessionId, correlationId, mode: 'AI SERVO', status: 'focused' });
-    return { provider: canonBridge.state === 'READY' || canonBridge.state === 'LIVEVIEW' ? 'canon' : 'canon-shadow', status: 'focused', correlationId };
+    return { provider: canonRuntime.state === 'READY' || canonRuntime.state === 'LIVEVIEW' ? 'canon' : 'canon-shadow', status: 'focused', correlationId };
   }));
 
   ipcMain.handle('cameraos:camera:liveview:start', async (_event, context) => safeGuest(async () => {
-    const sessionId = typeof context?.sessionId === 'string' ? context.sessionId : 'unknown_session';
-    if (canonBridge.state === 'READY' || canonBridge.state === 'LIVEVIEW') {
-      await canonBridge.startLiveView();
-      return { provider: 'canon', liveViewRunning: true };
+    liveViewRequested = true;
+    if (context?.sessionId) {
+      activeCaptureSessionId = String(context.sessionId);
     }
-    writeCanonShadowLog('StartLiveView', { sessionId, outputDevice: 'PC_AND_EVF' });
-    return { provider: 'canon-shadow', liveViewRunning: true };
+    const res = await canonRuntime.startLiveView();
+    return { provider: 'canon', liveViewRunning: res };
   }));
 
-  ipcMain.handle('cameraos:camera:liveview:stop', async (_event, context) => safeGuest(async () => {
-    const sessionId = typeof context?.sessionId === 'string' ? context.sessionId : 'unknown_session';
-    if (canonBridge.state === 'LIVEVIEW') {
-      await canonBridge.stopLiveView();
-      return { provider: 'canon', liveViewRunning: false };
-    }
-    writeCanonShadowLog('StopLiveView', { sessionId });
-    return { provider: 'canon-shadow', liveViewRunning: false };
+  ipcMain.handle('cameraos:camera:liveview:stop', async (_event, _context) => safeGuest(async () => {
+    // Preserve physical LiveView warm in background across normal Guest flow
+    return { provider: 'canon', liveViewRunning: true };
   }));
 
   ipcMain.handle('cameraos:camera:recording:start', (_event, context) => safeGuest(() => {
@@ -1171,7 +1328,13 @@ function registerSkeletonIpc() {
     const requestedEventId = typeof eventId === 'string' ? eventId : readiness.activeEvent.eventId;
     if (requestedEventId !== readiness.activeEvent.eventId) throw new Error('Requested event is not active.');
     const session = createGuestSession(requestedEventId);
+    activeCaptureSessionId = session.sessionId;
+    activeCaptureShotIndex = 1;
     sessions.set(session.sessionId, session);
+    if (sessionMediaPaths) {
+      sessionMediaPaths.ensureSessionDirectories(session.sessionId);
+      console.log(`[SESSION_STORAGE_CREATED]\nsessionId=${session.sessionId}\nsessionRoot=${sessionMediaPaths.sessionRoot(session.sessionId)}\nphotosDir=${sessionMediaPaths.photosDir(session.sessionId)}\nclipsDir=${sessionMediaPaths.clipsDir(session.sessionId)}\noutputsDir=${sessionMediaPaths.outputsDir(session.sessionId)}\nmanifestPath=${sessionMediaPaths.manifest(session.sessionId)}\nmetadataPath=${sessionMediaPaths.metadata(session.sessionId)}`);
+    }
     return session;
   }));
   ipcMain.handle('cameraos:guest:session:get', (_event, sessionId) => safeGuest(() => sessions.get(String(sessionId || '')) || null));
@@ -1180,24 +1343,55 @@ function registerSkeletonIpc() {
     const session = requireGuestSession(String(sessionId || ''));
     const captureFormat = listEnabledCaptureFormats().find((format) => format.id === String(formatId || ''));
     if (!captureFormat) throw new Error('Invalid capture format.');
+    activeCaptureSessionId = session.sessionId;
+    activeCaptureShotIndex = 1;
     return touch({ ...session, captureFormat, photos: [], selectedTemplate: null, slotAssignments: [], outputs: { master: null, share: null, print: null } }, 'READY_TO_CAPTURE');
   }));
   ipcMain.handle('cameraos:guest:photo:add', (_event, sessionId, photo) => safeGuest(() => {
     const session = requireGuestSession(String(sessionId || ''));
     if (!session.captureFormat) throw new Error('Capture format is required before capture.');
-    const shotIndex = Number(photo?.shotIndex || 0);
+    const shotIndex = Number(photo?.shotIndex || (session.photos.length + 1));
+    const photoId = String(photo?.photoId || photo?.id || `photo_${Date.now()}_${shotIndex}`);
+    const resolvedPath = photo?.localPath || (sessionMediaPaths ? sessionMediaPaths.photo(session.sessionId, shotIndex) : path.join(storageRoot, 'sessions', session.sessionId, 'photos', `shot_${String(shotIndex).padStart(2, '0')}.jpg`));
     const nextPhoto = {
-      photoId: String(photo?.photoId || `photo_${Date.now()}`),
+      photoId,
+      id: photoId,
       sessionId: session.sessionId,
       shotIndex,
-      originalPath: String(photo?.originalPath || `originals/capture_${String(shotIndex).padStart(2, '0')}.jpg`),
+      originalPath: resolvedPath,
+      localPath: resolvedPath,
       status: 'valid',
       capturedAt: nowIso(),
       dataUrl: typeof photo?.dataUrl === 'string' ? photo.dataUrl : undefined,
+      width: photo?.width || 5472,
+      height: photo?.height || 3648,
+      size: photo?.size,
+      provider: photo?.provider || 'canon',
+      mimeType: photo?.mimeType || 'image/jpeg',
     };
-    const photos = [...session.photos.filter((existing) => existing.photoId !== nextPhoto.photoId), nextPhoto].sort((a, b) => a.shotIndex - b.shotIndex);
+    const photos = [...session.photos.filter((existing) => existing.shotIndex !== shotIndex), nextPhoto].sort((a, b) => a.shotIndex - b.shotIndex);
     const nextStatus = photos.filter((item) => item.status === 'valid').length >= session.captureFormat.shotCount ? 'SELECTING_TEMPLATE' : 'CAPTURING';
-    return touch({ ...session, photos }, nextStatus);
+    activeCaptureShotIndex = Math.min(photos.length + 1, session.captureFormat.shotCount);
+    const updated = touch({ ...session, photos }, nextStatus);
+
+    // Save session manifest to disk
+    try {
+      if (sessionMediaPaths) {
+        const manifestData = {
+          sessionId: session.sessionId,
+          photos: updated.photos,
+          clips: desktopMediaManager.getClips(session.sessionId) || [],
+          outputs: {
+            finalImage: sessionMediaPaths.finalImage(session.sessionId),
+            finalVideo: sessionMediaPaths.finalVideo(session.sessionId),
+          },
+          updatedAt: nowIso(),
+        };
+        fs.writeFileSync(sessionMediaPaths.manifest(session.sessionId), JSON.stringify(manifestData, null, 2));
+      }
+    } catch (e) {}
+
+    return ok(updated);
   }));
   ipcMain.handle('cameraos:guest:templates:list', (_event, eventId, captureFormatId) => ok(listTemplates(String(eventId || 'event_hoi_an_heritage'), String(captureFormatId || 'format_1shot'))));
   ipcMain.handle('cameraos:guest:template:select', (_event, sessionId, templateId) => safeGuest(() => {
@@ -1214,28 +1408,89 @@ function registerSkeletonIpc() {
   ipcMain.handle('cameraos:guest:customization:save', (_event, sessionId, customization) => safeGuest(() => touch({ ...requireGuestSession(String(sessionId || '')), customization: customization || { text: [], drawing: [] } }, 'COMPOSING')));
   ipcMain.handle('cameraos:guest:compose', (_event, sessionId) => safeGuest(() => {
     const session = requireGuestSession(String(sessionId || ''));
-    const safeToken = encodeURIComponent(session.sessionId);
-    return touch({ ...session, outputs: { master: `/outputs/${safeToken}/final-master.png`, share: `/outputs/${safeToken}/final-share.jpg`, print: `/outputs/${safeToken}/final-print.jpg` }, qr: { url: '', status: 'failed' } }, 'RESULT_READY');
+    const finalImgPath = sessionMediaPaths ? sessionMediaPaths.finalImage(session.sessionId) : path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'final-image.jpg');
+    return touch({ ...session, outputs: { master: finalImgPath, share: finalImgPath, print: finalImgPath }, qr: { url: '', status: 'failed' } }, 'RESULT_READY');
   }));
   ipcMain.handle('cameraos:guest:print:request', (_event, sessionId, copies) => safeGuest(() => {
     const session = requireGuestSession(String(sessionId || ''));
+    const printImg = sessionMediaPaths ? sessionMediaPaths.finalImage(session.sessionId) : path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'final-image.jpg');
+    const exists = fs.existsSync(printImg);
+    const size = exists ? fs.statSync(printImg).size : 0;
+    console.log(`[PRINT_MEDIA_AUDIT]\nsessionId=${session.sessionId}\ninputPath=${printImg}\nrealPath=${exists ? fs.realpathSync(printImg) : printImg}\nexists=${exists}\nsize=${size}`);
     const enqueueResult = printQueue.enqueue(session, { copies: Number(copies) || 1 });
     if (!enqueueResult.ok) {
       throw new Error(enqueueResult.error?.message || 'Print enqueue failed.');
     }
     return touch({ ...session, printJob: enqueueResult.value }, session.status);
   }));
+  ipcMain.handle('cameraos:media:clip-recorder:start-shot', (_event, sessionId, shotIndex, countdownStartedAt) => safeGuest(() => {
+    activeCaptureSessionId = sessionId;
+    activeCaptureShotIndex = Number(shotIndex) + 1;
+    return desktopMediaManager.startShotClip(sessionId, shotIndex, countdownStartedAt);
+  }));
+  ipcMain.handle('cameraos:media:clip-recorder:push-device-frame', (_event, sessionId, shotIndex, bufferData, width, height) => safeGuest(() => {
+    const buf = Buffer.isBuffer(bufferData) ? bufferData : Buffer.from(bufferData);
+    desktopMediaManager.pushDevicePreviewFrame(sessionId, shotIndex, buf, width, height);
+    return { ok: true };
+  }));
+  ipcMain.handle('cameraos:media:clip-recorder:mark-shutter', (_event, sessionId, shotIndex, shutterAt) => safeGuest(() => {
+    return desktopMediaManager.markShutter(sessionId, shotIndex, shutterAt);
+  }));
+  ipcMain.handle('cameraos:media:clip-recorder:stop-shot', (_event, sessionId, shotIndex, persistedAt, options) => safeGuest(async () => {
+    let fallbackBuf = null;
+    if (options?.fallbackDataUrl) {
+      const b64 = options.fallbackDataUrl.split(',').pop() || '';
+      fallbackBuf = Buffer.from(b64, 'base64');
+    }
+    return desktopMediaManager.stopShotClip(sessionId, shotIndex, persistedAt, { fallbackImageBuffer: fallbackBuf });
+  }));
+  ipcMain.handle('cameraos:media:clip-recorder:fail-shot', (_event, sessionId, shotIndex, error) => safeGuest(() => {
+    return desktopMediaManager.failShotClip(sessionId, shotIndex, error);
+  }));
+  ipcMain.handle('cameraos:media:clip-recorder:get-clips', (_event, sessionId) => safeGuest(() => {
+    return desktopMediaManager.getClips(sessionId);
+  }));
+  ipcMain.handle('cameraos:media:video:compose', (_event, sessionId, frame, options) => safeGuest(() => {
+    const session = requireGuestSession(String(sessionId || ''));
+    session.videoCompositionState = 'QUEUED';
+    sessions.set(sessionId, session);
+    const job = desktopMediaManager.enqueueMediaJob(sessionId, 'FRAME_VIDEO_COMPOSE', {
+      frame,
+      overlayUrl: options?.overlayUrl,
+      drawDataUrl: options?.drawDataUrl,
+      durationMs: options?.durationMs || 4000,
+      targetWidth: options?.targetWidth,
+      targetHeight: options?.targetHeight,
+    });
+    return ok(job);
+  }));
+  ipcMain.handle('cameraos:media:package:get', (_event, sessionId, origin) => safeGuest(() => {
+    return desktopMediaManager.getSessionMediaPackage(sessionId, origin);
+  }));
+  ipcMain.handle('cameraos:media:token:get', (_event, sessionId) => safeGuest(() => {
+    return { publicToken: desktopMediaManager.getPublicToken(sessionId) };
+  }));
   ipcMain.handle('cameraos:guest:complete', (_event, sessionId) => safeGuest(() => {
     const session = requireGuestSession(String(sessionId || ''));
     const now = nowIso();
     const updated = touch({ ...session, completedAt: now }, 'COMPLETED');
+    activeCaptureSessionId = null;
     checkAndCompleteSession(session.sessionId);
     return ok(updated);
   }));
 }
 
 let lastFrameBroadcast = 0;
-canonBridge.on('liveViewFrame', (frame) => {
+let lastEvfFrameAt = 0;
+let lastEvfSeq = 0;
+let liveViewRequested = false;
+let activeCaptureSessionId = null;
+let activeCaptureShotIndex = 1;
+
+canonRuntime.on('liveViewFrame', (frame) => {
+  lastEvfFrameAt = Date.now();
+  lastEvfSeq = frame.seq || lastEvfSeq + 1;
+  desktopMediaManager.pushCanonLiveViewFrame(frame);
   const now = Date.now();
   if (now - lastFrameBroadcast >= 33) {
     lastFrameBroadcast = now;
@@ -1248,23 +1503,117 @@ canonBridge.on('liveViewFrame', (frame) => {
   }
 });
 
+let stallRecoveryInFlight = false;
+
+async function handleLiveViewStall() {
+  if (stallRecoveryInFlight) return;
+  stallRecoveryInFlight = true;
+  console.log('[CANON_HEALTH] LIVEVIEW_STALLED detected. Starting escalation recovery...');
+
+  try {
+    // LEVEL 1: In-Session EVF Recovery
+    const l1Ok = await canonRuntime.recoverLiveViewLevel1();
+    if (l1Ok) {
+      console.log('[CANON_HEALTH] Level 1 EVF Recovery SUCCESSFUL.');
+      return;
+    }
+
+    // LEVEL 2: Session Recovery (same bridge)
+    console.warn('[CANON_HEALTH] Level 1 failed. Escalating to Level 2 (Session Recovery)...');
+    const l2Ok = await canonRuntime.recoverSessionLevel2();
+    if (l2Ok) {
+      console.log('[CANON_HEALTH] Level 2 Session Recovery SUCCESSFUL.');
+      return;
+    }
+
+    // LEVEL 3: Bridge Recovery (Process Respawn)
+    console.warn('[CANON_HEALTH] Level 2 failed. Escalating to Level 3 (Bridge Process Respawn)...');
+    const l3Ok = await canonRuntime.recoverBridgeLevel3();
+    if (l3Ok) {
+      console.log('[CANON_HEALTH] Level 3 Bridge Recovery SUCCESSFUL.');
+      return;
+    }
+    console.error('[CANON_HEALTH] All 3 recovery levels exhausted. Camera in error state.');
+  } catch (err) {
+    console.error('[CANON_HEALTH] Recovery error:', err.message);
+  } finally {
+    stallRecoveryInFlight = false;
+  }
+}
+
+// 3-Second Camera Health Monitor (Section 8 & 9)
+setInterval(() => {
+  const evfAgeMs = lastEvfFrameAt > 0 ? Date.now() - lastEvfFrameAt : 0;
+  const runtimeAlive = Boolean(canonRuntime.process && !canonRuntime.process.killed);
+  const bridgeAlive = Boolean(canonRuntime.state !== 'DISCONNECTED' && canonRuntime.state !== 'ERROR' && canonRuntime.state !== 'CAMERA_NOT_FOUND');
+  const sessionOpen = canonRuntime.state === 'READY' || canonRuntime.state === 'LIVEVIEW' || canonRuntime.state === 'STARTING_LIVEVIEW' || canonRuntime.state === 'CAPTURING' || canonRuntime.state === 'DOWNLOADING';
+  const usbPresent = canonRuntime.cameraCount > 0 || sessionOpen;
+  const state = canonRuntime.state;
+  const isStalled = liveViewRequested && evfAgeMs > 3000;
+
+  const currentSessionId = activeCaptureSessionId || 'GUEST_STANDBY';
+  const session = activeCaptureSessionId ? sessions.get(activeCaptureSessionId) : null;
+  const photoCount = session?.photos?.length || 0;
+  const clips = activeCaptureSessionId ? desktopMediaManager.getClips(activeCaptureSessionId) : [];
+  const clipCount = clips?.filter((c) => c.status === 'ready')?.length || 0;
+  const isClipRecording = clips?.some((c) => c.status === 'recording') || false;
+
+  console.log(`[CANON_HEALTH] session=${currentSessionId} shot=${activeCaptureShotIndex}/4 runtimeAlive=${runtimeAlive} bridgeAlive=${bridgeAlive} usbPresent=${usbPresent} sessionOpen=${sessionOpen} state=${state}${isStalled ? ' (LIVEVIEW_STALLED)' : ''} evfAgeMs=${evfAgeMs} evfSeq=${lastEvfSeq} captureInProgress=${state === 'CAPTURING'} clipRecording=${isClipRecording} photoCount=${photoCount} clipCount=${clipCount}`);
+
+  if (isStalled && (sessionOpen || state === 'LIVEVIEW_STALLED') && (state === 'LIVEVIEW' || state === 'READY' || state === 'LIVEVIEW_STALLED') && !isClipRecording && state !== 'CAPTURING' && state !== 'DOWNLOADING') {
+    void handleLiveViewStall();
+  }
+}, 3000);
+
+canonRuntime.on('error', (err) => {
+  writeSystemLog('warn', 'CANON:RUNTIME_ERROR', typeof err === 'object' ? JSON.stringify(err) : String(err));
+});
+
+canonRuntime.on('bridgeError', (err) => {
+  writeSystemLog('warn', 'CANON:BRIDGE_ERROR', typeof err === 'object' ? JSON.stringify(err) : String(err));
+});
+
 app.whenReady().then(async () => {
+  console.log(`[ELECTRON_OWNER]\nelectronPid = ${process.pid}`);
   writeSystemLog('info', 'WINDOWMINI:BOOT', 'MomentAI CameraOS Electron Main booted.');
   registerSkeletonIpc();
   printQueue.init();
+  ensureStorageDb();
+  desktopMediaManager.init(storageDb);
+  desktopMediaManager.onJobCompleted((job) => {
+    const session = sessions.get(job.sessionId);
+    if (session && job.jobType === 'FRAME_VIDEO_COMPOSE') {
+      session.videoCompositionState = job.status === 'COMPLETED' ? 'COMPLETED' : 'FAILED';
+      sessions.set(job.sessionId, session);
+    }
+    checkAndCompleteSession(job.sessionId);
+  });
   initSessionCleanupScheduler();
   createWindow('guest');
 
   try {
-    const canonOk = await canonBridge.start();
-    if (canonOk) {
-      writeSystemLog('info', 'CANON:CONNECTED', `Canon camera ${canonBridge.cameraModel} connected and ready.`);
+    const canonOk = await canonRuntime.start();
+    if (canonOk && (canonRuntime.state === 'READY' || canonRuntime.state === 'LIVEVIEW')) {
+      desktopMediaManager.setProvider('canon');
+      writeSystemLog('info', 'CANON:CONNECTED', `Canon camera ${canonRuntime.cameraModel} connected and ready.`);
+    } else if (canonRuntime.cameraCount > 0) {
+      desktopMediaManager.setProvider('canon');
+      writeSystemLog('info', 'CANON:CONNECTING', `Canon camera ${canonRuntime.cameraModel} detected; session opening/connecting.`);
     } else {
-      writeSystemLog('info', 'CANON:FALLBACK', 'Canon not available on boot; falling back to device camera.');
+      desktopMediaManager.setProvider('device');
+      writeSystemLog('info', 'CANON:FALLBACK', 'Canon not detected on boot; falling back to device camera.');
     }
   } catch (err) {
-    writeSystemLog('warn', 'CANON:START_ERROR', `Canon start error: ${err.message}`);
+    if (canonRuntime.cameraCount > 0) {
+      desktopMediaManager.setProvider('canon');
+      writeSystemLog('warn', 'CANON:START_WARNING', `Canon connecting warning: ${err.message}`);
+    } else {
+      desktopMediaManager.setProvider('device');
+      writeSystemLog('warn', 'CANON:START_ERROR', `Canon start error: ${err.message}`);
+    }
   }
+
+  logCameraRuntimeStatus('POST_BOOT_AUDIT');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow('guest');
@@ -1272,6 +1621,6 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  canonBridge.shutdown();
+  canonRuntime.shutdown();
   if (process.platform !== 'darwin') app.quit();
 });

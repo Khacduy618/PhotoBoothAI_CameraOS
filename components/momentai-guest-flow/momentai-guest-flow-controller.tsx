@@ -308,8 +308,43 @@ export function MomentAIGuestFlowController() {
         console.warn('Storage saveOutput error:', e);
       }
     }
+
+    // Trigger background video composition for the FINAL selected frame
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { media?: { composeVideo: (sid: string, frame: unknown, opts: unknown) => Promise<unknown> } } } }).momentai?.guest?.media?.composeVideo) {
+      try {
+        void (window as unknown as { momentai: { guest: { media: { composeVideo: (sid: string, frame: unknown, opts: unknown) => Promise<unknown> } } } }).momentai.guest.media.composeVideo(
+          backend.sessionId,
+          session.selectedFrame,
+          {
+            drawDataUrl,
+            targetWidth,
+            targetHeight,
+          }
+        );
+      } catch (e) {
+        console.warn('Video compose trigger error:', e);
+      }
+    }
+
+    // Early QR reservation: get tokenized session share URL
+    let qrUrl = '';
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { media?: { getPublicToken: (sid: string) => Promise<{ ok: boolean; value?: { publicToken?: string } }> } } } }).momentai?.guest?.media?.getPublicToken) {
+      try {
+        const tokenRes = await (window as unknown as { momentai: { guest: { media: { getPublicToken: (sid: string) => Promise<{ ok: boolean; value?: { publicToken?: string } }> } } } }).momentai.guest.media.getPublicToken(backend.sessionId);
+        const token = tokenRes?.value?.publicToken;
+        if (token) {
+          const origin = window.location.origin.includes('5173') || window.location.origin.includes('5174')
+            ? `http://${window.location.hostname}:3000`
+            : window.location.origin;
+          qrUrl = `${origin}/s/${token}`;
+        }
+      } catch {}
+    }
+
     const composedBackend = await api('compose', { sessionId: backend.sessionId });
-    setCurrentSession({ ...session, drawDataUrl, outputs, qr: mapBackendQr(composedBackend), printStatus: 'idle' });
+    const qrData = qrUrl ? { status: 'ready' as const, url: qrUrl } : mapBackendQr(composedBackend);
+
+    setCurrentSession({ ...session, drawDataUrl, outputs, qr: qrData, printStatus: 'idle' });
     setBackendSession(composedBackend);
     setScreenState('G06_RESULT');
   };

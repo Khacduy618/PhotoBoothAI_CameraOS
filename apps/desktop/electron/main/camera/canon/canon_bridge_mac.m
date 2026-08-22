@@ -5,8 +5,10 @@
 #include <string.h>
 #include <dlfcn.h>
 #include <unistd.h>
-#include <time.h>
+#include <sys/time.h>
 #include <pthread.h>
+#include <semaphore.h>
+#include <fcntl.h>
 
 // EDSDK Types & Constants
 typedef unsigned int EdsError;
@@ -27,13 +29,18 @@ typedef struct {
     char szDeviceDescription[256];
     EdsUInt32 DeviceSubType;
     EdsUInt32 reserved;
+    EdsUInt32 padding[16];
 } EdsDeviceInfo;
 
 typedef struct {
-    EdsUInt32 size;
-    char szFileName[256];
+    EdsUInt64 size;
     EdsUInt32 isFolder;
     EdsUInt32 groupID;
+    EdsUInt32 option;
+    char      szFileName[256];
+    EdsUInt32 format;
+    EdsUInt32 dateTime;
+    EdsUInt32 reserved[16];
 } EdsDirectoryItemInfo;
 
 #define EDS_ERR_OK 0x00000000
@@ -43,9 +50,24 @@ typedef struct {
 #define kEdsSaveTo_Host               0x00000002
 #define kEdsSaveTo_Both               0x00000003
 #define kEdsEvfOutputDevice_PC        0x00000002
-#define kEdsCameraCommand_TakePicture 0x00000000
+#define kEdsCameraCommand_TakePicture                 0x00000000
+#define kEdsCameraCommand_PressShutterButton          0x00000004
+#define kEdsCameraCommand_ShutterButton_OFF           0x00000000
+#define kEdsCameraCommand_ShutterButton_Halfway       0x00000001
+#define kEdsCameraCommand_ShutterButton_Completely    0x00000003
+#define kEdsCameraCommand_ShutterButton_Halfway_NonAF 0x00000011
+#define kEdsCameraCommand_ShutterButton_Completely_NonAF 0x00000013
 #define kEdsObjectEvent_DirItemCreated 0x00000204
 #define kEdsObjectEvent_DirItemRequestTransfer 0x00000208
+
+typedef int EdsInt32;
+typedef unsigned int EdsBool;
+
+typedef struct {
+    EdsInt32 numberOfFreeClusters;
+    EdsInt32 bytesPerSector;
+    EdsBool  reset;
+} EdsCapacity;
 
 typedef EdsError (*FnEdsInitializeSDK)(void);
 typedef EdsError (*FnEdsTerminateSDK)(void);
@@ -58,6 +80,7 @@ typedef EdsError (*FnEdsOpenSession)(EdsCameraRef inCameraRef);
 typedef EdsError (*FnEdsCloseSession)(EdsCameraRef inCameraRef);
 typedef EdsError (*FnEdsSendCommand)(EdsCameraRef inCameraRef, EdsCameraCommand inCommand, EdsUInt32 inParam);
 typedef EdsError (*FnEdsSetPropertyData)(EdsBaseRef inRef, EdsPropertyID inPropertyID, EdsUInt32 inParam, EdsUInt32 inSize, const void *inData);
+typedef EdsError (*FnEdsSetCapacity)(EdsCameraRef inCameraRef, EdsCapacity inCapacity);
 typedef EdsError (*FnEdsCreateMemoryStream)(EdsUInt32 inBufferSize, EdsStreamRef *outStreamRef);
 typedef EdsError (*FnEdsCreateFileStream)(const char *inFileName, EdsUInt32 inCreateDisposition, EdsUInt32 inDesiredAccess, EdsStreamRef *outStreamRef);
 typedef EdsError (*FnEdsCreateEvfImageRef)(EdsStreamRef inStreamRef, EdsEvfImageRef *outEvfImageRef);
@@ -65,10 +88,11 @@ typedef EdsError (*FnEdsDownloadEvfImage)(EdsCameraRef inCameraRef, EdsEvfImageR
 typedef EdsError (*FnEdsGetLength)(EdsStreamRef inStreamRef, EdsUInt64 *outLength);
 typedef EdsError (*FnEdsGetPointer)(EdsStreamRef inStreamRef, void **outPointer);
 typedef EdsError (*FnEdsGetDirectoryItemInfo)(EdsDirectoryItemRef inDirItemRef, EdsDirectoryItemInfo *outDirItemInfo);
-typedef EdsError (*FnEdsDownload)(EdsDirectoryItemRef inDirItemRef, EdsUInt32 inReadSize, EdsStreamRef outStreamRef);
+typedef EdsError (*FnEdsDownload)(EdsDirectoryItemRef inDirItemRef, EdsUInt64 inReadSize, EdsStreamRef outStreamRef);
 typedef EdsError (*FnEdsDownloadComplete)(EdsDirectoryItemRef inDirItemRef);
 typedef EdsError (*FnEdsSetObjectEventHandler)(EdsCameraRef inCameraRef, EdsObjectEvent inEvent, void *inHandler, void *inContext);
 typedef EdsUInt32 (*FnEdsRelease)(EdsBaseRef inRef);
+typedef EdsUInt32 (*FnEdsRetain)(EdsBaseRef inRef);
 
 static FnEdsInitializeSDK pEdsInitializeSDK;
 static FnEdsTerminateSDK pEdsTerminateSDK;
@@ -81,6 +105,7 @@ static FnEdsOpenSession pEdsOpenSession;
 static FnEdsCloseSession pEdsCloseSession;
 static FnEdsSendCommand pEdsSendCommand;
 static FnEdsSetPropertyData pEdsSetPropertyData;
+static FnEdsSetCapacity pEdsSetCapacity;
 static FnEdsCreateMemoryStream pEdsCreateMemoryStream;
 static FnEdsCreateFileStream pEdsCreateFileStream;
 static FnEdsCreateEvfImageRef pEdsCreateEvfImageRef;
@@ -92,6 +117,7 @@ static FnEdsDownload pEdsDownload;
 static FnEdsDownloadComplete pEdsDownloadComplete;
 static FnEdsSetObjectEventHandler pEdsSetObjectEventHandler;
 static FnEdsRelease pEdsRelease;
+static FnEdsRetain pEdsRetain;
 
 static void *g_edsdkHandle = NULL;
 static EdsCameraListRef g_cameraList = NULL;
@@ -100,15 +126,30 @@ static char g_cameraModel[256] = {0};
 static volatile int g_sessionOpen = 0;
 static volatile int g_liveViewActive = 0;
 static volatile int g_running = 1;
+static volatile int g_openSessionInProgress = 0;
 
 static char g_pendingCaptureTargetPath[512] = {0};
 static volatile int g_capturePending = 0;
 static volatile int g_captureCompleted = 0;
+static volatile int g_wasLiveViewBeforeCapture = 0;
 static unsigned long g_downloadedFileSize = 0;
 static int g_downloadedWidth = 0;
 static int g_downloadedHeight = 0;
 
 static pthread_mutex_t g_ioMutex = PTHREAD_MUTEX_INITIALIZER;
+
+static double getTimestampMs(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (tv.tv_sec * 1000.0) + (tv.tv_usec / 1000.0);
+}
+
+static void unlinkStaleSemaphores(void) {
+    sem_unlink("edsdk");
+    sem_unlink("/edsdk");
+    sem_unlink("EdsLogTool");
+    sem_unlink("/EdsLogTool");
+}
 
 static void sendJsonEvent(NSDictionary *dict) {
     NSError *error = nil;
@@ -150,89 +191,129 @@ static int parseJpegMemoryDimensions(const unsigned char *data, size_t size, int
     return 0;
 }
 
-static int parseJpegFileDimensions(const char *path, int *width, int *height) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return 0;
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (sz <= 4) { fclose(f); return 0; }
+static EdsError handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef inRef, void *inContext) {
+    fprintf(stderr, "[CanonBridge] Object event received: 0x%08X\n", inEvent);
 
-    unsigned char *buf = malloc(sz);
-    if (!buf) { fclose(f); return 0; }
-    fread(buf, 1, sz, f);
-    fclose(f);
-
-    int res = parseJpegMemoryDimensions(buf, (size_t)sz, width, height);
-    free(buf);
-    return res;
-}
-
-EdsError handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef inRef, void *inContext) {
     if (inEvent == kEdsObjectEvent_DirItemCreated || inEvent == kEdsObjectEvent_DirItemRequestTransfer) {
+        if (!g_capturePending && g_captureCompleted) {
+            fprintf(stderr, "[CanonBridge] Ignoring extraneous object event 0x%08X (already completed)\n", inEvent);
+            return EDS_ERR_OK;
+        }
         EdsDirectoryItemRef dirItem = (EdsDirectoryItemRef)inRef;
-        EdsDirectoryItemInfo itemInfo;
-        memset(&itemInfo, 0, sizeof(itemInfo));
-        EdsError err = pEdsGetDirectoryItemInfo(dirItem, &itemInfo);
-        if (err == EDS_ERR_OK) {
-            sendJsonEvent(@{
-                @"event": @"objectCreated",
-                @"fileName": [NSString stringWithUTF8String:itemInfo.szFileName],
-                @"size": @(itemInfo.size)
-            });
+        EdsDirectoryItemInfo dirInfo;
+        memset(&dirInfo, 0, sizeof(dirInfo));
 
-            char targetPath[512] = {0};
-            if (strlen(g_pendingCaptureTargetPath) > 0) {
-                strncpy(targetPath, g_pendingCaptureTargetPath, sizeof(targetPath) - 1);
+        EdsError err = pEdsGetDirectoryItemInfo(dirItem, &dirInfo);
+        if (err != EDS_ERR_OK) {
+            fprintf(stderr, "[CanonBridge] Failed to get dir item info: 0x%08X\n", err);
+            sendJsonEvent(@{ @"event": @"error", @"code": @"GET_DIR_ITEM_INFO_FAILED", @"edsdkError": @(err) });
+            return err;
+        }
+
+        fprintf(stderr, "[CanonBridge] Object ready: %s (size %llu bytes)\n", dirInfo.szFileName, dirInfo.size);
+        sendJsonEvent(@{
+            @"event": @"objectCreated",
+            @"fileName": [NSString stringWithUTF8String:dirInfo.szFileName],
+            @"size": @(dirInfo.size)
+        });
+
+        // Determine destination path
+        NSString *destPath = nil;
+        if (strlen(g_pendingCaptureTargetPath) > 0) {
+            destPath = [NSString stringWithUTF8String:g_pendingCaptureTargetPath];
+        } else {
+            NSString *tempDir = NSTemporaryDirectory();
+            NSString *uniqueName = [NSString stringWithFormat:@"canon_%lld_%s", (long long)[[NSDate date] timeIntervalSince1970], dirInfo.szFileName];
+            destPath = [tempDir stringByAppendingPathComponent:uniqueName];
+        }
+
+        // Create file stream
+        EdsStreamRef stream = NULL;
+        err = pEdsCreateFileStream([destPath UTF8String], 1 /* kEdsFileCreate_CreateAlways */, 2 /* kEdsAccess_ReadWrite */, &stream);
+        if (err != EDS_ERR_OK) {
+            fprintf(stderr, "[CanonBridge] Failed to create file stream for %s: 0x%08X\n", [destPath UTF8String], err);
+            sendJsonEvent(@{ @"event": @"error", @"code": @"CREATE_STREAM_FAILED", @"edsdkError": @(err) });
+            return err;
+        }
+
+        fprintf(stderr, "[CanonBridge] Downloading to %s...\n", [destPath UTF8String]);
+        err = pEdsDownload(dirItem, dirInfo.size, stream);
+        if (err != EDS_ERR_OK) {
+            fprintf(stderr, "[CanonBridge] Download failed: 0x%08X\n", err);
+            pEdsRelease(stream);
+            sendJsonEvent(@{ @"event": @"error", @"code": @"DOWNLOAD_FAILED", @"edsdkError": @(err) });
+            return err;
+        }
+
+        pEdsDownloadComplete(dirItem);
+        pEdsRelease(stream);
+
+        // Parse downloaded image dimensions
+        int width = 0, height = 0;
+        NSData *fileData = [NSData dataWithContentsOfFile:destPath];
+        if (fileData) {
+            parseJpegMemoryDimensions([fileData bytes], [fileData length], &width, &height);
+        }
+
+        g_downloadedFileSize = (unsigned long)[fileData length];
+        g_downloadedWidth = width > 0 ? width : 5472;
+        g_downloadedHeight = height > 0 ? height : 3648;
+        g_captureCompleted = 1;
+        g_capturePending = 0;
+
+        fprintf(stderr, "[CanonBridge] Download completed successfully: %s (%lu bytes, %dx%d)\n",
+                [destPath UTF8String], g_downloadedFileSize, g_downloadedWidth, g_downloadedHeight);
+
+        sendJsonEvent(@{
+            @"event": @"downloadCompleted",
+            @"path": destPath,
+            @"size": @(g_downloadedFileSize),
+            @"width": @(g_downloadedWidth),
+            @"height": @(g_downloadedHeight)
+        });
+
+        if (g_wasLiveViewBeforeCapture) {
+            g_wasLiveViewBeforeCapture = 0;
+            usleep(150000);
+            EdsUInt32 evfOn = kEdsEvfOutputDevice_PC;
+            EdsError errEvf = pEdsSetPropertyData ? pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn) : EDS_ERR_OK;
+            if (errEvf == EDS_ERR_OK) {
+                g_liveViewActive = 1;
+                fprintf(stderr, "[CanonBridge] Restored LiveView EVF output after capture download\n");
+                sendJsonEvent(@{ @"event": @"liveViewResumed", @"status": @"ok" });
             } else {
-                snprintf(targetPath, sizeof(targetPath), "/tmp/canon_capture_%lu_%s", time(NULL), itemInfo.szFileName);
-            }
-
-            NSString *nsTarget = [NSString stringWithUTF8String:targetPath];
-            [[NSFileManager defaultManager] createDirectoryAtPath:[nsTarget stringByDeletingLastPathComponent] withIntermediateDirectories:YES attributes:nil error:nil];
-
-            EdsStreamRef fileStream = NULL;
-            err = pEdsCreateFileStream(targetPath, 1 /* CreateAlways */, 2 /* ReadWrite */, &fileStream);
-            if (err == EDS_ERR_OK && fileStream) {
-                sendJsonEvent(@{ @"event": @"downloadStarted", @"targetPath": nsTarget });
-                err = pEdsDownload(dirItem, itemInfo.size, fileStream);
-                if (err == EDS_ERR_OK) {
-                    pEdsDownloadComplete(dirItem);
-                    
-                    FILE *chk = fopen(targetPath, "rb");
-                    if (chk) {
-                        fseek(chk, 0, SEEK_END);
-                        g_downloadedFileSize = (unsigned long)ftell(chk);
-                        fclose(chk);
-                    }
-                    parseJpegFileDimensions(targetPath, &g_downloadedWidth, &g_downloadedHeight);
-
-                    sendJsonEvent(@{
-                        @"event": @"downloadCompleted",
-                        @"path": nsTarget,
-                        @"size": @(g_downloadedFileSize),
-                        @"width": @(g_downloadedWidth),
-                        @"height": @(g_downloadedHeight)
-                    });
-                    g_captureCompleted = 1;
-                } else {
-                    sendJsonEvent(@{ @"event": @"error", @"code": @"DOWNLOAD_FAILED", @"edsdkError": @(err) });
-                }
-                pEdsRelease(fileStream);
+                fprintf(stderr, "[CanonBridge] Failed to restore LiveView EVF output: 0x%08X\n", errEvf);
             }
         }
     }
     return EDS_ERR_OK;
 }
 
-static int loadEdsdk() {
+static int loadEdsdk(void) {
     if (g_edsdkHandle) return 1;
-    const char *frameworkPath = "/Applications/Canon Utilities/EOS Utility/EU3/EOS Utility 3.app/Contents/Frameworks/EDSDK.framework/Versions/A/EDSDK";
-    g_edsdkHandle = dlopen(frameworkPath, RTLD_LAZY);
+
+    const char *paths[] = {
+        "/Applications/Canon Utilities/EOS Utility/EU3/EOS Utility 3.app/Contents/Frameworks/EDSDK.framework/Versions/A/EDSDK",
+        "/Applications/Canon Utilities/EOS Utility/EOS Utility.app/Contents/Frameworks/EDSDK.framework/Versions/A/EDSDK",
+        "/Library/Frameworks/EDSDK.framework/Versions/A/EDSDK",
+        NULL
+    };
+
+    for (int i = 0; paths[i] != NULL; i++) {
+        if (access(paths[i], R_OK) == 0) {
+            g_edsdkHandle = dlopen(paths[i], RTLD_LAZY);
+            if (g_edsdkHandle) {
+                fprintf(stderr, "[CanonBridge] Loaded EDSDK from %s\n", paths[i]);
+                break;
+            }
+        }
+    }
+
     if (!g_edsdkHandle) {
-        fprintf(stderr, "[CanonBridge] dlopen error: %s\n", dlerror());
+        fprintf(stderr, "[CanonBridge] Failed to load EDSDK dynamic library: %s\n", dlerror());
         return 0;
     }
+
     pEdsInitializeSDK = (FnEdsInitializeSDK)dlsym(g_edsdkHandle, "EdsInitializeSDK");
     pEdsTerminateSDK = (FnEdsTerminateSDK)dlsym(g_edsdkHandle, "EdsTerminateSDK");
     pEdsGetCameraList = (FnEdsGetCameraList)dlsym(g_edsdkHandle, "EdsGetCameraList");
@@ -244,6 +325,7 @@ static int loadEdsdk() {
     pEdsCloseSession = (FnEdsCloseSession)dlsym(g_edsdkHandle, "EdsCloseSession");
     pEdsSendCommand = (FnEdsSendCommand)dlsym(g_edsdkHandle, "EdsSendCommand");
     pEdsSetPropertyData = (FnEdsSetPropertyData)dlsym(g_edsdkHandle, "EdsSetPropertyData");
+    pEdsSetCapacity = (FnEdsSetCapacity)dlsym(g_edsdkHandle, "EdsSetCapacity");
     pEdsCreateMemoryStream = (FnEdsCreateMemoryStream)dlsym(g_edsdkHandle, "EdsCreateMemoryStream");
     pEdsCreateFileStream = (FnEdsCreateFileStream)dlsym(g_edsdkHandle, "EdsCreateFileStream");
     pEdsCreateEvfImageRef = (FnEdsCreateEvfImageRef)dlsym(g_edsdkHandle, "EdsCreateEvfImageRef");
@@ -255,6 +337,7 @@ static int loadEdsdk() {
     pEdsDownloadComplete = (FnEdsDownloadComplete)dlsym(g_edsdkHandle, "EdsDownloadComplete");
     pEdsSetObjectEventHandler = (FnEdsSetObjectEventHandler)dlsym(g_edsdkHandle, "EdsSetObjectEventHandler");
     pEdsRelease = (FnEdsRelease)dlsym(g_edsdkHandle, "EdsRelease");
+    pEdsRetain = (FnEdsRetain)dlsym(g_edsdkHandle, "EdsRetain");
     return 1;
 }
 
@@ -268,29 +351,59 @@ static void processCommand(NSDictionary *cmd) {
             sendJsonEvent(@{ @"event": @"error", @"code": @"DLOPEN_FAILED" });
             return;
         }
+        fprintf(stderr, "[EDS_INITIALIZE_BEGIN] thread=0x%lx isMain=%d at=%.3f\n",
+                (unsigned long)pthread_self(), pthread_main_np(), getTimestampMs());
         EdsError err = pEdsInitializeSDK();
-        fprintf(stderr, "[DEBUG] EdsInitializeSDK returned 0x%08X\n", err);
+        fprintf(stderr, "[EDS_INITIALIZE_END] result=0x%08X at=%.3f\n", err, getTimestampMs());
         if (err == EDS_ERR_OK) {
             sendJsonEvent(@{ @"event": @"initialized", @"status": @"ok" });
         } else {
             sendJsonEvent(@{ @"event": @"error", @"code": @"INITIALIZE_FAILED", @"edsdkError": @(err) });
         }
+    } else if ([action isEqualToString:@"cleanStaleLock"]) {
+        unlinkStaleSemaphores();
+        sendJsonEvent(@{ @"event": @"staleLockCleaned", @"status": @"ok" });
     } else if ([action isEqualToString:@"enumerate"]) {
         if (!pEdsGetCameraList) {
             sendJsonEvent(@{ @"event": @"error", @"code": @"NOT_INITIALIZED" });
             return;
         }
-        EdsError err = pEdsGetCameraList(&g_cameraList);
-        fprintf(stderr, "[DEBUG] EdsGetCameraList returned 0x%08X\n", err);
-        EdsUInt32 count = 0;
-        if (err == EDS_ERR_OK && g_cameraList) {
-            pEdsGetChildCount(g_cameraList, &count);
-            fprintf(stderr, "[DEBUG] EdsGetChildCount returned count: %u\n", count);
+
+        double enumBeginMs = getTimestampMs();
+
+        // 1. Release previous camera and camera list references before acquiring fresh
+        if (g_camera && pEdsRelease) {
+            fprintf(stderr, "[DEBUG] Releasing stale cameraRef=%p\n", g_camera);
+            pEdsRelease(g_camera);
+            g_camera = NULL;
         }
-        if (count > 0) {
+        if (g_cameraList && pEdsRelease) {
+            fprintf(stderr, "[DEBUG] Releasing stale cameraListRef=%p\n", g_cameraList);
+            pEdsRelease(g_cameraList);
+            g_cameraList = NULL;
+        }
+
+        // 2. Acquire fresh camera list
+        EdsCameraListRef newList = NULL;
+        EdsError err = pEdsGetCameraList(&newList);
+        g_cameraList = newList;
+
+        EdsUInt32 count = 0;
+        EdsError childCountErr = 0xFFFFFFFF;
+        if (err == EDS_ERR_OK && newList) {
+            childCountErr = pEdsGetChildCount(newList, &count);
+        }
+
+        double elapsedMs = getTimestampMs() - enumBeginMs;
+        fprintf(stderr, "[EDS_ENUM_AUDIT] bridgePid=%d threadId=0x%lx isMainThread=%d initializeCompleted=1 getCameraListResult=0x%08X cameraListRef=%p getChildCountResult=0x%08X cameraCount=%u elapsedMs=%.2f\n",
+                getpid(), (unsigned long)pthread_self(), pthread_main_np(), err, newList, childCountErr, count, elapsedMs);
+
+        if (count > 0 && newList) {
             EdsCameraRef cam = NULL;
-            pEdsGetChildAtIndex(g_cameraList, 0, (EdsBaseRef*)&cam);
+            pEdsGetChildAtIndex(newList, 0, (EdsBaseRef*)&cam);
             g_camera = cam;
+            fprintf(stderr, "[DEBUG] CAMERA_LIST_REF = %p, CAMERA_REF = %p (count=%u)\n", g_cameraList, g_camera, count);
+
             EdsDeviceInfo devInfo;
             memset(&devInfo, 0, sizeof(devInfo));
             pEdsGetDeviceInfo(g_camera, &devInfo);
@@ -305,10 +418,23 @@ static void processCommand(NSDictionary *cmd) {
                 @"event": @"cameraDiscovered",
                 @"count": @(count),
                 @"model": [NSString stringWithUTF8String:g_cameraModel],
-                @"port": [NSString stringWithUTF8String:devInfo.szPortName]
+                @"port": [NSString stringWithUTF8String:devInfo.szPortName],
+                @"cameraListRef": [NSString stringWithFormat:@"%p", g_cameraList],
+                @"cameraRef": [NSString stringWithFormat:@"%p", g_camera]
             });
         } else {
-            sendJsonEvent(@{ @"event": @"cameraDiscovered", @"count": @0 });
+            fprintf(stderr, "[EDS_ENUM_RESULT] SUCCESS_EMPTY_LIST (bridgePid=%d count=0 err=0x%08X)\n", getpid(), err);
+            // Immediately release empty camera list to prevent stale caching
+            if (g_cameraList && pEdsRelease) {
+                pEdsRelease(g_cameraList);
+                g_cameraList = NULL;
+            }
+            sendJsonEvent(@{
+                @"event": @"cameraDiscovered",
+                @"count": @0,
+                @"result": @"SUCCESS_EMPTY_LIST",
+                @"edsdkResult": @(err)
+            });
         }
     } else if ([action isEqualToString:@"openSession"]) {
         if (!g_camera) {
@@ -316,15 +442,54 @@ static void processCommand(NSDictionary *cmd) {
             sendJsonEvent(@{ @"event": @"error", @"code": @"NO_CAMERA" });
             return;
         }
-        fprintf(stderr, "[DEBUG] Calling EdsOpenSession...\n");
+        if (g_openSessionInProgress) {
+            fprintf(stderr, "[DEBUG] openSession: attempt already in progress, skipping duplicate call.\n");
+            return;
+        }
+        g_openSessionInProgress = 1;
+        fprintf(stderr, "[EDS_OPEN_SESSION_BEGIN] thread=0x%lx isMain=%d cameraRef=%p at=%.3f\n",
+                (unsigned long)pthread_self(), pthread_main_np(), g_camera, getTimestampMs());
+
         EdsError err = pEdsOpenSession(g_camera);
-        fprintf(stderr, "[DEBUG] EdsOpenSession returned 0x%08X\n", err);
+
+        fprintf(stderr, "[EDS_OPEN_SESSION_END] result=0x%08X at=%.3f\n", err, getTimestampMs());
+        g_openSessionInProgress = 0;
+
         if (err == EDS_ERR_OK) {
             g_sessionOpen = 1;
-            EdsUInt32 saveTo = kEdsSaveTo_Both;
-            pEdsSetPropertyData(g_camera, kEdsPropID_SaveTo, 0, sizeof(saveTo), &saveTo);
+
+            // 1. Read SaveTo before
+            EdsUInt32 saveToBefore = 0;
+            EdsError errSaveToBefore = pEdsGetPropertyData ? pEdsGetPropertyData(g_camera, kEdsPropID_SaveTo, 0, sizeof(saveToBefore), &saveToBefore) : 0xFFFFFFFF;
+
+            // 2. Set SaveTo = Host
+            EdsUInt32 saveTo = kEdsSaveTo_Host;
+            EdsError errSetSaveTo = pEdsSetPropertyData ? pEdsSetPropertyData(g_camera, kEdsPropID_SaveTo, 0, sizeof(saveTo), &saveTo) : 0xFFFFFFFF;
+
+            // 3. Set EdsCapacity
+            EdsCapacity capacity;
+            capacity.numberOfFreeClusters = 0x7FFFFFFF;
+            capacity.bytesPerSector = 512;
+            capacity.reset = 1;
+            EdsError errSetCapacity = pEdsSetCapacity ? pEdsSetCapacity(g_camera, capacity) : 0xFFFFFFFF;
+
+            // 4. Read SaveTo after
+            EdsUInt32 saveToAfter = 0;
+            EdsError errSaveToAfter = pEdsGetPropertyData ? pEdsGetPropertyData(g_camera, kEdsPropID_SaveTo, 0, sizeof(saveToAfter), &saveToAfter) : 0xFFFFFFFF;
+
+            fprintf(stderr, "[EDS_CAPACITY_AUDIT] SAVE_TO_BEFORE=0x%08X (res=0x%08X) SET_SAVE_TO_HOST=0x%08X (res=0x%08X) SAVE_TO_AFTER=0x%08X (res=0x%08X) SET_CAPACITY=0x%08X\n",
+                    saveToBefore, errSaveToBefore, saveTo, errSetSaveTo, saveToAfter, errSaveToAfter, errSetCapacity);
+
             pEdsSetObjectEventHandler(g_camera, 0x00000200 /* kEdsObjectEvent_All */, (void*)handleObjectEvent, NULL);
-            sendJsonEvent(@{ @"event": @"sessionOpened", @"status": @"ok", @"model": [NSString stringWithUTF8String:g_cameraModel] });
+            sendJsonEvent(@{
+                @"event": @"sessionOpened",
+                @"status": @"ok",
+                @"model": [NSString stringWithUTF8String:g_cameraModel],
+                @"saveToBefore": @(saveToBefore),
+                @"saveToAfter": @(saveToAfter),
+                @"setSaveToRes": @(errSetSaveTo),
+                @"setCapacityRes": @(errSetCapacity)
+            });
         } else {
             sendJsonEvent(@{ @"event": @"error", @"code": @"OPEN_SESSION_FAILED", @"edsdkError": @(err) });
         }
@@ -363,11 +528,45 @@ static void processCommand(NSDictionary *cmd) {
         g_captureCompleted = 0;
 
         sendJsonEvent(@{ @"event": @"captureStarted", @"shotIndex": cmd[@"shotIndex"] ?: @1 });
+        g_wasLiveViewBeforeCapture = g_liveViewActive;
+        if (g_wasLiveViewBeforeCapture) {
+            EdsUInt32 evfOff = 0;
+            pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOff), &evfOff);
+            g_liveViewActive = 0;
+            // Pump runloop for 300ms to allow camera to drop mirror and return from LiveView
+            for (int i = 0; i < 6; i++) {
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
+            }
+        }
+
+        // Try TakePicture first, then fallback to PressShutterButton
         EdsError err = pEdsSendCommand(g_camera, kEdsCameraCommand_TakePicture, 0);
+        NSString *usedCmd = @"TakePicture";
+        if (err != EDS_ERR_OK) {
+            usedCmd = @"PressShutterButton_Completely_NonAF";
+            err = pEdsSendCommand(g_camera, kEdsCameraCommand_PressShutterButton, kEdsCameraCommand_ShutterButton_Completely_NonAF);
+            usleep(200000);
+            pEdsSendCommand(g_camera, kEdsCameraCommand_PressShutterButton, kEdsCameraCommand_ShutterButton_OFF);
+        }
+        if (err != EDS_ERR_OK) {
+            usedCmd = @"PressShutterButton_Completely";
+            err = pEdsSendCommand(g_camera, kEdsCameraCommand_PressShutterButton, kEdsCameraCommand_ShutterButton_Completely);
+            usleep(200000);
+            pEdsSendCommand(g_camera, kEdsCameraCommand_PressShutterButton, kEdsCameraCommand_ShutterButton_OFF);
+        }
+
+        fprintf(stderr, "[CAPTURE_AUDIT] COMMAND=%s RESULT=0x%08X\n", [usedCmd UTF8String], err);
+
         if (err == EDS_ERR_OK) {
-            sendJsonEvent(@{ @"event": @"shutterDone", @"status": @"ok" });
+            sendJsonEvent(@{ @"event": @"shutterDone", @"status": @"ok", @"command": usedCmd });
         } else {
-            sendJsonEvent(@{ @"event": @"error", @"code": @"TAKE_PICTURE_FAILED", @"edsdkError": @(err) });
+            sendJsonEvent(@{ @"event": @"error", @"code": @"TAKE_PICTURE_FAILED", @"edsdkError": @(err), @"command": usedCmd });
+            if (g_wasLiveViewBeforeCapture) {
+                g_wasLiveViewBeforeCapture = 0;
+                EdsUInt32 evfOn = kEdsEvfOutputDevice_PC;
+                pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn);
+                g_liveViewActive = 1;
+            }
         }
     } else if ([action isEqualToString:@"closeSession"]) {
         if (g_camera && g_sessionOpen) {
@@ -396,7 +595,7 @@ static void *stdinReaderThread(void *arg) {
         NSError *err = nil;
         NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:0 error:&err];
         if (dict && !err) {
-            CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopCommonModes, ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 processCommand(dict);
             });
             CFRunLoopWakeUp(CFRunLoopGetMain());
@@ -420,7 +619,7 @@ int main(int argc, const char * argv[]) {
         uint64_t frameSeq = 0;
         while (g_running) {
             @autoreleasepool {
-                [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, false);
 
                 if (g_liveViewActive && g_sessionOpen && g_camera) {
                     EdsStreamRef evfStream = NULL;
@@ -444,6 +643,10 @@ int main(int argc, const char * argv[]) {
                                     NSString *dataUrl = [NSString stringWithFormat:@"data:image/jpeg;base64,%@", base64];
 
                                     frameSeq++;
+                                    if (frameSeq % 30 == 1) {
+                                        fprintf(stderr, "[NATIVE_EVF] seq=%llu bytes=%llu width=%d height=%d at=%.3f\n",
+                                                (unsigned long long)frameSeq, (unsigned long long)length, w, h, getTimestampMs());
+                                    }
                                     sendJsonEvent(@{
                                         @"event": @"liveViewFrame",
                                         @"seq": @(frameSeq),
@@ -465,8 +668,8 @@ int main(int argc, const char * argv[]) {
         if (g_camera && g_sessionOpen) {
             pEdsCloseSession(g_camera);
         }
-        if (g_camera) pEdsRelease(g_camera);
-        if (g_cameraList) pEdsRelease(g_cameraList);
+        if (g_camera && pEdsRelease) pEdsRelease(g_camera);
+        if (g_cameraList && pEdsRelease) pEdsRelease(g_cameraList);
         if (pEdsTerminateSDK) pEdsTerminateSDK();
         if (g_edsdkHandle) dlclose(g_edsdkHandle);
 

@@ -11,6 +11,8 @@ const COMMANDS = {
   LIVEVIEW_START: 'camera.liveview.start',
   LIVEVIEW_STOP: 'camera.liveview.stop',
   CAPTURE: 'camera.capture',
+  AUTOFOCUS: 'camera.autofocus',
+  AUTOFOCUS_STOP: 'camera.autofocus.stop',
   RECONNECT: 'camera.reconnect',
   RECOVER_EVF: 'camera.recover.evf',
   RECOVER_SESSION: 'camera.recover.session',
@@ -27,6 +29,8 @@ const EVENTS = {
   LIVEVIEW_FRAME: 'camera.liveview.frame',
   LIVEVIEW_STOPPED: 'camera.liveview.stopped',
   LIVEVIEW_RESUMED: 'camera.liveview.resumed',
+  AUTOFOCUS_STARTED: 'camera.autofocus.started',
+  AUTOFOCUS_COMPLETED: 'camera.autofocus.completed',
   CAPTURE_STARTED: 'camera.capture.started',
   SHUTTER: 'camera.shutter',
   OBJECT_CREATED: 'camera.object.created',
@@ -55,6 +59,7 @@ const STATES = {
   LIVEVIEW_STALLED: 'LIVEVIEW_STALLED',
   LIVEVIEW_RECOVERING: 'LIVEVIEW_RECOVERING',
   RECOVERING: 'RECOVERING',
+  CAMERA_PTP_UNRESPONSIVE: 'CAMERA_PTP_UNRESPONSIVE',
   ERROR: 'ERROR',
 };
 

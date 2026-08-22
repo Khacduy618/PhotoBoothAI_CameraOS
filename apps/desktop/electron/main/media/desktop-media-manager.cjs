@@ -154,6 +154,8 @@ class DesktopMediaManager {
     this.storageRootDir = path.resolve(options.storageRootDir || process.env.MOMENTAI_STORAGE_DIR || path.join(projectRoot, 'artifacts', 'windowmini-storage'));
     this.sessionMediaPaths = new SessionMediaPaths(this.storageRootDir);
     this.activeSessionId = null;
+    this.activeCaptureSessionId = null;
+    this.activeCaptureShotIndex = null;
     this.activeProvider = 'canon';
     this.targetFps = 15;
     this.maxQueueFrames = 300;
@@ -239,17 +241,7 @@ class DesktopMediaManager {
     if (this.sessionTokens.has(sessionId)) {
       return this.sessionTokens.get(sessionId);
     }
-    if (this.db) {
-      try {
-        const row = this.db.prepare('SELECT public_token FROM public_session_tokens WHERE session_id = ?').get(sessionId);
-        if (row?.public_token) {
-          this.sessionTokens.set(sessionId, row.public_token);
-          return row.public_token;
-        }
-      } catch {}
-    }
-    // Generate secure 16-char random token
-    const token = crypto.randomBytes(8).toString('hex');
+    const token = crypto.randomBytes(6).toString('hex');
     this.sessionTokens.set(sessionId, token);
     if (this.db) {
       try {
@@ -271,10 +263,46 @@ class DesktopMediaManager {
     this.getPublicToken(sessionId);
   }
 
-  startShotClip(sessionId, shotIndex, countdownStartedAt) {
+  startShotClip(sessionId, shotIndex, countdownStartedAt, options = {}) {
+    const requiredShots = options.requiredShots || 4;
+    if (shotIndex < 0 || shotIndex >= requiredShots) {
+      console.log(`[SHOT_GUARD_REJECTED]\nsessionId=${sessionId}\nshotIndex=${shotIndex}\nrequiredShots=${requiredShots}`);
+      throw new Error(`[DesktopMediaManager] Shot index ${shotIndex} is out of bounds (requiredShots=${requiredShots})`);
+    }
+
     const provider = this.sessionProviders.get(sessionId) || this.activeProvider;
     this.startSession(sessionId, provider);
     const sessionMap = this.sessionClips.get(sessionId);
+
+    // Idempotent: If already recording this exact shot in this session, return existing metadata
+    const existing = sessionMap.get(shotIndex);
+    if (existing && existing.status === 'recording') {
+      this.activeCaptureSessionId = sessionId;
+      this.activeCaptureShotIndex = shotIndex;
+      return existing.metadata || {
+        id: `clip_${sessionId}_${shotIndex + 1}`,
+        sessionId,
+        shotIndex,
+        localPath: existing.localPath,
+        status: 'recording',
+        startedAt: existing.startedAt,
+        provider,
+      };
+    }
+
+    // Invariant: MAX_ACTIVE_FRAME_COLLECTORS = 1 across all sessions
+    // Transition any prior recording shot to finalizing, but do NOT wipe frames!
+    for (const [, sMap] of this.sessionClips.entries()) {
+      for (const [, sState] of sMap.entries()) {
+        if (sState.status === 'recording') {
+          sState.status = 'finalizing';
+        }
+      }
+    }
+
+    this.activeCaptureSessionId = sessionId;
+    this.activeCaptureShotIndex = shotIndex;
+
     const startedAt = countdownStartedAt || new Date().toISOString();
     const localPath = this.sessionMediaPaths.clip(sessionId, shotIndex + 1);
 
@@ -298,35 +326,40 @@ class DesktopMediaManager {
       provider,
     };
     shotState.metadata = meta;
+
+    console.log(`[SHOT_TX_START]\nsessionId=${sessionId}\nshotIndex=${shotIndex + 1}\nrequiredShots=${requiredShots}\nprovider=${provider}\nactiveRecordingShot=${shotIndex + 1}`);
+
     return meta;
   }
 
   pushCanonLiveViewFrame(frame) {
-    for (const [, sessionMap] of this.sessionClips.entries()) {
-      for (const shotState of sessionMap.values()) {
-        if (shotState.status === 'recording') {
-          let buffer = null;
-          if (frame.data && Buffer.isBuffer(frame.data)) {
-            buffer = frame.data;
-          } else if (frame.dataUrl && typeof frame.dataUrl === 'string') {
-            const base64 = frame.dataUrl.split(',').pop() || frame.dataUrl;
-            buffer = Buffer.from(base64, 'base64');
-          }
+    if (!this.activeCaptureSessionId || this.activeCaptureShotIndex === null || this.activeCaptureShotIndex === undefined) {
+      return;
+    }
+    const sessionMap = this.sessionClips.get(this.activeCaptureSessionId);
+    if (!sessionMap) return;
+    const shotState = sessionMap.get(this.activeCaptureShotIndex);
+    if (!shotState || shotState.status !== 'recording') return;
 
-          if (buffer && buffer.length > 0) {
-            shotState.frames.push({
-              data: buffer,
-              timestamp: Date.now(),
-              width: frame.width || 1920,
-              height: frame.height || 1080,
-              seq: frame.seq,
-            });
+    let buffer = null;
+    if (frame.data && Buffer.isBuffer(frame.data)) {
+      buffer = frame.data;
+    } else if (frame.dataUrl && typeof frame.dataUrl === 'string') {
+      const base64 = frame.dataUrl.split(',').pop() || frame.dataUrl;
+      buffer = Buffer.from(base64, 'base64');
+    }
 
-            if (shotState.frames.length > this.maxQueueFrames) {
-              shotState.frames.shift();
-            }
-          }
-        }
+    if (buffer && buffer.length > 0) {
+      shotState.frames.push({
+        data: buffer,
+        timestamp: Date.now(),
+        width: frame.width || 1920,
+        height: frame.height || 1080,
+        seq: frame.seq,
+      });
+
+      if (shotState.frames.length > this.maxQueueFrames) {
+        shotState.frames.shift();
       }
     }
   }
@@ -366,19 +399,41 @@ class DesktopMediaManager {
     const shotState = sessionMap.get(shotIndex);
     if (!shotState) throw new Error(`Shot ${shotIndex} for session ${sessionId} not found.`);
 
-    shotState.completedAt = capturedPhotoPersistedAt || new Date().toISOString();
-    shotState.status = 'finalizing';
+    // Idempotent: If already ready, failed, or encoding, return existing metadata
+    if (shotState.status === 'ready' || shotState.status === 'failed' || shotState.status === 'encoding') {
+      return shotState.metadata || {
+        id: `clip_${sessionId}_${shotIndex + 1}`,
+        sessionId,
+        shotIndex,
+        localPath: shotState.localPath,
+        status: shotState.status,
+      };
+    }
 
-    const clipsDir = path.join(this.storageRootDir, 'sessions', sessionId, 'clips');
-    fs.mkdirSync(clipsDir, { recursive: true });
-    const outputPath = path.join(clipsDir, `shot_${String(shotIndex + 1).padStart(2, '0')}.mp4`);
+    if (this.activeCaptureSessionId === sessionId && this.activeCaptureShotIndex === shotIndex) {
+      this.activeCaptureShotIndex = null;
+    }
+
+    // Atomically detach/freeze frame buffer for this shot
+    const framesToEncode = [...shotState.frames];
+    shotState.frames = []; // detached from collector
+    shotState.status = 'encoding';
+    shotState.completedAt = capturedPhotoPersistedAt || new Date().toISOString();
+
+    const firstSeq = framesToEncode[0]?.seq || 0;
+    const lastSeq = framesToEncode[framesToEncode.length - 1]?.seq || 0;
+    console.log(`[SHOT_FRAME_BUFFER_DETACHED]\nsessionId=${sessionId}\nshotIndex=${shotIndex + 1}\nframeCount=${framesToEncode.length}\nfirstSeq=${firstSeq}\nlastSeq=${lastSeq}`);
+
+    const outputPath = this.sessionMediaPaths.clip(sessionId, shotIndex + 1);
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 
     try {
       // In Canon mode, fallback placeholder injection is strictly forbidden
       if (shotState.provider === 'canon') {
-        if (shotState.frames.length === 0) {
+        if (framesToEncode.length === 0) {
           shotState.status = 'failed';
           shotState.error = 'NO_CANON_EVF_FRAMES_FOR_CLIP';
+          console.log(`[SHOT_TX_FAILED]\nsessionId=${sessionId}\nshotIndex=${shotIndex + 1}\nreason=NO_CANON_EVF_FRAMES_FOR_CLIP`);
           const meta = {
             id: `clip_${sessionId}_${shotIndex + 1}`,
             sessionId,
@@ -396,19 +451,19 @@ class DesktopMediaManager {
           return meta;
         }
       } else {
-        if (shotState.frames.length === 0 && options.fallbackImageBuffer) {
+        if (framesToEncode.length === 0 && options.fallbackImageBuffer) {
           for (let k = 0; k < 15; k++) {
-            shotState.frames.push({
+            framesToEncode.push({
               data: options.fallbackImageBuffer,
               timestamp: Date.now() + k * 66,
               width: 1920,
               height: 1080,
             });
           }
-        } else if (shotState.frames.length === 1) {
-          const single = shotState.frames[0];
+        } else if (framesToEncode.length === 1) {
+          const single = framesToEncode[0];
           for (let k = 1; k < 15; k++) {
-            shotState.frames.push({
+            framesToEncode.push({
               data: single.data,
               timestamp: single.timestamp + k * 66,
               width: single.width,
@@ -418,9 +473,10 @@ class DesktopMediaManager {
         }
       }
 
-      if (shotState.frames.length === 0) {
+      if (framesToEncode.length === 0) {
         shotState.status = 'failed';
         shotState.error = 'NO_FRAMES_CAPTURED';
+        console.log(`[SHOT_TX_FAILED]\nsessionId=${sessionId}\nshotIndex=${shotIndex + 1}\nreason=NO_FRAMES_CAPTURED`);
         const meta = {
           id: `clip_${sessionId}_${shotIndex + 1}`,
           sessionId,
@@ -438,20 +494,22 @@ class DesktopMediaManager {
         return meta;
       }
 
+      console.log(`[SHOT_ENCODING_START]\nsessionId=${sessionId}\nshotIndex=${shotIndex + 1}\nframeCount=${framesToEncode.length}\noutputPath=${outputPath}`);
+
       // Encode via FFmpeg
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'momentai-shot-'));
       try {
         let calculatedFps = this.targetFps;
-        if (shotState.frames.length >= 2) {
-          const durSec = (shotState.frames[shotState.frames.length - 1].timestamp - shotState.frames[0].timestamp) / 1000;
+        if (framesToEncode.length >= 2) {
+          const durSec = (framesToEncode[framesToEncode.length - 1].timestamp - framesToEncode[0].timestamp) / 1000;
           if (durSec > 0.2) {
-            calculatedFps = Math.max(5, Math.min(30, Math.round((shotState.frames.length / durSec) * 10) / 10));
+            calculatedFps = Math.max(5, Math.min(30, Math.round((framesToEncode.length / durSec) * 10) / 10));
           }
         }
 
-        for (let i = 0; i < shotState.frames.length; i++) {
+        for (let i = 0; i < framesToEncode.length; i++) {
           const fPath = path.join(tempDir, `frame_${String(i + 1).padStart(5, '0')}.jpg`);
-          fs.writeFileSync(fPath, shotState.frames[i].data);
+          fs.writeFileSync(fPath, framesToEncode[i].data);
         }
 
         const args = [
@@ -473,11 +531,9 @@ class DesktopMediaManager {
         } catch {}
       }
 
-      // Clear memory
-      shotState.frames = [];
-
       const probe = await probeVideo(outputPath).catch(() => null);
       const stat = fs.statSync(outputPath);
+      const durMs = probe?.duration ? Math.round(probe.duration * 1000) : 1000;
 
       shotState.status = 'ready';
       const meta = {
@@ -489,7 +545,7 @@ class DesktopMediaManager {
         startedAt: shotState.startedAt,
         shutterAt: shotState.shutterAt,
         completedAt: shotState.completedAt,
-        durationMs: probe?.duration ? Math.round(probe.duration * 1000) : 1000,
+        durationMs: durMs,
         fileSize: stat.size,
         width: probe?.width || 1920,
         height: probe?.height || 1080,
@@ -499,11 +555,14 @@ class DesktopMediaManager {
       };
       shotState.metadata = meta;
       this.saveClipToDb(meta);
+
+      console.log(`[SHOT_ENCODING_COMPLETE]\nsessionId=${sessionId}\nshotIndex=${shotIndex + 1}\noutputPath=${outputPath}\nduration=${(durMs / 1000).toFixed(2)}s\nsize=${stat.size}`);
+
       return meta;
     } catch (err) {
       shotState.status = 'failed';
       shotState.error = err.message;
-      shotState.frames = [];
+      console.log(`[SHOT_TX_FAILED]\nsessionId=${sessionId}\nshotIndex=${shotIndex + 1}\nreason=${err.message}`);
       const meta = {
         id: `clip_${sessionId}_${shotIndex + 1}`,
         sessionId,
@@ -594,6 +653,24 @@ class DesktopMediaManager {
     return [];
   }
 
+  async waitForClipsReady(sessionId, requiredCount, timeoutMs = 15000) {
+    const startTime = Date.now();
+    while (Date.now() - startTime < timeoutMs) {
+      const clips = this.getClips(sessionId);
+      const readyClips = clips.filter((c) => c.status === 'ready' && c.localPath && fs.existsSync(c.localPath));
+      if (readyClips.length >= requiredCount) {
+        return readyClips.slice(0, requiredCount);
+      }
+      const failedClip = clips.find((c) => c.status === 'failed');
+      if (failedClip) {
+        throw new Error(`Clip #${failedClip.shotIndex + 1} failed: ${failedClip.error || 'encoding failed'}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+    const clips = this.getClips(sessionId);
+    throw new Error(`Timeout waiting for ${requiredCount} ready clips (${clips.filter((c) => c.status === 'ready').length}/${requiredCount} ready)`);
+  }
+
   async composeFrameVideo(options) {
     const {
       sessionId,
@@ -605,9 +682,10 @@ class DesktopMediaManager {
       targetHeight,
     } = options;
 
-    const clips = this.getClips(sessionId);
     const slots = frame.slots || [];
     if (slots.length === 0) throw new Error('[DesktopMediaManager] Frame definition contains no slots.');
+
+    const clips = await this.waitForClipsReady(sessionId, slots.length, 15000);
 
     const rawW = targetWidth || frame.outputWidth || 1800;
     const rawH = targetHeight || frame.outputHeight || 2700;
@@ -638,6 +716,8 @@ class DesktopMediaManager {
         if (!clip || clip.status === 'failed' || !clip.localPath || !fs.existsSync(clip.localPath)) {
           throw new Error(`Missing required shot clip for slot #${i + 1} (${clip?.localPath || 'not found'})`);
         }
+
+        console.log(`[FINAL_VIDEO_SLOT_MAP]\nslotIndex=${i + 1}\nclipPath=${clip.localPath}\nslotGeometry=${JSON.stringify(slot)}`);
 
         const inputIndex = inputCount;
         inputCount++;
@@ -747,6 +827,8 @@ class DesktopMediaManager {
       fs.copyFileSync(tempOutputFile, outputPath);
       const stat = fs.statSync(outputPath);
 
+      console.log(`[FINAL_VIDEO_COMPLETE]\nsessionId=${sessionId}\noutputPath=${outputPath}\nduration=${probe.duration ? probe.duration.toFixed(2) : durationSec.toFixed(2)}s\ndimensions=${outputWidth}x${outputHeight}\ncodec=${probe.codec || 'h264'}\nsize=${stat.size}`);
+
       return {
         outputPath,
         durationMs: probe.duration ? Math.round(probe.duration * 1000) : durationMs,
@@ -767,6 +849,11 @@ class DesktopMediaManager {
     if (!this.db) return null;
     const jobId = idempotencyKey || `job_${jobType.toLowerCase()}_${sessionId}_${Date.now().toString(36)}`;
     const now = new Date().toISOString();
+
+    if (jobType === 'FRAME_VIDEO_COMPOSE') {
+      const clips = this.getClips(sessionId);
+      console.log(`[FINAL_VIDEO_JOB]\nsessionId=${sessionId}\nrequiredShots=${payload?.frame?.slots?.length || 4}\ncompletedPhotoCount=${clips.length}\ncompletedClipCount=${clips.filter((c) => c.status === 'ready').length}\ntemplateId=${payload?.frame?.id || payload?.frame?.templateId || 'default'}\noutputPath=${this.sessionMediaPaths.finalVideo(sessionId)}\nstatus=QUEUED`);
+    }
 
     const existing = this.db.prepare('SELECT * FROM media_jobs WHERE id = ?').get(jobId);
     if (existing) {
@@ -801,6 +888,7 @@ class DesktopMediaManager {
       return;
     }
 
+    let currentSessionId = '';
     try {
       const row = this.db.prepare('SELECT * FROM media_jobs WHERE id = ?').get(jobId);
       if (!row || row.status !== 'QUEUED') {
@@ -809,11 +897,14 @@ class DesktopMediaManager {
         return;
       }
 
+      currentSessionId = row.session_id;
       const now = new Date().toISOString();
       this.db.prepare("UPDATE media_jobs SET status = 'PROCESSING', started_at = ?, updated_at = ? WHERE id = ?").run(now, now, jobId);
 
       const payload = JSON.parse(row.payload_json || '{}');
       if (row.job_type === 'FRAME_VIDEO_COMPOSE') {
+        const clips = this.getClips(row.session_id);
+        console.log(`[FINAL_VIDEO_JOB]\nsessionId=${row.session_id}\nrequiredShots=${payload?.frame?.slots?.length || 4}\ncompletedPhotoCount=${clips.length}\ncompletedClipCount=${clips.filter((c) => c.status === 'ready').length}\ntemplateId=${payload?.frame?.id || payload?.frame?.templateId || 'default'}\noutputPath=${this.sessionMediaPaths.finalVideo(row.session_id)}\nstatus=PROCESSING`);
         await this.composeFrameVideo({
           sessionId: row.session_id,
           frame: payload.frame,
@@ -823,6 +914,7 @@ class DesktopMediaManager {
           targetWidth: payload.targetWidth,
           targetHeight: payload.targetHeight,
         });
+        console.log(`[FINAL_VIDEO_JOB]\nsessionId=${row.session_id}\nrequiredShots=${payload?.frame?.slots?.length || 4}\ncompletedPhotoCount=${clips.length}\ncompletedClipCount=${clips.filter((c) => c.status === 'ready').length}\ntemplateId=${payload?.frame?.id || payload?.frame?.templateId || 'default'}\noutputPath=${this.sessionMediaPaths.finalVideo(row.session_id)}\nstatus=COMPLETED`);
       }
 
       const completedNow = new Date().toISOString();
@@ -835,6 +927,9 @@ class DesktopMediaManager {
       }
     } catch (err) {
       console.warn(`[DesktopMediaManager] Job ${jobId} failed:`, err);
+      if (currentSessionId) {
+        console.log(`[FINAL_VIDEO_FAILED]\nsessionId=${currentSessionId}\nerrorCode=COMPOSE_ERROR\nerrorMessage=${err.message}\nffmpegExitCode=1\nffmpegStderr=${err.stack || err.message}\ninputClips=${JSON.stringify(this.getClips(currentSessionId).map((c) => c.localPath))}\noutputPath=${this.sessionMediaPaths.finalVideo(currentSessionId)}`);
+      }
       const errNow = new Date().toISOString();
       const current = this.db.prepare('SELECT attempt_count FROM media_jobs WHERE id = ?').get(jobId);
       const nextAttempts = (current?.attempt_count || 0) + 1;

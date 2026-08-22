@@ -1,0 +1,6 @@
+{
+  "name": "Photobooth Cloud Media Viewer",
+  "description": "Landing Page nhận dữ liệu 1 ảnh và 1 video từ Cloud Photobooth, hiển thị trực quan và tải về điện thoại di động.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

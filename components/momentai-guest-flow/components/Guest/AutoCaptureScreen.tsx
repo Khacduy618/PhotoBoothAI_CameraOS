@@ -174,11 +174,11 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
 
         for (let value = captureConfig.countdownSeconds || 3; value > 0; value -= 1) {
           setCountdown(value);
-          if (value === 1) {
-            await cameraService.autofocus(session.sessionId);
-          } else {
-            cameraService.playBeepSound(800 + (4 - value) * 100, 120);
+          if (value === (captureConfig.countdownSeconds || 3)) {
+            // Trigger autofocus once at approximately T-3s before physical shot
+            void cameraService.autofocus(session.sessionId, shot + 1);
           }
+          cameraService.playBeepSound(800 + (4 - value) * 100, 120);
           await wait(1000);
         }
 

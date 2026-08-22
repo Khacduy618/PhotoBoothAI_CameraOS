@@ -286,12 +286,13 @@ export class CameraService {
     return canvas.toDataURL('image/jpeg', 0.95);
   }
 
-  public async autofocus(sessionId?: string): Promise<boolean> {
+  public async autofocus(sessionId?: string, shotIndex?: number): Promise<boolean> {
     this.playBeepSound(1200, 80);
     if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { autofocus: (ctx: unknown) => Promise<unknown> } } } }).momentai?.guest?.camera?.autofocus) {
       try {
         await (window as unknown as { momentai: { guest: { camera: { autofocus: (ctx: unknown) => Promise<unknown> } } } }).momentai.guest.camera.autofocus({
           sessionId: sessionId || 'desktop_session',
+          shotIndex: shotIndex || 1,
         });
       } catch (err) {
         console.warn('IPC autofocus failed:', err);

@@ -51,6 +51,9 @@ typedef struct {
 #define kEdsSaveTo_Both               0x00000003
 #define kEdsEvfOutputDevice_PC        0x00000002
 #define kEdsCameraCommand_TakePicture                 0x00000000
+#define kEdsCameraCommand_DoEvfAf                     0x00000102
+#define kEdsCameraCommand_EvfAf_OFF                   0x00000000
+#define kEdsCameraCommand_EvfAf_ON                    0x00000001
 #define kEdsCameraCommand_PressShutterButton          0x00000004
 #define kEdsCameraCommand_ShutterButton_OFF           0x00000000
 #define kEdsCameraCommand_ShutterButton_Halfway       0x00000001
@@ -383,15 +386,27 @@ static void processCommand(NSDictionary *cmd) {
             g_cameraList = NULL;
         }
 
-        // 2. Acquire fresh camera list
+        // Stage 1: GET_CAMERA_LIST
+        fprintf(stderr, "[GET_CAMERA_LIST_BEGIN] bridgePid=%d timestamp=%.3f\n", getpid(), getTimestampMs());
+        double gclStart = getTimestampMs();
         EdsCameraListRef newList = NULL;
         EdsError err = pEdsGetCameraList(&newList);
+        double gclElapsed = getTimestampMs() - gclStart;
         g_cameraList = newList;
+        fprintf(stderr, "[GET_CAMERA_LIST_END] bridgePid=%d timestamp=%.3f elapsedMs=%.2f result=0x%08X cameraListRef=%p\n",
+                getpid(), getTimestampMs(), gclElapsed, err, newList);
 
+        // Stage 2: GET_CHILD_COUNT
         EdsUInt32 count = 0;
         EdsError childCountErr = 0xFFFFFFFF;
+        double gccElapsed = 0.0;
         if (err == EDS_ERR_OK && newList) {
+            fprintf(stderr, "[GET_CHILD_COUNT_BEGIN] bridgePid=%d timestamp=%.3f cameraListRef=%p\n", getpid(), getTimestampMs(), newList);
+            double gccStart = getTimestampMs();
             childCountErr = pEdsGetChildCount(newList, &count);
+            gccElapsed = getTimestampMs() - gccStart;
+            fprintf(stderr, "[GET_CHILD_COUNT_END] bridgePid=%d timestamp=%.3f elapsedMs=%.2f result=0x%08X count=%u\n",
+                    getpid(), getTimestampMs(), gccElapsed, childCountErr, count);
         }
 
         double elapsedMs = getTimestampMs() - enumBeginMs;
@@ -399,9 +414,16 @@ static void processCommand(NSDictionary *cmd) {
                 getpid(), (unsigned long)pthread_self(), pthread_main_np(), err, newList, childCountErr, count, elapsedMs);
 
         if (count > 0 && newList) {
+            // Stage 3: GET_CHILD_AT_INDEX
+            fprintf(stderr, "[GET_CHILD_AT_INDEX_BEGIN] bridgePid=%d timestamp=%.3f index=0\n", getpid(), getTimestampMs());
+            double gcaStart = getTimestampMs();
             EdsCameraRef cam = NULL;
-            pEdsGetChildAtIndex(newList, 0, (EdsBaseRef*)&cam);
+            EdsError gcaErr = pEdsGetChildAtIndex(newList, 0, (EdsBaseRef*)&cam);
+            double gcaElapsed = getTimestampMs() - gcaStart;
             g_camera = cam;
+            fprintf(stderr, "[GET_CHILD_AT_INDEX_END] bridgePid=%d timestamp=%.3f elapsedMs=%.2f result=0x%08X cameraRef=%p\n",
+                    getpid(), getTimestampMs(), gcaElapsed, gcaErr, g_camera);
+
             fprintf(stderr, "[DEBUG] CAMERA_LIST_REF = %p, CAMERA_REF = %p (count=%u)\n", g_cameraList, g_camera, count);
 
             EdsDeviceInfo devInfo;
@@ -420,7 +442,9 @@ static void processCommand(NSDictionary *cmd) {
                 @"model": [NSString stringWithUTF8String:g_cameraModel],
                 @"port": [NSString stringWithUTF8String:devInfo.szPortName],
                 @"cameraListRef": [NSString stringWithFormat:@"%p", g_cameraList],
-                @"cameraRef": [NSString stringWithFormat:@"%p", g_camera]
+                @"cameraRef": [NSString stringWithFormat:@"%p", g_camera],
+                @"getCameraListMs": @(gclElapsed),
+                @"getChildCountMs": @(gccElapsed)
             });
         } else {
             fprintf(stderr, "[EDS_ENUM_RESULT] SUCCESS_EMPTY_LIST (bridgePid=%d count=0 err=0x%08X)\n", getpid(), err);
@@ -433,7 +457,9 @@ static void processCommand(NSDictionary *cmd) {
                 @"event": @"cameraDiscovered",
                 @"count": @0,
                 @"result": @"SUCCESS_EMPTY_LIST",
-                @"edsdkResult": @(err)
+                @"edsdkResult": @(err),
+                @"getCameraListMs": @(gclElapsed),
+                @"getChildCountMs": @(gccElapsed)
             });
         }
     } else if ([action isEqualToString:@"openSession"]) {
@@ -512,6 +538,28 @@ static void processCommand(NSDictionary *cmd) {
             pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfDevice), &evfDevice);
             g_liveViewActive = 0;
             sendJsonEvent(@{ @"event": @"liveViewStopped", @"status": @"ok" });
+        }
+    } else if ([action isEqualToString:@"autoFocus"]) {
+        if (!g_sessionOpen || !g_camera || !g_liveViewActive) {
+            sendJsonEvent(@{ @"event": @"error", @"code": @"AUTOFOCUS_NOT_ALLOWED", @"message": @"Session or LiveView not active." });
+            return;
+        }
+        EdsError err = pEdsSendCommand(g_camera, kEdsCameraCommand_DoEvfAf, kEdsCameraCommand_EvfAf_ON);
+        if (err == EDS_ERR_OK) {
+            sendJsonEvent(@{ @"event": @"autoFocusStarted", @"status": @"ok" });
+        } else {
+            sendJsonEvent(@{ @"event": @"error", @"code": @"AUTOFOCUS_START_FAILED", @"edsdkError": @(err) });
+        }
+    } else if ([action isEqualToString:@"autoFocusStop"]) {
+        if (g_camera) {
+            EdsError err = pEdsSendCommand(g_camera, kEdsCameraCommand_DoEvfAf, kEdsCameraCommand_EvfAf_OFF);
+            if (err == EDS_ERR_OK) {
+                sendJsonEvent(@{ @"event": @"autoFocusStopped", @"status": @"ok" });
+            } else {
+                sendJsonEvent(@{ @"event": @"error", @"code": @"AUTOFOCUS_STOP_FAILED", @"edsdkError": @(err) });
+            }
+        } else {
+            sendJsonEvent(@{ @"event": @"autoFocusStopped", @"status": @"ok" });
         }
     } else if ([action isEqualToString:@"capture"]) {
         if (!g_sessionOpen || !g_camera) {
@@ -606,8 +654,80 @@ static void *stdinReaderThread(void *arg) {
     return NULL;
 }
 
+static volatile sig_atomic_t g_shutdownRequested = 0;
+static int g_resourcesReleased = 0;
+
+static void releaseAllCanonResources(void) {
+    if (g_resourcesReleased) return;
+    g_resourcesReleased = 1;
+
+    fprintf(stderr, "[NATIVE_SHUTDOWN_BEGIN] pid=%d\n", getpid());
+
+    if (g_liveViewActive) {
+        g_liveViewActive = 0;
+        if (g_camera && pEdsSetPropertyData) {
+            EdsUInt32 evfOff = 0;
+            EdsError err = pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOff), &evfOff);
+            fprintf(stderr, "[NATIVE_EVF_STOP] result=0x%08X\n", err);
+        } else {
+            fprintf(stderr, "[NATIVE_EVF_STOP] result=SKIPPED\n");
+        }
+    }
+
+    if (g_camera && g_sessionOpen && pEdsCloseSession) {
+        EdsError err = pEdsCloseSession(g_camera);
+        g_sessionOpen = 0;
+        fprintf(stderr, "[NATIVE_SESSION_CLOSE] result=0x%08X\n", err);
+    } else {
+        fprintf(stderr, "[NATIVE_SESSION_CLOSE] result=SKIPPED\n");
+    }
+
+    if (g_camera && pEdsRelease) {
+        EdsError err = pEdsRelease(g_camera);
+        g_camera = NULL;
+        fprintf(stderr, "[NATIVE_CAMERA_RELEASE] result=0x%08X\n", err);
+    } else {
+        fprintf(stderr, "[NATIVE_CAMERA_RELEASE] result=SKIPPED\n");
+    }
+
+    if (g_cameraList && pEdsRelease) {
+        EdsError err = pEdsRelease(g_cameraList);
+        g_cameraList = NULL;
+        fprintf(stderr, "[NATIVE_LIST_RELEASE] result=0x%08X\n", err);
+    } else {
+        fprintf(stderr, "[NATIVE_LIST_RELEASE] result=SKIPPED\n");
+    }
+
+    if (pEdsTerminateSDK) {
+        EdsError err = pEdsTerminateSDK();
+        fprintf(stderr, "[NATIVE_EDSDK_TERMINATE] result=0x%08X\n", err);
+    } else {
+        fprintf(stderr, "[NATIVE_EDSDK_TERMINATE] result=SKIPPED\n");
+    }
+
+    if (g_edsdkHandle) {
+        int dlRes = dlclose(g_edsdkHandle);
+        g_edsdkHandle = NULL;
+        fprintf(stderr, "[NATIVE_DLCLOSE] result=%d\n", dlRes);
+    } else {
+        fprintf(stderr, "[NATIVE_DLCLOSE] result=SKIPPED\n");
+    }
+
+    fprintf(stderr, "[NATIVE_SHUTDOWN_COMPLETE] pid=%d\n", getpid());
+}
+
+static void cleanSignalShutdown(int sig) {
+    g_shutdownRequested = 1;
+    g_running = 0;
+}
+
 int main(int argc, const char * argv[]) {
     @autoreleasepool {
+        signal(SIGTERM, cleanSignalShutdown);
+        signal(SIGINT, cleanSignalShutdown);
+        signal(SIGHUP, cleanSignalShutdown);
+        signal(SIGPIPE, SIG_IGN);
+
         NSApplicationLoad();
         [NSApplication sharedApplication];
 
@@ -617,8 +737,15 @@ int main(int argc, const char * argv[]) {
         sendJsonEvent(@{ @"event": @"bridgeReady", @"platform": @"macOS", @"arch": @"arm64" });
 
         uint64_t frameSeq = 0;
-        while (g_running) {
+        while (g_running && !g_shutdownRequested) {
             @autoreleasepool {
+                if (getppid() == 1) {
+                    // Parent process died
+                    g_shutdownRequested = 1;
+                    g_running = 0;
+                    break;
+                }
+
                 CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, false);
 
                 if (g_liveViewActive && g_sessionOpen && g_camera) {
@@ -665,13 +792,7 @@ int main(int argc, const char * argv[]) {
             }
         }
 
-        if (g_camera && g_sessionOpen) {
-            pEdsCloseSession(g_camera);
-        }
-        if (g_camera && pEdsRelease) pEdsRelease(g_camera);
-        if (g_cameraList && pEdsRelease) pEdsRelease(g_cameraList);
-        if (pEdsTerminateSDK) pEdsTerminateSDK();
-        if (g_edsdkHandle) dlclose(g_edsdkHandle);
+        releaseAllCanonResources();
 
         return 0;
     }

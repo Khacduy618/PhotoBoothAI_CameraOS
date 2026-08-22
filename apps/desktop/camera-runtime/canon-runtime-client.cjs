@@ -23,6 +23,8 @@ class CanonRuntimeClient extends EventEmitter {
     this.requestSeq = 0;
     this.pendingRequests = new Map();
     this.latestEvfFrame = null;
+    this.physicalUsbPresent = false;
+    this.ptpResponsive = true;
   }
 
   get isRunning() {
@@ -237,6 +239,8 @@ class CanonRuntimeClient extends EventEmitter {
       case EVENTS.STATE_CHANGED:
         if (msg.cameraModel) this.cameraModel = msg.cameraModel;
         if (typeof msg.cameraCount === 'number') this.cameraCount = msg.cameraCount;
+        if (typeof msg.physicalUsbPresent === 'boolean') this.physicalUsbPresent = msg.physicalUsbPresent;
+        if (typeof msg.ptpResponsive === 'boolean') this.ptpResponsive = msg.ptpResponsive;
         if (msg.to && msg.to !== this.state) {
           const prevState = this.state;
           this.state = msg.to;
@@ -334,21 +338,60 @@ class CanonRuntimeClient extends EventEmitter {
     );
   }
 
+  async autoFocus(options = {}) {
+    return this.sendRequest(COMMANDS.AUTOFOCUS, options, 4000);
+  }
+
+  async autoFocusStop() {
+    return this.sendRequest(COMMANDS.AUTOFOCUS_STOP, {}, 2000);
+  }
+
   async getStatus() {
     return this.sendRequest(COMMANDS.STATUS, {}, 3000);
   }
 
   async shutdown() {
     this.isShuttingDown = true;
-    if (this.process && this.process.connected) {
+    if (this.process && !this.process.killed) {
       try {
-        await this.sendRequest(COMMANDS.SHUTDOWN, {}, 1000);
-      } catch (e) {}
-      setTimeout(() => {
-        if (this.process) {
-          try { this.process.kill('SIGTERM'); } catch (e) {}
+        if (this.process.connected) {
+          await this.sendRequest(COMMANDS.SHUTDOWN, {}, 1000).catch(() => {});
         }
-      }, 200);
+      } catch (e) {}
+
+      if (this.process && !this.process.killed) {
+        try { this.process.kill('SIGTERM'); } catch (e) {}
+      }
+
+      await new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          if (this.process && !this.process.killed) {
+            try { this.process.kill('SIGKILL'); } catch (e) {}
+          }
+          resolve();
+        }, 500);
+
+        if (!this.process || this.process.killed) {
+          clearTimeout(timer);
+          resolve();
+        } else {
+          this.process.once('close', () => {
+            clearTimeout(timer);
+            resolve();
+          });
+        }
+      });
+      this.process = null;
+    }
+  }
+
+  killSync() {
+    this.isShuttingDown = true;
+    if (this.process && !this.process.killed) {
+      try {
+        this.process.kill('SIGKILL');
+      } catch (e) {}
+      this.process = null;
     }
   }
 }

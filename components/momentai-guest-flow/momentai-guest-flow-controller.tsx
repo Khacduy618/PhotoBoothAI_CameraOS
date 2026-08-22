@@ -749,7 +749,13 @@ function isLocalGuestFallbackAllowed() {
 
 function normalizeSession(partial: Partial<MomentAIGuestSession>, previous: MomentAIGuestSession | null, action: string, body: Record<string, unknown>): MomentAIGuestSession {
   const fallback = previous ?? createLocalSession(body.eventId as string | undefined);
-  return applyLocalGuestAction(action, body, { ...fallback, ...partial });
+  const localResult = applyLocalGuestAction(action, body, { ...fallback, ...partial });
+  return {
+    ...localResult,
+    ...partial,
+    sessionId: partial.sessionId || localResult.sessionId,
+    eventId: partial.eventId || localResult.eventId,
+  };
 }
 
 function applyLocalGuestAction(action: string, body: Record<string, unknown>, previous: MomentAIGuestSession | null): MomentAIGuestSession {
@@ -758,7 +764,7 @@ function applyLocalGuestAction(action: string, body: Record<string, unknown>, pr
 
   switch (action) {
     case 'start-session':
-      return createLocalSession(body.eventId as string | undefined);
+      return previous ? { ...previous, status: 'SELECTING_FORMAT', updatedAt: now } : createLocalSession(body.eventId as string | undefined);
     case 'select-format': {
       const format = LOCAL_CAPTURE_FORMATS.find((item) => item.id === body.formatId) ?? LOCAL_CAPTURE_FORMATS[2];
       return { ...session, captureFormat: format, status: 'READY_TO_CAPTURE', updatedAt: now };
@@ -815,8 +821,9 @@ function applyLocalGuestAction(action: string, body: Record<string, unknown>, pr
 function createLocalSession(eventId = 'event_hoi_an_heritage'): MomentAIGuestSession {
   localSessionSequence += 1;
   const now = new Date().toISOString();
+  const uniqueId = `desktop_session_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   return {
-    sessionId: `desktop_dev_session_${localSessionSequence}`,
+    sessionId: uniqueId,
     eventId,
     captureFormat: null,
     photos: [],

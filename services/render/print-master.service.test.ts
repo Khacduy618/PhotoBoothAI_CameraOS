@@ -1,90 +1,212 @@
-import { describe, it, expect, vi } from "vitest";
-import { buildPrintMaster } from "./print-master.service";
+import { describe, it, expect, vi } from 'vitest';
+import { buildPrintMaster } from './print-master.service';
+import { generateCalibrationSheet } from './calibration-sheet.service';
 
-function createMockCanvas() {
+function createMockCanvas(w = 1800, h = 2700) {
   const drawImage = vi.fn();
   const fillRect = vi.fn();
+  const strokeRect = vi.fn();
   const beginPath = vi.fn();
   const moveTo = vi.fn();
   const lineTo = vi.fn();
   const stroke = vi.fn();
+  const fillText = vi.fn();
+  const setLineDash = vi.fn();
 
   const ctx = {
-    fillStyle: "#ffffff",
-    strokeStyle: "#000000",
+    fillStyle: '#ffffff',
+    strokeStyle: '#000000',
     lineWidth: 1,
     imageSmoothingEnabled: true,
-    imageSmoothingQuality: "high",
+    imageSmoothingQuality: 'high',
+    font: '',
+    textAlign: '',
+    textBaseline: '',
     fillRect,
+    strokeRect,
     drawImage,
     beginPath,
     moveTo,
     lineTo,
     stroke,
+    fillText,
+    setLineDash,
   };
 
   const canvas = {
-    width: 1800,
-    height: 2700,
-    getContext: (type: string) => (type === "2d" ? ctx : null),
-    toDataURL: () => "data:image/png;base64,mock",
-    toBlob: (cb: (b: Blob) => void) => cb(new Blob(["mock"], { type: "image/png" })),
+    width: w,
+    height: h,
+    getContext: (type: string) => (type === '2d' ? ctx : null),
+    toDataURL: (format = 'image/jpeg', quality = 0.95) => `data:${format};base64,mock`,
+    toBlob: (cb: (b: Blob) => void, format = 'image/jpeg') => cb(new Blob(['mock'], { type: format })),
   } as unknown as HTMLCanvasElement;
 
-  return canvas;
+  return { canvas, ctx, drawImage, fillRect, stroke, beginPath, moveTo, lineTo };
 }
 
-describe("buildPrintMaster", () => {
-  it("creates a 1800x2700 10x15 physical master for SHEET_4", async () => {
-    const canvas = createMockCanvas();
-    const sourceCanvas = createMockCanvas();
+describe('buildPrintMaster & CP1000 Physical Raster', () => {
+  it('A. PREMIUM_POSTCARD -> 1181x1748 physical print master', async () => {
+    const { canvas } = createMockCanvas();
+    const { canvas: sourceCanvas } = createMockCanvas(1800, 2700);
 
     const master = await buildPrintMaster({
       logicalProductImage: sourceCanvas,
-      targetProduct: "SHEET_4",
-      masterWidth: 1800,
-      masterHeight: 2700,
+      targetProduct: 'PREMIUM_POSTCARD',
       targetCanvas: canvas,
     });
 
-    expect(master.width).toBe(1800);
-    expect(master.height).toBe(2700);
+    expect(master.width).toBe(1181);
+    expect(master.height).toBe(1748);
   });
 
-  it("creates a 1800x2700 physical master for STRIP_4 with 2 identical strips duplicated side-by-side", async () => {
-    const canvas = createMockCanvas();
-    const stripCanvas = createMockCanvas();
-    stripCanvas.width = 900;
-    stripCanvas.height = 2700;
+  it('B. SHEET_4 -> 1181x1748 physical print master', async () => {
+    const { canvas } = createMockCanvas();
+    const { canvas: sourceCanvas } = createMockCanvas(1800, 2700);
+
+    const master = await buildPrintMaster({
+      logicalProductImage: sourceCanvas,
+      targetProduct: 'SHEET_4',
+      targetCanvas: canvas,
+    });
+
+    expect(master.width).toBe(1181);
+    expect(master.height).toBe(1748);
+  });
+
+  it('C. SHEET_6 -> 1181x1748 physical print master', async () => {
+    const { canvas } = createMockCanvas();
+    const { canvas: sourceCanvas } = createMockCanvas(1800, 2700);
+
+    const master = await buildPrintMaster({
+      logicalProductImage: sourceCanvas,
+      targetProduct: 'SHEET_6',
+      targetCanvas: canvas,
+    });
+
+    expect(master.width).toBe(1181);
+    expect(master.height).toBe(1748);
+  });
+
+  it('D. STRIP_2 -> 1181x1748 with left (590px) and right (591px) duplication', async () => {
+    const { canvas, drawImage } = createMockCanvas();
+    const { canvas: stripCanvas } = createMockCanvas(900, 2700);
 
     const master = await buildPrintMaster({
       logicalProductImage: stripCanvas,
-      targetProduct: "STRIP_4",
-      masterWidth: 1800,
-      masterHeight: 2700,
+      targetProduct: 'STRIP_2',
       targetCanvas: canvas,
     });
 
-    expect(master.width).toBe(1800);
-    expect(master.height).toBe(2700);
+    expect(master.width).toBe(1181);
+    expect(master.height).toBe(1748);
+
+    // Verify 2 drawImage calls for two-up layout
+    expect(drawImage).toHaveBeenCalledTimes(2);
+
+    // Call 1: Left strip drawn at x=0, y=0, w=590, h=1748
+    const call1 = drawImage.mock.calls[0];
+    expect(call1[0]).toBe(stripCanvas);
+    expect(call1[5]).toBe(0); // destX
+    expect(call1[6]).toBe(0); // destY
+    expect(call1[7]).toBe(590); // destWidth
+    expect(call1[8]).toBe(1748); // destHeight
+
+    // Call 2: Right strip drawn at x=590, y=0, w=591, h=1748
+    const call2 = drawImage.mock.calls[1];
+    expect(call2[0]).toBe(stripCanvas);
+    expect(call2[5]).toBe(590); // destX
+    expect(call2[6]).toBe(0); // destY
+    expect(call2[7]).toBe(591); // destWidth
+    expect(call2[8]).toBe(1748); // destHeight
+
+    // Total width = 590 + 591 = 1181 (zero gap / zero overlap)
+    expect(call1[7] + call2[7]).toBe(1181);
   });
 
-  it("handles landscape 2700x1800 master for PREMIUM_POSTCARD landscape", async () => {
-    const canvas = createMockCanvas();
-    const sourceCanvas = createMockCanvas();
-    sourceCanvas.width = 2700;
-    sourceCanvas.height = 1800;
+  it('F. STRIP_4 -> 1181x1748 with left (590px) and right (591px) duplication', async () => {
+    const { canvas, drawImage } = createMockCanvas();
+    const { canvas: stripCanvas } = createMockCanvas(900, 2700);
+
+    const master = await buildPrintMaster({
+      logicalProductImage: stripCanvas,
+      targetProduct: 'STRIP_4',
+      targetCanvas: canvas,
+    });
+
+    expect(master.width).toBe(1181);
+    expect(master.height).toBe(1748);
+    expect(drawImage).toHaveBeenCalledTimes(2);
+  });
+
+  it('G. Strip left and right render from the exact same source image', async () => {
+    const { canvas, drawImage } = createMockCanvas();
+    const { canvas: stripCanvas } = createMockCanvas(900, 2700);
+
+    await buildPrintMaster({
+      logicalProductImage: stripCanvas,
+      targetProduct: 'STRIP_4',
+      targetCanvas: canvas,
+    });
+
+    expect(drawImage.mock.calls[0][0]).toBe(stripCanvas);
+    expect(drawImage.mock.calls[1][0]).toBe(stripCanvas);
+  });
+
+  it('H. Landscape PREMIUM_POSTCARD produces 1748x1181 physical master', async () => {
+    const { canvas, drawImage } = createMockCanvas();
+    const { canvas: sourceCanvas } = createMockCanvas(2700, 1800);
 
     const master = await buildPrintMaster({
       logicalProductImage: sourceCanvas,
-      targetProduct: "PREMIUM_POSTCARD",
-      masterWidth: 1800,
-      masterHeight: 2700,
+      targetProduct: 'PREMIUM_POSTCARD',
       isLandscape: true,
       targetCanvas: canvas,
     });
 
-    expect(master.width).toBe(2700);
-    expect(master.height).toBe(1800);
+    expect(master.width).toBe(1748);
+    expect(master.height).toBe(1181);
+
+    expect(drawImage).toHaveBeenCalledTimes(1);
+    const call = drawImage.mock.calls[0];
+    expect(call[5]).toBe(0);
+    expect(call[6]).toBe(0);
+    expect(call[7]).toBe(1748);
+    expect(call[8]).toBe(1181);
+  });
+
+  it('K. Generates valid JPEG dataURL by default', async () => {
+    const { canvas } = createMockCanvas();
+    const { canvas: sourceCanvas } = createMockCanvas(1800, 2700);
+
+    const master = await buildPrintMaster({
+      logicalProductImage: sourceCanvas,
+      targetProduct: 'SHEET_4',
+      targetCanvas: canvas,
+    });
+
+    const dataUrl = master.toDataURL();
+    expect(dataUrl).toContain('image/jpeg');
+  });
+
+  it('L. Production strip master contains NO visible calibration cut marks', async () => {
+    const { canvas, stroke } = createMockCanvas();
+    const { canvas: stripCanvas } = createMockCanvas(900, 2700);
+
+    await buildPrintMaster({
+      logicalProductImage: stripCanvas,
+      targetProduct: 'STRIP_2',
+      targetCanvas: canvas,
+    });
+
+    // Stroke must not be called during production strip printing (no calibration lines)
+    expect(stroke).not.toHaveBeenCalled();
+  });
+
+  it('Calibration sheet generator produces exact 1181x1748 calibration raster', () => {
+    const { canvas } = createMockCanvas();
+    const cal = generateCalibrationSheet({ targetCanvas: canvas });
+
+    expect(cal.width).toBe(1181);
+    expect(cal.height).toBe(1748);
   });
 });

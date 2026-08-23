@@ -372,239 +372,16 @@ function checkAndCompleteSession(sessionId) {
   }
 }
 
-class MockPrinterAdapter {
-  constructor() {
-    this.name = 'MockPrinterAdapter';
-  }
-  async print(job) {
-    writeSystemLog('info', 'PRINT:MOCK', `[MOCK] Starting print execution for Job ${job.id}`, {
-      provider: 'mock-printer',
-      jobId: job.id,
-      sessionId: job.session_id || job.sessionId,
-      copies: job.copies,
-      paperId: job.paper_id || job.paperId,
-      status: 'PRINTING',
-    });
-    // Simulate 2s printing time
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    writeSystemLog('info', 'PRINT:MOCK', `[MOCK] Physical print completed successfully for Job ${job.id}`, {
-      provider: 'mock-printer',
-      jobId: job.id,
-      sessionId: job.session_id || job.sessionId,
-      status: 'COMPLETED',
-    });
-    return { ok: true, value: { jobId: job.id, status: 'COMPLETED' } };
-  }
-}
+const { PrintQueueManager } = require('./printer/print-queue-manager.cjs');
 
-class PrintQueueManager {
-  constructor() {
-    this.queue = [];
-    this.isProcessing = false;
-    this.adapter = new MockPrinterAdapter();
-  }
-
-  init() {
-    try {
-      const db = ensureStorageDb();
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS print_jobs (
-          id TEXT PRIMARY KEY,
-          session_id TEXT NOT NULL,
-          print_master_path TEXT NOT NULL,
-          paper_id TEXT NOT NULL,
-          copies INTEGER NOT NULL DEFAULT 1,
-          status TEXT NOT NULL,
-          idempotency_key TEXT,
-          attempt_count INTEGER NOT NULL DEFAULT 0,
-          last_error TEXT,
-          created_at TEXT NOT NULL,
-          started_at TEXT,
-          completed_at TEXT,
-          updated_at TEXT NOT NULL
-        );
-      `);
-
-      const rows = db.prepare("SELECT * FROM print_jobs WHERE status IN ('QUEUED', 'PRINTING') ORDER BY created_at ASC").all();
-      for (const row of rows) {
-        if (row.status === 'PRINTING') {
-          const now = nowIso();
-          db.prepare("UPDATE print_jobs SET status = 'QUEUED', updated_at = ? WHERE id = ?").run(now, row.id);
-          writeSystemLog('warn', 'PRINT:RECOVER', `Recovered stale PRINTING job ${row.id} -> reset to QUEUED`, {
-            jobId: row.id,
-            sessionId: row.session_id,
-          });
-        }
-        this.queue.push(row.id);
-      }
-      if (this.queue.length > 0) {
-        writeSystemLog('info', 'PRINT:QUEUE', `Recovered ${this.queue.length} pending print job(s) from SQLite storage.`, {
-          pendingCount: this.queue.length,
-        });
-        void this.processNext();
-      }
-    } catch (err) {
-      console.warn('[PrintQueue] Init error:', err);
-    }
-  }
-
-  enqueue(session, options = {}) {
-    const db = ensureStorageDb();
-    const idempotencyKey = options.idempotencyKey || `${session.sessionId}_print_${session.selectedTemplate?.templateId || 'default'}`;
-
-    const existing = db.prepare("SELECT * FROM print_jobs WHERE idempotency_key = ?").get(idempotencyKey);
-    if (existing) {
-      writeSystemLog('info', 'PRINT:IDEMPOTENT', `Idempotent print request matched existing job ${existing.id}`, {
-        jobId: existing.id,
-        sessionId: session.sessionId,
-        status: existing.status,
-      });
-      return { ok: true, value: existing, idempotent: true };
-    }
-
-    const now = nowIso();
-    const jobId = `print_${session.sessionId}_${Date.now().toString(36)}`;
-    const printMasterPath = session.outputs?.print || session.outputs?.master || path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'final-print.jpg');
-    const paperId = session.selectedTemplate?.printProfile?.paper || '4x6';
-    const copies = Number(options.copies) || 1;
-
-    const job = {
-      id: jobId,
-      sessionId: session.sessionId,
-      printMasterPath,
-      paperId,
-      copies,
-      status: 'QUEUED',
-      idempotencyKey,
-      attemptCount: 0,
-      lastError: null,
-      createdAt: now,
-      startedAt: null,
-      completedAt: null,
-      updatedAt: now,
-    };
-
-    db.prepare(`
-      INSERT INTO print_jobs (
-        id, session_id, print_master_path, paper_id, copies, status, idempotency_key, attempt_count, last_error, created_at, started_at, completed_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      job.id, job.sessionId, job.printMasterPath, job.paperId, job.copies, job.status,
-      job.idempotencyKey, job.attemptCount, job.lastError, job.createdAt, job.startedAt, job.completedAt, job.updatedAt
-    );
-
-    session.printJob = job;
-    session.printStatus = 'QUEUED';
-    sessions.set(session.sessionId, session);
-
-    writeSystemLog('info', 'PRINT:QUEUE', `Print job ${job.id} durably enqueued into SQLite.`, {
-      jobId: job.id,
-      sessionId: session.sessionId,
-      copies: job.copies,
-      status: 'QUEUED',
-    });
-
-    this.queue.push(job.id);
-    void this.processNext();
-
-    return { ok: true, value: job, idempotent: false };
-  }
-
-  async processNext() {
-    if (this.isProcessing || this.queue.length === 0) return;
-    this.isProcessing = true;
-
-    const jobId = this.queue.shift();
-    if (!jobId) {
-      this.isProcessing = false;
-      return;
-    }
-
-    try {
-      const db = ensureStorageDb();
-      const jobRow = db.prepare("SELECT * FROM print_jobs WHERE id = ?").get(jobId);
-      if (!jobRow || jobRow.status !== 'QUEUED') {
-        this.isProcessing = false;
-        void this.processNext();
-        return;
-      }
-
-      const now = nowIso();
-      db.prepare("UPDATE print_jobs SET status = 'PRINTING', started_at = ?, updated_at = ? WHERE id = ?").run(now, now, jobId);
-
-      const memSession = sessions.get(jobRow.session_id);
-      if (memSession) {
-        memSession.printStatus = 'PRINTING';
-        if (memSession.printJob) memSession.printJob.status = 'PRINTING';
-      }
-
-      writeSystemLog('info', 'PRINT:WORKER', `Starting print worker execution for Job ${jobId}`, {
-        jobId,
-        sessionId: jobRow.session_id,
-        status: 'PRINTING',
-      });
-
-      const printResult = await this.adapter.print(jobRow);
-
-      if (printResult.ok) {
-        const completedNow = nowIso();
-        db.prepare("UPDATE print_jobs SET status = 'COMPLETED', completed_at = ?, updated_at = ? WHERE id = ?").run(completedNow, completedNow, jobId);
-        
-        if (memSession) {
-          memSession.printStatus = 'COMPLETED';
-          if (memSession.printJob) {
-            memSession.printJob.status = 'COMPLETED';
-            memSession.printJob.completedAt = completedNow;
-          }
-        }
-
-        writeSystemLog('info', 'PRINT:WORKER', `Print Job ${jobId} COMPLETED successfully.`, {
-          jobId,
-          sessionId: jobRow.session_id,
-          status: 'COMPLETED',
-        });
-
-        checkAndCompleteSession(jobRow.session_id);
-      } else {
-        const nextAttempts = (jobRow.attempt_count || 0) + 1;
-        const errNow = nowIso();
-        const errMsg = printResult.error?.message || 'Printer error';
-
-        if (nextAttempts < 2) {
-          db.prepare("UPDATE print_jobs SET status = 'QUEUED', attempt_count = ?, last_error = ?, updated_at = ? WHERE id = ?").run(nextAttempts, errMsg, errNow, jobId);
-          writeSystemLog('warn', 'PRINT:WORKER', `Print Job ${jobId} failed attempt ${nextAttempts}. Retrying in 2s...`, {
-            jobId,
-            sessionId: jobRow.session_id,
-            error: errMsg,
-          });
-          setTimeout(() => {
-            this.queue.push(jobId);
-            void this.processNext();
-          }, 2000);
-        } else {
-          db.prepare("UPDATE print_jobs SET status = 'FAILED', attempt_count = ?, last_error = ?, updated_at = ? WHERE id = ?").run(nextAttempts, errMsg, errNow, jobId);
-          if (memSession) {
-            memSession.printStatus = 'FAILED';
-            if (memSession.printJob) memSession.printJob.status = 'FAILED';
-          }
-          writeSystemLog('error', 'PRINT:WORKER', `Print Job ${jobId} FAILED after ${nextAttempts} attempts.`, {
-            jobId,
-            sessionId: jobRow.session_id,
-            status: 'FAILED',
-            error: errMsg,
-          });
-        }
-      }
-    } catch (err) {
-      console.warn('[PrintQueue] Worker execution error:', err);
-    } finally {
-      this.isProcessing = false;
-      setTimeout(() => void this.processNext(), 100);
-    }
-  }
-}
-
-const printQueue = new PrintQueueManager();
+const printQueue = new PrintQueueManager({
+  ensureStorageDb,
+  storageRoot,
+  sessionMediaPaths,
+  sessions,
+  writeSystemLog,
+  checkAndCompleteSession,
+});
 
 function requireGuestSession(sessionId) {
   const session = sessions.get(sessionId);
@@ -1142,6 +919,8 @@ function registerSkeletonIpc() {
     let filename = `${outputType}${extensionForMime(mimeType)}`;
     if (outputType === 'share' || type === 'final-image') {
       filename = 'final-image.jpg';
+    } else if (outputType === 'print' || type === 'print-cp1000') {
+      filename = 'print-cp1000.jpg';
     }
     const relativePath = path.posix.join('sessions', safeSessionId, 'outputs', filename);
     const stored = saveStorageFile(safeSessionId, relativePath, `output_${safeSessionId}_${outputType}`, { ...file, mimeType }, outputType, true);
@@ -1454,15 +1233,22 @@ function registerSkeletonIpc() {
   ipcMain.handle('cameraos:guest:compose', (_event, sessionId) => safeGuest(() => {
     const session = requireGuestSession(String(sessionId || ''));
     const finalImgPath = sessionMediaPaths ? sessionMediaPaths.finalImage(session.sessionId) : path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'final-image.jpg');
-    return touch({ ...session, outputs: { master: finalImgPath, share: finalImgPath, print: finalImgPath }, qr: { url: '', status: 'failed' } }, 'RESULT_READY');
+    const printImgPath = sessionMediaPaths ? sessionMediaPaths.printMaster(session.sessionId) : path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'print-cp1000.jpg');
+    const masterImgPath = path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'master.png');
+    return touch({ ...session, outputs: { master: masterImgPath, share: finalImgPath, print: printImgPath }, qr: { url: '', status: 'failed' } }, 'RESULT_READY');
   }));
   ipcMain.handle('cameraos:guest:print:request', (_event, sessionId, copies) => safeGuest(() => {
     const session = requireGuestSession(String(sessionId || ''));
-    const printImg = sessionMediaPaths ? sessionMediaPaths.finalImage(session.sessionId) : path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'final-image.jpg');
-    const exists = fs.existsSync(printImg);
-    const size = exists ? fs.statSync(printImg).size : 0;
-    console.log(`[PRINT_MEDIA_AUDIT]\nsessionId=${session.sessionId}\ninputPath=${printImg}\nrealPath=${exists ? fs.realpathSync(printImg) : printImg}\nexists=${exists}\nsize=${size}`);
-    const enqueueResult = printQueue.enqueue(session, { copies: Number(copies) || 1 });
+    const printImg =
+      session.outputs?.print ||
+      (sessionMediaPaths ? sessionMediaPaths.printMaster(session.sessionId) : null) ||
+      path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'print-cp1000.jpg');
+    const fallbackImg = sessionMediaPaths ? sessionMediaPaths.finalImage(session.sessionId) : path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'final-image.jpg');
+    const targetImg = fs.existsSync(printImg) ? printImg : fallbackImg;
+    const exists = fs.existsSync(targetImg);
+    const size = exists ? fs.statSync(targetImg).size : 0;
+    console.log(`[PRINT_MEDIA_AUDIT]\nsessionId=${session.sessionId}\ninputPath=${targetImg}\nrealPath=${exists ? fs.realpathSync(targetImg) : targetImg}\nexists=${exists}\nsize=${size}`);
+    const enqueueResult = printQueue.enqueue(session, { copies: Number(copies) || 1, printMasterPath: targetImg });
     if (!enqueueResult.ok) {
       throw new Error(enqueueResult.error?.message || 'Print enqueue failed.');
     }

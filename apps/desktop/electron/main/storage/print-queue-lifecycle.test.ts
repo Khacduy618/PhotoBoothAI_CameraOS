@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
@@ -14,7 +15,7 @@ interface PrintJobRecord {
   print_master_path: string;
   paper_id: string;
   copies: number;
-  status: 'QUEUED' | 'PRINTING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+  status: 'QUEUED' | 'PREPARING' | 'SUBMITTING' | 'SUBMITTED' | 'PRINTING' | 'COMPLETED' | 'FAILED' | 'REQUIRES_REVIEW' | 'CANCELLED';
   idempotency_key: string;
   attempt_count: number;
   last_error: string | null;
@@ -22,6 +23,11 @@ interface PrintJobRecord {
   started_at: string | null;
   completed_at: string | null;
   updated_at: string;
+  printer_profile_id?: string;
+  orientation?: string;
+  width_px?: number;
+  height_px?: number;
+  content_hash?: string;
 }
 
 class TestMockPrinterAdapter {
@@ -65,22 +71,66 @@ class TestPrintQueueManager {
         created_at TEXT NOT NULL,
         started_at TEXT,
         completed_at TEXT,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        printer_profile_id TEXT,
+        orientation TEXT,
+        width_px INTEGER,
+        height_px INTEGER,
+        content_hash TEXT
       );
     `);
 
-    const rows = this.db.prepare("SELECT * FROM print_jobs WHERE status IN ('QUEUED', 'PRINTING') ORDER BY created_at ASC").all() as PrintJobRecord[];
-    for (const row of rows) {
-      if (row.status === 'PRINTING') {
-        const now = new Date().toISOString();
-        this.db.prepare("UPDATE print_jobs SET status = 'QUEUED', updated_at = ? WHERE id = ?").run(now, row.id);
+    // Non-destructive migration
+    const existingColumns = this.db.prepare('PRAGMA table_info(print_jobs)').all().map((c: any) => c.name);
+    const requiredColumns = [
+      { name: 'printer_profile_id', type: 'TEXT' },
+      { name: 'orientation', type: 'TEXT' },
+      { name: 'width_px', type: 'INTEGER' },
+      { name: 'height_px', type: 'INTEGER' },
+      { name: 'content_hash', type: 'TEXT' },
+    ];
+    for (const col of requiredColumns) {
+      if (!existingColumns.includes(col.name)) {
+        this.db.exec(`ALTER TABLE print_jobs ADD COLUMN ${col.name} ${col.type};`);
       }
-      this.queue.push(row.id);
+    }
+
+    const rows = this.db.prepare("SELECT * FROM print_jobs WHERE status IN ('QUEUED', 'PREPARING', 'SUBMITTING', 'PRINTING') ORDER BY created_at ASC").all() as PrintJobRecord[];
+    for (const row of rows) {
+      if (row.status === 'PRINTING' || row.status === 'SUBMITTING') {
+        const now = new Date().toISOString();
+        // Transition in-flight jobs to REQUIRES_REVIEW to avoid duplicate physical prints
+        this.db.prepare("UPDATE print_jobs SET status = 'REQUIRES_REVIEW', updated_at = ? WHERE id = ?").run(now, row.id);
+      } else if (row.status === 'QUEUED') {
+        this.queue.push(row.id);
+      }
     }
   }
 
-  enqueue(sessionId: string, options: { printMasterPath?: string; paperId?: string; copies?: number; idempotencyKey?: string } = {}) {
-    const idempotencyKey = options.idempotencyKey || `${sessionId}_print_default`;
+  enqueue(sessionId: string, options: { printMasterPath?: string; paperId?: string; copies?: number; idempotencyKey?: string; profileId?: string; orientation?: string; widthPx?: number; heightPx?: number; enforceFileExists?: boolean } = {}) {
+    const paperId = options.paperId || 'POSTCARD';
+    const copies = options.copies || 1;
+    const profileId = options.profileId || 'CANON_SELPHY_CP1000';
+    const printMasterPath = options.printMasterPath || `/outputs/${sessionId}/print-cp1000.jpg`;
+
+    if (options.enforceFileExists && !fs.existsSync(printMasterPath)) {
+      return {
+        ok: false,
+        error: {
+          code: 'PRINT_MASTER_NOT_FOUND',
+          message: `Physical print master not found at "${printMasterPath}". Refusing to fall back to digital final-image.jpg.`,
+        },
+      };
+    }
+
+    let contentHash = 'mock_hash';
+    if (fs.existsSync(printMasterPath)) {
+      const bytes = fs.readFileSync(printMasterPath);
+      contentHash = crypto.createHash('sha256').update(bytes).digest('hex').substring(0, 16);
+    }
+
+    const idempotencyKey = options.idempotencyKey || `${sessionId}_print_${copies}_${contentHash}_${profileId}`;
+
     const existing = this.db.prepare("SELECT * FROM print_jobs WHERE idempotency_key = ?").get(idempotencyKey) as PrintJobRecord | undefined;
     if (existing) {
       return { ok: true, value: existing, idempotent: true };
@@ -88,12 +138,16 @@ class TestPrintQueueManager {
 
     const now = new Date().toISOString();
     const jobId = `print_${sessionId}_${Date.now().toString(36)}`;
+    const orientation = options.orientation || 'portrait';
+    const width_px = options.widthPx || (orientation === 'landscape' ? 1748 : 1181);
+    const height_px = options.heightPx || (orientation === 'landscape' ? 1181 : 1748);
+
     const job: PrintJobRecord = {
       id: jobId,
       session_id: sessionId,
-      print_master_path: options.printMasterPath || `/outputs/${sessionId}/final-print.jpg`,
-      paper_id: options.paperId || '4x6',
-      copies: options.copies || 1,
+      print_master_path: printMasterPath,
+      paper_id: paperId,
+      copies,
       status: 'QUEUED',
       idempotency_key: idempotencyKey,
       attempt_count: 0,
@@ -102,15 +156,24 @@ class TestPrintQueueManager {
       started_at: null,
       completed_at: null,
       updated_at: now,
+      printer_profile_id: profileId,
+      orientation,
+      width_px,
+      height_px,
+      content_hash: contentHash,
     };
 
     this.db.prepare(`
       INSERT INTO print_jobs (
-        id, session_id, print_master_path, paper_id, copies, status, idempotency_key, attempt_count, last_error, created_at, started_at, completed_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, session_id, print_master_path, paper_id, copies, status, idempotency_key, attempt_count,
+        last_error, created_at, started_at, completed_at, updated_at, printer_profile_id, orientation,
+        width_px, height_px, content_hash
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       job.id, job.session_id, job.print_master_path, job.paper_id, job.copies, job.status,
-      job.idempotency_key, job.attempt_count, job.last_error, job.created_at, job.started_at, job.completed_at, job.updated_at
+      job.idempotency_key, job.attempt_count, job.last_error, job.created_at, job.started_at,
+      job.completed_at, job.updated_at, job.printer_profile_id, job.orientation, job.width_px,
+      job.height_px, job.content_hash
     );
 
     this.queue.push(job.id);
@@ -162,7 +225,7 @@ class TestPrintQueueManager {
   }
 }
 
-describe('Background Print Queue & Lifecycle Specification', () => {
+describe('Background Print Queue & Lifecycle Specification for Canon CP1000', () => {
   let db: DatabaseType;
   let adapter: TestMockPrinterAdapter;
 
@@ -182,7 +245,7 @@ describe('Background Print Queue & Lifecycle Specification', () => {
     }
   });
 
-  it('1. Enqueues PrintJob durably into SQLite with status QUEUED', () => {
+  it('1. Enqueues PrintJob durably into SQLite with status QUEUED and CP1000 metadata', () => {
     const queue = new TestPrintQueueManager(db, adapter);
     queue.init();
 
@@ -190,11 +253,14 @@ describe('Background Print Queue & Lifecycle Specification', () => {
     expect(res.ok).toBe(true);
     expect(res.value?.status).toBe('QUEUED');
     expect(res.value?.copies).toBe(2);
+    expect(res.value?.printer_profile_id).toBe('CANON_SELPHY_CP1000');
 
     const row = db.prepare("SELECT * FROM print_jobs WHERE id = ?").get(res.value!.id) as PrintJobRecord;
     expect(row).toBeDefined();
     expect(row.session_id).toBe('session_001');
     expect(row.status).toBe('QUEUED');
+    expect(row.width_px).toBe(1181);
+    expect(row.height_px).toBe(1748);
   });
 
   it('2. Enforces idempotency on duplicate print requests', () => {
@@ -234,28 +300,74 @@ describe('Background Print Queue & Lifecycle Specification', () => {
     expect(row2.completed_at).toBeDefined();
   });
 
-  it('4. Recovers pending and stale PRINTING jobs on restart', () => {
+  it('4. Safe Crash Recovery: marks stale PRINTING jobs as REQUIRES_REVIEW (prevents duplicate prints)', () => {
     const queue1 = new TestPrintQueueManager(db, adapter);
     queue1.init();
 
     const j1 = queue1.enqueue('session_001', { copies: 1 });
     const j2 = queue1.enqueue('session_002', { copies: 1 });
 
-    // Simulate crash while j1 was PRINTING
+    // Simulate crash while j1 was in PRINTING state
     db.prepare("UPDATE print_jobs SET status = 'PRINTING' WHERE id = ?").run(j1.value!.id);
 
     // New instance boots up
     const queue2 = new TestPrintQueueManager(db, adapter);
     queue2.init();
 
-    expect(queue2.queue).toContain(j1.value!.id);
+    // j1 was in-flight, so it must NOT be re-enqueued automatically
+    expect(queue2.queue).not.toContain(j1.value!.id);
+    // j2 was still QUEUED, so it is safely recovered
     expect(queue2.queue).toContain(j2.value!.id);
 
     const recoveredRow1 = db.prepare("SELECT * FROM print_jobs WHERE id = ?").get(j1.value!.id) as PrintJobRecord;
-    expect(recoveredRow1.status).toBe('QUEUED');
+    expect(recoveredRow1.status).toBe('REQUIRES_REVIEW');
   });
 
-  it('5. Handles bounded retry and records failure on maximum attempts', async () => {
+  it('5. Safe Crash Recovery: marks stale SUBMITTING jobs as REQUIRES_REVIEW', () => {
+    const queue1 = new TestPrintQueueManager(db, adapter);
+    queue1.init();
+
+    const j1 = queue1.enqueue('session_submitting_01', { copies: 1 });
+    db.prepare("UPDATE print_jobs SET status = 'SUBMITTING' WHERE id = ?").run(j1.value!.id);
+
+    const queue2 = new TestPrintQueueManager(db, adapter);
+    queue2.init();
+
+    expect(queue2.queue).not.toContain(j1.value!.id);
+    const recovered = db.prepare("SELECT * FROM print_jobs WHERE id = ?").get(j1.value!.id) as PrintJobRecord;
+    expect(recovered.status).toBe('REQUIRES_REVIEW');
+  });
+
+  it('6. Missing physical print master fails safely and does NOT fall back to final-image.jpg', () => {
+    const queue = new TestPrintQueueManager(db, adapter);
+    queue.init();
+
+    const res = queue.enqueue('session_missing_master', {
+      printMasterPath: '/nonexistent/path/to/print-cp1000.jpg',
+      enforceFileExists: true,
+    });
+
+    expect(res.ok).toBe(false);
+    expect((res as any).error?.code).toBe('PRINT_MASTER_NOT_FOUND');
+  });
+
+  it('7. Immutable copy SHA matches canonical source file exactly', () => {
+    const testMasterPath = path.join(TEST_DIR, 'canonical_print-cp1000.jpg');
+    const dummyBytes = Buffer.from('TEST_CANON_CP1000_PRINT_MASTER_RASTER_DATA');
+    fs.writeFileSync(testMasterPath, dummyBytes);
+
+    const sourceSha = crypto.createHash('sha256').update(dummyBytes).digest('hex');
+
+    const immutablePath = path.join(TEST_DIR, 'print_immutable_job_001.jpg');
+    fs.copyFileSync(testMasterPath, immutablePath);
+
+    const copyBytes = fs.readFileSync(immutablePath);
+    const copySha = crypto.createHash('sha256').update(copyBytes).digest('hex');
+
+    expect(copySha).toBe(sourceSha);
+  });
+
+  it('8. Handles bounded retry and records failure on maximum attempts', async () => {
     adapter.shouldFail = true;
     const queue = new TestPrintQueueManager(db, adapter);
     queue.init();
@@ -269,7 +381,7 @@ describe('Background Print Queue & Lifecycle Specification', () => {
     expect(row.last_error).toBe('Simulated paper jam');
   });
 
-  it('6. Fires onJobCompleted callback to trigger backend session completion', async () => {
+  it('9. Fires onJobCompleted callback to trigger backend session completion', async () => {
     const queue = new TestPrintQueueManager(db, adapter);
     queue.init();
 

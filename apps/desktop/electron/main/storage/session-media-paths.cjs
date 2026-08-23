@@ -78,6 +78,18 @@ class SessionMediaPaths {
     return path.join(this.outputsDir(sessionId), 'final-video.mp4');
   }
 
+  printDir(sessionId) {
+    return path.join(this.outputsDir(sessionId), 'print');
+  }
+
+  printMaster(sessionId, profileId = 'cp1000', jobId = '') {
+    if (jobId) {
+      const safeJob = String(jobId).replace(/[^a-zA-Z0-9_-]/g, '_');
+      return path.join(this.printDir(sessionId), `print_${safeJob}.jpg`);
+    }
+    return path.join(this.outputsDir(sessionId), 'print-cp1000.jpg');
+  }
+
   metadata(sessionId) {
     return path.join(this.sessionRoot(sessionId), 'metadata.json');
   }
@@ -91,12 +103,14 @@ class SessionMediaPaths {
     const photos = this.photosDir(sessionId);
     const clips = this.clipsDir(sessionId);
     const outputs = this.outputsDir(sessionId);
+    const printDir = this.printDir(sessionId);
 
     fs.mkdirSync(photos, { recursive: true });
     fs.mkdirSync(clips, { recursive: true });
     fs.mkdirSync(outputs, { recursive: true });
+    fs.mkdirSync(printDir, { recursive: true });
 
-    return { root, photos, clips, outputs };
+    return { root, photos, clips, outputs, printDir };
   }
 }
 

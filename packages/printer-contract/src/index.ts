@@ -1,8 +1,20 @@
 import type { Result } from '@momentai/shared-types';
 
-export type PrinterProvider = 'fake' | 'windows_print';
+export * from './printer-profile';
+
+export type PrinterProvider = 'fake' | 'windows_print' | 'canon_cp1000';
 export type PrinterConnectionStatus = 'unknown' | 'ready' | 'printing' | 'offline' | 'paper_out' | 'error';
-export type PrintJobStatus = 'queued' | 'validating' | 'printing' | 'completed' | 'failed';
+export type PrintJobStatus =
+  | 'queued'
+  | 'validating'
+  | 'preparing'
+  | 'submitting'
+  | 'submitted'
+  | 'printing'
+  | 'completed'
+  | 'failed'
+  | 'requires_review'
+  | 'cancelled';
 
 export interface PrinterInfo {
   printerId: string;
@@ -21,12 +33,16 @@ export interface PrintJob {
   id: string;
   sessionId: string;
   printerId: string;
+  printerProfileId?: string;
   imagePath: string;
-  paperId: '4x6';
+  paperId: string;
   copies: number;
   orientation: 'portrait' | 'landscape';
   borderless: boolean;
   status: PrintJobStatus;
+  widthPx?: number;
+  heightPx?: number;
+  dpi?: number;
 }
 
 export interface PrintResult {
@@ -42,3 +58,4 @@ export interface PrinterAdapter {
   print(job: PrintJob): Promise<Result<PrintResult>>;
   getStatus(printerId: string): Promise<PrinterConnectionStatus>;
 }
+

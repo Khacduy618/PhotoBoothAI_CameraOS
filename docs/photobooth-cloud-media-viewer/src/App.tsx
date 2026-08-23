@@ -117,9 +117,10 @@ export default function App() {
 
           if (cloudDoc) {
             const status = String(cloudDoc.status || '').toUpperCase() as CloudState;
-            const hasFinalMedia = Boolean(cloudDoc.finalImage?.url);
+            const isImageReady = cloudDoc.finalImage?.status === 'READY' || Boolean(cloudDoc.finalImage?.url);
+            const isVideoReady = cloudDoc.finalVideo?.status === 'READY' || Boolean(cloudDoc.finalVideo?.url);
 
-            if (status === 'READY' || hasFinalMedia) {
+            if (isImageReady || isVideoReady || status === 'READY') {
               const codeDisplay = token.slice(0, 6).toUpperCase();
               const formattedSession: PhotoboothSession = {
                 id: token,
@@ -128,21 +129,26 @@ export default function App() {
                 location: 'MomentAI Cloud Storage',
                 createdAt: cloudDoc.createdAt || new Date().toISOString(),
                 expiresAt: new Date(new Date(cloudDoc.createdAt || Date.now()).getTime() + 48 * 60 * 60 * 1000).toISOString(),
-                stripMedia: {
+                stripMedia: isImageReady ? {
                   id: `strip-${token}`,
                   url: cloudDoc.finalImage?.url || '',
-                  name: `Photobooth_Photo_${codeDisplay}.jpg`,
+                  name: `MomentAI-${codeDisplay}-photo.jpg`,
                   type: 'image',
                   width: cloudDoc.finalImage?.width || 1800,
                   height: cloudDoc.finalImage?.height || 2700,
+                } : {
+                  id: `strip-${token}`,
+                  url: '',
+                  name: `MomentAI-${codeDisplay}-photo.jpg`,
+                  type: 'image',
                 },
-                videoMedia: cloudDoc.finalVideo?.url ? {
+                videoMedia: isVideoReady ? {
                   id: `video-${token}`,
-                  url: cloudDoc.finalVideo.url,
-                  name: `Photobooth_Video_${codeDisplay}.mp4`,
+                  url: cloudDoc.finalVideo?.url || '',
+                  name: `MomentAI-${codeDisplay}-video.mp4`,
                   type: 'video',
-                  width: cloudDoc.finalVideo.width || 1800,
-                  height: cloudDoc.finalVideo.height || 2700,
+                  width: cloudDoc.finalVideo?.width || 1800,
+                  height: cloudDoc.finalVideo?.height || 2700,
                 } : undefined,
                 rawPhotos: (cloudDoc.rawPhotos || []).map((p, idx) => ({
                   id: `raw-${token}-${p.shotIndex || idx + 1}`,
@@ -153,10 +159,15 @@ export default function App() {
               };
 
               setSession(formattedSession);
-              setCloudState('READY');
+              setCloudState(status === 'READY' ? 'READY' : isImageReady ? 'PARTIAL' : status);
+
+              // If video is still processing, keep polling in background for video readiness
+              if (!isVideoReady && status !== 'READY') {
+                pollTimer = setTimeout(querySession, 2000);
+              }
               return;
             } else {
-              // Document exists but still processing
+              // Document exists but still processing initial uploads
               setCloudState(status || 'UPLOADING_ORIGINALS');
               pollTimer = setTimeout(querySession, 2000);
               return;
@@ -432,7 +443,7 @@ export default function App() {
                         ref={videoRef}
                         src={session.videoMedia.url}
                         playsInline
-                        autoPlay
+                        preload="metadata"
                         loop
                         muted={isMuted}
                         className="w-full h-full object-cover rounded-2xl cursor-pointer"
@@ -472,7 +483,13 @@ export default function App() {
                       </div>
                     </>
                   ) : (
-                    <div className="text-white/40 text-xs">Video đang được xử lý...</div>
+                    <div className="flex flex-col items-center justify-center gap-3 p-6 text-center">
+                      <div className="w-10 h-10 rounded-full bg-purple-500/20 border border-purple-400/30 flex items-center justify-center">
+                        <Loader2 className="w-5 h-5 text-purple-300 animate-spin" />
+                      </div>
+                      <div className="text-xs text-purple-200 font-medium">Video đang được xử lý...</div>
+                      <div className="text-[10px] text-white/50">Tự động hiển thị khi hoàn thành</div>
+                    </div>
                   )}
                 </div>
 

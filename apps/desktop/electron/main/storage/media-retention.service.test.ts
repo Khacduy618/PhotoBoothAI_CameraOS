@@ -291,4 +291,27 @@ describe('WindowMiniMediaRetentionService — 20-Minute Session Cleanup Specific
     const check70s = isSessionEligibleForCleanup(session, DEFAULT_MEDIA_RETENTION_CONFIG, new Date('2026-08-18T12:01:10.000Z'));
     expect(check70s.eligible).toBe(true);
   });
+
+  // Test L: COMPLETED 30 minutes, printStatus = REQUIRES_REVIEW -> NOT DELETED (Forensic Safety)
+  it('Test L: COMPLETED 30 minutes with printStatus REQUIRES_REVIEW is NOT DELETED', () => {
+    const service = new WindowMiniMediaRetentionService();
+    const now = new Date('2026-08-18T12:30:00.000Z');
+    const result = service.runEligibleCleanup(
+      [
+        {
+          sessionId: 'session_requires_review_30m',
+          status: 'COMPLETED',
+          completedAt: '2026-08-18T12:00:00.000Z',
+          printStatus: 'REQUIRES_REVIEW',
+        },
+      ],
+      { now, storageRootDir: TEST_STORAGE_DIR }
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toHaveLength(0);
+    }
+    expect(service.getSummary().deferredPrint).toBe(1);
+  });
 });

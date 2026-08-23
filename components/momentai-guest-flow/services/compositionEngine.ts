@@ -1,6 +1,7 @@
 import { FrameTemplate, PhotoItem, EventConfig, PaperSize } from '../types';
 import { isStripTemplate } from '../components/UI/frame-previews/FramePreviewCard';
 import { renderFrameComposition, loadImage } from '@/services/render/frame-compositor.service';
+import { buildPrintMaster } from '@/services/render/print-master.service';
 
 export class CompositionEngine {
   public async renderComposition(
@@ -122,14 +123,19 @@ export class CompositionEngine {
 
     // Generate Outputs
     const masterDataUrl = canvas.toDataURL('image/png');
-    const shareDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    const shareDataUrl = canvas.toDataURL('image/jpeg', 0.92);
 
-    // Render Print Data URL (Handles 2x6 / 5x15 double-strip cut mode on 4x6 / 10x15 paper)
-    let printDataUrl = masterDataUrl;
+    // Render Print Data URL via authoritative CP1000 print master builder
     const isStrip = isStripTemplate(frame);
-    if (frame.renderMode === 'double-strip' || frame.preferredPaper === '2x6-double' || isStrip) {
-      printDataUrl = await this.renderDoubleStrip(canvas, 1800, 2700);
-    }
+    const targetProduct = frame.targetProduct || (isStrip ? 'STRIP_4' : 'SHEET_4');
+    const isLandscape = canvas.width > canvas.height;
+
+    const printMasterResult = await buildPrintMaster({
+      logicalProductImage: canvas,
+      targetProduct,
+      isLandscape,
+    });
+    const printDataUrl = printMasterResult.toDataURL('image/jpeg', 0.95);
 
     return {
       master: masterDataUrl,

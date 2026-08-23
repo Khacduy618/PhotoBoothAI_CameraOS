@@ -18,6 +18,7 @@ import type { CameraSettings, CaptureConfig, EventConfig, FrameTemplate, LayoutT
 import type { MomentAICaptureFormat, MomentAICaptureFormatId, MomentAIGuestSession, MomentAITemplate } from '@/types/momentai-guest-session';
 import type { GuestProductConfig } from '@/types/guest-product';
 import { resolveTargetProduct, isStripProduct as isStripProductId, canonicalLayoutType, canonicalPreferredPaper, canonicalRenderMode, getCanonicalSlots, normalizeSlotToUnit } from '@/services/frame/resolveTargetProduct';
+import { resolvePhysicalPrintPlan } from '@/services/printer/physical-print-plan';
 
 const EVENT_CONFIG: EventConfig = {
   eventName: 'PHỐ CỔ HỘI AN',
@@ -319,6 +320,12 @@ export function MomentAIGuestFlowController() {
           dataUrl: outputs.master,
           mimeType: 'image/png',
         });
+        if (outputs.print) {
+          await (window as unknown as { momentai: { guest: { storage: { saveOutput: (sid: string, type: string, file: unknown) => Promise<unknown> } } } }).momentai.guest.storage.saveOutput(backend.sessionId, 'print', {
+            dataUrl: outputs.print,
+            mimeType: 'image/jpeg',
+          });
+        }
       } catch (e) {
         console.warn('Storage saveOutput error:', e);
       }
@@ -382,7 +389,20 @@ export function MomentAIGuestFlowController() {
 
   const handleConfirmPrint = async () => {
     if (!backendSession || !currentSession) return;
-    const printCopies = currentSession.product?.printSheets || 1;
+    const productType =
+      currentSession.product?.id ||
+      (currentSession.selectedFrame ? resolveTargetProduct(currentSession.selectedFrame) : null) ||
+      'STRIP_2';
+    const isStrip = isStripProductId(productType as any);
+    const requestedUnits = isStrip ? 2 : (currentSession.product?.printSheets || 1);
+    const plan = resolvePhysicalPrintPlan({
+      product: productType,
+      requestedQuantity: requestedUnits,
+      isLandscape: currentSession.selectedFrame?.orientation === 'landscape',
+      sessionId: backendSession.sessionId,
+    });
+    const printCopies = plan.sheets;
+
     setCurrentSession({ ...currentSession, printStatus: 'sending' });
     try {
       await api('request-print', { sessionId: backendSession.sessionId, copies: printCopies });

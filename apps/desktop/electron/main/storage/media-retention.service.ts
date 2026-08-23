@@ -55,9 +55,9 @@ export function isSessionEligibleForCleanup(
     return { eligible: false, status: 'deferred_upload_active' };
   }
 
-  // Rule: Print in progress protection (Section 24)
+  // Rule: Print in progress protection (Section 24 & CP1000 Forensic Audit)
   const normalizedPrint = String(session.printStatus || '').toUpperCase();
-  if (['QUEUED', 'PRINTING', 'RETRYING', 'VALIDATING'].includes(normalizedPrint)) {
+  if (['QUEUED', 'PREPARING', 'SUBMITTING', 'SUBMITTED', 'PRINTING', 'RETRYING', 'VALIDATING', 'REQUIRES_REVIEW'].includes(normalizedPrint)) {
     return { eligible: false, status: 'deferred_print_active' };
   }
 

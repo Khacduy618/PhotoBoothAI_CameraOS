@@ -124,7 +124,7 @@ describe('CloudSyncCoordinator Unit & Integration Tests', () => {
 
     expect(result.ok).toBe(false);
     expect(result.state.status).not.toBe('READY');
-    expect(['PARTIAL', 'UPLOAD_FAILED']).toContain(result.state.status);
+    expect(['PROCESSING', 'PARTIAL', 'UPLOAD_FAILED']).toContain(result.state.status);
   });
 
   it('onJobCompleted with failed FRAME_VIDEO_COMPOSE marks status COMPOSE_FAILED, never READY', async () => {
@@ -141,6 +141,36 @@ describe('CloudSyncCoordinator Unit & Integration Tests', () => {
     const state = coordinator.sessions.get(sessionId);
     expect(state.status).toBe('COMPOSE_FAILED');
     expect(state.status).not.toBe('READY');
+  });
+
+  it('triggerFinalImageUpload makes finalImage READY immediately while status remains PROCESSING', async () => {
+    const sessionId = 'desktop_session_image_first';
+    coordinator.initSession(sessionId, { requiredShots: 2 });
+    sessionMediaPaths.ensureSessionDirectories(sessionId);
+
+    const finalImage = sessionMediaPaths.finalImage(sessionId);
+    fs.writeFileSync(finalImage, Buffer.from('fake-final-image-jpg'));
+
+    const imgRes = await coordinator.triggerFinalImageUpload(sessionId, finalImage);
+
+    expect(imgRes).toBeDefined();
+    expect(imgRes.status).toBe('READY');
+    expect(imgRes.url).toBeDefined();
+
+    const state = coordinator.sessions.get(sessionId);
+    expect(state.finalImage.status).toBe('READY');
+    expect(state.status).toBe('PROCESSING');
+    expect(state.status).not.toBe('READY'); // Must NOT be READY until video is ready
+
+    // Now video arrives
+    const finalVideo = sessionMediaPaths.finalVideo(sessionId);
+    fs.writeFileSync(finalVideo, Buffer.from('fake-final-video-mp4'));
+
+    const vidRes = await coordinator.triggerFinalVideoUpload(sessionId, finalVideo);
+    expect(vidRes.status).toBe('READY');
+
+    expect(state.finalVideo.status).toBe('READY');
+    expect(state.status).toBe('READY'); // Now both are ready
   });
 
   it('upload retry handles transient network errors with bounded retry count', async () => {

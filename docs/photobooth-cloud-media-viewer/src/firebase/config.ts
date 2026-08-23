@@ -64,18 +64,25 @@ export function parseFirestoreDocument(doc: any) {
   }
 
   const finalImage = f.finalImage?.mapValue?.fields ? {
+    status: getStr(f.finalImage.mapValue.fields.status) || (getStr(f.finalImage.mapValue.fields.url) ? 'READY' : 'PENDING'),
+    storagePath: getStr(f.finalImage.mapValue.fields.storagePath),
     url: getStr(f.finalImage.mapValue.fields.url),
     name: getStr(f.finalImage.mapValue.fields.name) || 'final-image.jpg',
     width: getNum(f.finalImage.mapValue.fields.width) || 1800,
     height: getNum(f.finalImage.mapValue.fields.height) || 2700,
+    bytes: getNum(f.finalImage.mapValue.fields.bytes),
   } : undefined;
 
   const finalVideo = f.finalVideo?.mapValue?.fields ? {
+    status: getStr(f.finalVideo.mapValue.fields.status) || (getStr(f.finalVideo.mapValue.fields.url) ? 'READY' : 'PROCESSING'),
+    storagePath: getStr(f.finalVideo.mapValue.fields.storagePath),
     url: getStr(f.finalVideo.mapValue.fields.url),
     name: getStr(f.finalVideo.mapValue.fields.name) || 'final-video.mp4',
     duration: getNum(f.finalVideo.mapValue.fields.duration) || 4.0,
+    durationMs: getNum(f.finalVideo.mapValue.fields.durationMs) || 4000,
     width: getNum(f.finalVideo.mapValue.fields.width) || 1800,
     height: getNum(f.finalVideo.mapValue.fields.height) || 2700,
+    bytes: getNum(f.finalVideo.mapValue.fields.bytes),
   } : undefined;
 
   return {

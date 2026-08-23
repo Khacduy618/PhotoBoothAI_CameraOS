@@ -366,10 +366,11 @@ class CloudSyncCoordinator {
 
   /**
    * Media-Readiness Listener: called when a final output image is saved.
+   * Uploads final-image.jpg immediately without waiting for final-video composition!
    */
   onOutputSaved(sessionId, outputType, filePath) {
     if (outputType === 'share' || outputType === 'final-image' || filePath?.endsWith('final-image.jpg')) {
-      void this.checkMediaReadinessAndTriggerPhaseB(sessionId);
+      void this.triggerFinalImageUpload(sessionId, filePath);
     }
   }
 
@@ -378,177 +379,226 @@ class CloudSyncCoordinator {
    */
   onJobCompleted(job) {
     if (job?.jobType === 'FRAME_VIDEO_COMPOSE') {
-      void this.checkMediaReadinessAndTriggerPhaseB(job.sessionId, job);
+      if (job.status === 'COMPLETED') {
+        const finalVideoPath = this.sessionMediaPaths ? this.sessionMediaPaths.finalVideo(job.sessionId) : null;
+        void this.triggerFinalVideoUpload(job.sessionId, finalVideoPath);
+      } else if (job.status === 'FAILED') {
+        const state = this.sessions.get(job.sessionId) || this.initSession(job.sessionId);
+        state.finalVideo = {
+          status: 'FAILED',
+          error: job.error || 'Video composition failed',
+        };
+        state.phaseBStatus = state.finalImage?.status === 'READY' ? 'PARTIAL' : 'FAILED';
+        state.status = state.finalImage?.status === 'READY' ? 'PARTIAL' : 'COMPOSE_FAILED';
+        state.lastError = job.error || 'Video composition failed';
+        state.updatedAt = new Date().toISOString();
+        this.persistLocalState(state);
+        void this.syncFirestoreDoc(state);
+        this.logStructured('warn', 'CLOUD_UPLOAD_FAILED', `Video composition failed for session ${job.sessionId}; status marked ${state.status}`, {
+          sessionId: job.sessionId,
+          status: state.status,
+        });
+      }
     }
   }
 
   /**
-   * Authoritative Media-Readiness Evaluator for Phase B.
-   * Condition for normal READY:
-   *  - final-image.jpg exists
-   *  - final-video.mp4 exists
-   *  - FRAME_VIDEO_COMPOSE job == COMPLETED
+   * Independent Final Image Upload (Image-First Delivery)
+   * Uploads final-image.jpg to Storage and updates Firestore immediately.
    */
-  async checkMediaReadinessAndTriggerPhaseB(sessionId, completedJob = null) {
-    if (!sessionId || !this.sessionMediaPaths) return;
-
-    const finalImagePath = this.sessionMediaPaths.finalImage(sessionId);
-    const finalVideoPath = this.sessionMediaPaths.finalVideo(sessionId);
-
-    const imageExists = fs.existsSync(finalImagePath);
-    const videoExists = fs.existsSync(finalVideoPath);
-
-    // If video composition explicitly failed
-    if (completedJob && completedJob.jobType === 'FRAME_VIDEO_COMPOSE' && completedJob.status === 'FAILED') {
-      const state = this.sessions.get(sessionId) || this.initSession(sessionId);
-      state.phaseBStatus = 'FAILED';
-      state.status = 'COMPOSE_FAILED';
-      state.lastError = completedJob.error || 'Video composition failed';
-      state.updatedAt = new Date().toISOString();
-      this.persistLocalState(state);
-      void this.syncFirestoreDoc(state);
-      this.logStructured('warn', 'CLOUD_UPLOAD_FAILED', `Video composition failed for session ${sessionId}; status marked COMPOSE_FAILED (never READY)`, {
-        sessionId,
-        status: state.status,
-      });
-      return;
+  async triggerFinalImageUpload(sessionId, filePath = null) {
+    if (!sessionId) return null;
+    const resolvedPath = filePath || (this.sessionMediaPaths ? this.sessionMediaPaths.finalImage(sessionId) : null);
+    if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+      return null;
     }
 
-    if (imageExists && videoExists) {
-      void this.triggerPhaseBUpload(sessionId, finalImagePath, finalVideoPath);
-    }
-  }
-
-  /**
-   * Phase B Trigger: Upload of final-image.jpg and final-video.mp4.
-   * Automatically triggered by media-readiness in Electron Main.
-   */
-  triggerPhaseBUpload(sessionId, finalImagePath, finalVideoPath) {
-    if (!sessionId) return Promise.resolve(null);
-    if (this.inFlightPhaseB.has(sessionId)) {
-      return this.inFlightPhaseB.get(sessionId);
-    }
-
-    const task = this.executePhaseBUpload(sessionId, finalImagePath, finalVideoPath).finally(() => {
-      this.inFlightPhaseB.delete(sessionId);
-    });
-
-    this.inFlightPhaseB.set(sessionId, task);
-    return task;
-  }
-
-  async executePhaseBUpload(sessionId, finalImagePath, finalVideoPath) {
     const state = this.sessions.get(sessionId) || this.initSession(sessionId);
     const publicToken = state.publicToken;
+    const stat = fs.statSync(resolvedPath);
 
-    if (state.phaseBStatus === 'COMPLETED' && state.status === 'READY') {
-      return { ok: true, state };
-    }
-
-    state.phaseBStatus = 'UPLOADING';
-    state.status = 'UPLOADING_FINAL';
-    state.updatedAt = new Date().toISOString();
-    this.persistLocalState(state);
-    void this.syncFirestoreDoc(state);
-
-    this.logStructured('info', 'CLOUD_UPLOAD_BEGIN', `Phase B final outputs upload started for session ${sessionId}`, {
+    this.logStructured('info', 'CLOUD_FINAL_IMAGE_LOCAL_READY', `Final image local file ready for session ${sessionId}`, {
       sessionId,
       publicToken,
-      type: 'PHASE_B_FINAL_OUTPUTS',
+      localPath: resolvedPath,
+      bytes: stat.size,
+    });
+
+    if (state.finalImage?.status === 'READY') {
+      return state.finalImage;
+    }
+
+    const remoteImagePath = `sessions/${publicToken}/outputs/final-image.jpg`;
+    this.logStructured('info', 'CLOUD_FINAL_IMAGE_UPLOAD_BEGIN', `Starting final image upload for session ${sessionId}`, {
+      sessionId,
+      publicToken,
+      storagePath: remoteImagePath,
+      bytes: stat.size,
     });
 
     const startTime = Date.now();
-    let finalImageUploaded = false;
-    let finalVideoUploaded = false;
-    const errors = [];
+    try {
+      const imgRes = await this.uploadFileWithRetry(resolvedPath, remoteImagePath, 'image/jpeg');
+      const elapsedMs = Date.now() - startTime;
 
-    const resolvedImagePath = finalImagePath || (this.sessionMediaPaths ? this.sessionMediaPaths.finalImage(sessionId) : null);
-    const resolvedVideoPath = finalVideoPath || (this.sessionMediaPaths ? this.sessionMediaPaths.finalVideo(sessionId) : null);
-
-    // 1. Upload Final Image
-    if (resolvedImagePath && fs.existsSync(resolvedImagePath)) {
-      const remoteImagePath = `sessions/${publicToken}/outputs/final-image.jpg`;
-      try {
-        const imgRes = await this.uploadFileWithRetry(resolvedImagePath, remoteImagePath, 'image/jpeg');
-        finalImageUploaded = true;
-        state.finalImage = {
-          name: 'final-image.jpg',
-          remotePath: remoteImagePath,
-          url: imgRes.downloadUrl,
-          width: 1800,
-          height: 2700,
-          size: imgRes.size,
-        };
-      } catch (err) {
-        errors.push(`Final Image: ${err.message}`);
-      }
-    } else {
-      errors.push('Final image file does not exist on disk.');
-    }
-
-    // 2. Upload Final Video
-    if (resolvedVideoPath && fs.existsSync(resolvedVideoPath)) {
-      const remoteVideoPath = `sessions/${publicToken}/outputs/final-video.mp4`;
-      try {
-        const vidRes = await this.uploadFileWithRetry(resolvedVideoPath, remoteVideoPath, 'video/mp4');
-        finalVideoUploaded = true;
-        state.finalVideo = {
-          name: 'final-video.mp4',
-          remotePath: remoteVideoPath,
-          url: vidRes.downloadUrl,
-          duration: 4.0,
-          width: 1800,
-          height: 2700,
-          size: vidRes.size,
-        };
-      } catch (err) {
-        errors.push(`Final Video: ${err.message}`);
-      }
-    } else {
-      errors.push('Final video file does not exist on disk.');
-    }
-
-    const elapsedMs = Date.now() - startTime;
-
-    // Strict invariant: READY requires BOTH final image and final video uploads to have succeeded!
-    if (finalImageUploaded && finalVideoUploaded && errors.length === 0) {
-      state.phaseBStatus = 'COMPLETED';
-      state.status = 'READY';
-      state.updatedAt = new Date().toISOString();
-      this.persistLocalState(state);
-      void this.syncFirestoreDoc(state);
-
-      this.logStructured('info', 'CLOUD_FINAL_READY', `Session ${sessionId} is now READY on Cloud`, {
+      this.logStructured('info', 'CLOUD_FINAL_IMAGE_UPLOAD_COMPLETE', `Final image uploaded to Storage for session ${sessionId}`, {
         sessionId,
         publicToken,
-        landingUrl: state.landingUrl,
-        finalImageUrl: state.finalImage?.url,
-        finalVideoUrl: state.finalVideo?.url,
+        storagePath: remoteImagePath,
+        bytes: imgRes.size,
         elapsedMs,
       });
 
-      return { ok: true, state };
-    } else {
-      // Degraded / Partial state - NEVER mark READY if video or image failed
-      state.phaseBStatus = finalImageUploaded ? 'PARTIAL' : 'FAILED';
-      state.status = finalImageUploaded ? 'PARTIAL' : 'UPLOAD_FAILED';
-      state.lastError = errors.join('; ');
+      state.finalImage = {
+        status: 'READY',
+        name: 'final-image.jpg',
+        storagePath: remoteImagePath,
+        url: imgRes.downloadUrl,
+        width: 1800,
+        height: 2700,
+        bytes: imgRes.size,
+      };
+
+      state.phaseBStatus = state.finalVideo?.status === 'READY' ? 'COMPLETED' : 'PARTIAL';
+      state.status = state.finalVideo?.status === 'READY' ? 'READY' : 'PROCESSING';
       state.updatedAt = new Date().toISOString();
       this.persistLocalState(state);
       void this.syncFirestoreDoc(state);
 
-      this.logStructured('warn', 'CLOUD_UPLOAD_FAILED', `Phase B upload incomplete for session ${sessionId}: ${errors.join('; ')}`, {
+      this.logStructured('info', 'CLOUD_FINAL_IMAGE_READY', `Final image is now READY on Firestore for session ${sessionId}`, {
         sessionId,
         publicToken,
         status: state.status,
-        finalImageUploaded,
-        finalVideoUploaded,
-        errors,
+        finalImageUrl: state.finalImage.url,
+      });
+
+      return state.finalImage;
+    } catch (err) {
+      state.finalImage = {
+        status: 'FAILED',
+        error: err.message,
+      };
+      state.phaseBStatus = 'FAILED';
+      state.status = 'UPLOAD_FAILED';
+      state.lastError = err.message;
+      state.updatedAt = new Date().toISOString();
+      this.persistLocalState(state);
+      void this.syncFirestoreDoc(state);
+
+      this.logStructured('error', 'CLOUD_UPLOAD_FAILED', `Final image upload failed for session ${sessionId}: ${err.message}`, {
+        sessionId,
+        publicToken,
+        error: err.message,
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Independent Final Video Upload (Video Delivery)
+   * Uploads final-video.mp4 to Storage and updates Firestore.
+   */
+  async triggerFinalVideoUpload(sessionId, filePath = null) {
+    if (!sessionId) return null;
+    const resolvedPath = filePath || (this.sessionMediaPaths ? this.sessionMediaPaths.finalVideo(sessionId) : null);
+    if (!resolvedPath || !fs.existsSync(resolvedPath)) {
+      return null;
+    }
+
+    const state = this.sessions.get(sessionId) || this.initSession(sessionId);
+    const publicToken = state.publicToken;
+    const stat = fs.statSync(resolvedPath);
+
+    this.logStructured('info', 'CLOUD_FINAL_VIDEO_LOCAL_READY', `Final video local file ready for session ${sessionId}`, {
+      sessionId,
+      publicToken,
+      localPath: resolvedPath,
+      bytes: stat.size,
+    });
+
+    if (state.finalVideo?.status === 'READY') {
+      return state.finalVideo;
+    }
+
+    const remoteVideoPath = `sessions/${publicToken}/outputs/final-video.mp4`;
+    this.logStructured('info', 'CLOUD_FINAL_VIDEO_UPLOAD_BEGIN', `Starting final video upload for session ${sessionId}`, {
+      sessionId,
+      publicToken,
+      storagePath: remoteVideoPath,
+      bytes: stat.size,
+    });
+
+    const startTime = Date.now();
+    try {
+      const vidRes = await this.uploadFileWithRetry(resolvedPath, remoteVideoPath, 'video/mp4');
+      const elapsedMs = Date.now() - startTime;
+
+      this.logStructured('info', 'CLOUD_FINAL_VIDEO_UPLOAD_COMPLETE', `Final video uploaded to Storage for session ${sessionId}`, {
+        sessionId,
+        publicToken,
+        storagePath: remoteVideoPath,
+        bytes: vidRes.size,
         elapsedMs,
       });
 
-      return { ok: false, state, errors };
+      state.finalVideo = {
+        status: 'READY',
+        name: 'final-video.mp4',
+        storagePath: remoteVideoPath,
+        url: vidRes.downloadUrl,
+        duration: 4.0,
+        durationMs: 4000,
+        width: 1800,
+        height: 2700,
+        bytes: vidRes.size,
+      };
+
+      state.phaseBStatus = state.finalImage?.status === 'READY' ? 'COMPLETED' : 'PARTIAL';
+      state.status = state.finalImage?.status === 'READY' ? 'READY' : 'PROCESSING';
+      state.updatedAt = new Date().toISOString();
+      this.persistLocalState(state);
+      void this.syncFirestoreDoc(state);
+
+      this.logStructured('info', 'CLOUD_FINAL_VIDEO_READY', `Final video is now READY on Firestore for session ${sessionId}`, {
+        sessionId,
+        publicToken,
+        status: state.status,
+        finalVideoUrl: state.finalVideo.url,
+      });
+
+      return state.finalVideo;
+    } catch (err) {
+      state.finalVideo = {
+        status: 'FAILED',
+        error: err.message,
+      };
+      state.phaseBStatus = state.finalImage?.status === 'READY' ? 'PARTIAL' : 'FAILED';
+      state.status = state.finalImage?.status === 'READY' ? 'PARTIAL' : 'UPLOAD_FAILED';
+      state.lastError = err.message;
+      state.updatedAt = new Date().toISOString();
+      this.persistLocalState(state);
+      void this.syncFirestoreDoc(state);
+
+      this.logStructured('error', 'CLOUD_UPLOAD_FAILED', `Final video upload failed for session ${sessionId}: ${err.message}`, {
+        sessionId,
+        publicToken,
+        error: err.message,
+      });
+      return null;
     }
+  }
+
+  /**
+   * Unified Phase B execution (convenience wrapper for backward compatibility / tests).
+   */
+  async executePhaseBUpload(sessionId, finalImagePath, finalVideoPath) {
+    const imgPromise = this.triggerFinalImageUpload(sessionId, finalImagePath);
+    const vidPromise = this.triggerFinalVideoUpload(sessionId, finalVideoPath);
+    const [imgRes, vidRes] = await Promise.all([imgPromise, vidPromise]);
+    const state = this.sessions.get(sessionId) || this.initSession(sessionId);
+
+    const ok = Boolean(imgRes && vidRes && state.status === 'READY');
+    return { ok, state };
   }
 
   /**
@@ -679,28 +729,35 @@ class CloudSyncCoordinator {
         boothName: { stringValue: 'TIỆM ẢNH DI SẢN • MOMENTAI' },
       };
 
-      if (state.finalImage?.url) {
+      if (state.finalImage) {
         fields.finalImage = {
           mapValue: {
             fields: {
-              url: { stringValue: state.finalImage.url },
+              status: { stringValue: state.finalImage.status || (state.finalImage.url ? 'READY' : 'PENDING') },
+              storagePath: { stringValue: state.finalImage.storagePath || state.finalImage.remotePath || '' },
+              url: { stringValue: state.finalImage.url || '' },
               name: { stringValue: state.finalImage.name || 'final-image.jpg' },
               width: { integerValue: String(state.finalImage.width || 1800) },
               height: { integerValue: String(state.finalImage.height || 2700) },
+              bytes: { integerValue: String(state.finalImage.bytes || state.finalImage.size || 0) },
             },
           },
         };
       }
 
-      if (state.finalVideo?.url) {
+      if (state.finalVideo) {
         fields.finalVideo = {
           mapValue: {
             fields: {
-              url: { stringValue: state.finalVideo.url },
+              status: { stringValue: state.finalVideo.status || (state.finalVideo.url ? 'READY' : 'PROCESSING') },
+              storagePath: { stringValue: state.finalVideo.storagePath || state.finalVideo.remotePath || '' },
+              url: { stringValue: state.finalVideo.url || '' },
               name: { stringValue: state.finalVideo.name || 'final-video.mp4' },
               duration: { doubleValue: state.finalVideo.duration || 4.0 },
+              durationMs: { integerValue: String(state.finalVideo.durationMs || 4000) },
               width: { integerValue: String(state.finalVideo.width || 1800) },
               height: { integerValue: String(state.finalVideo.height || 2700) },
+              bytes: { integerValue: String(state.finalVideo.bytes || state.finalVideo.size || 0) },
             },
           },
         };

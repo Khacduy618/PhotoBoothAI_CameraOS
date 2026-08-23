@@ -1,0 +1,13 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /sessions/{publicToken} {
+      // Allow public customers to read their single session document by exact token
+      allow get: if true;
+      // Disallow collection scanning/enumeration to prevent token discovery
+      allow list: if false;
+      // Disallow all public writes (writes must originate from privileged desktop backend)
+      allow write: if false;
+    }
+  }
+}

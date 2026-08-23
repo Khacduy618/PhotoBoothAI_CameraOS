@@ -53,6 +53,12 @@ contextBridge.exposeInMainWorld('momentai', {
       getPackage: (sessionId, origin) => invoke('cameraos:media:package:get', sessionId, origin),
       getPublicToken: (sessionId) => invoke('cameraos:media:token:get', sessionId),
     },
+    cloud: {
+      initSession: (sessionId, metadata) => invoke('cameraos:cloud:session:init', sessionId, metadata),
+      getPublicToken: (sessionId) => invoke('cameraos:cloud:session:get-token', sessionId),
+      triggerPhaseAUpload: (sessionId) => invoke('cameraos:cloud:upload:phase-a', sessionId),
+      getStatus: (sessionId) => invoke('cameraos:cloud:session:get-status', sessionId),
+    },
   },
   admin: {
     auth: {

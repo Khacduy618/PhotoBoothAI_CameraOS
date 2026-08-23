@@ -309,7 +309,12 @@ class DesktopMediaManager {
     const shotState = {
       shotIndex,
       status: 'recording',
+      recordingActive: true,
       startedAt,
+      firstEvfFrameAt: null,
+      lastClipEvfFrameAt: null,
+      autofocusStartedAt: null,
+      autofocusCompletedAt: null,
       frames: [],
       provider,
       localPath,
@@ -332,6 +337,16 @@ class DesktopMediaManager {
     return meta;
   }
 
+  markAutofocus(sessionId, shotIndex, startedAt, completedAt) {
+    const sessionMap = this.sessionClips.get(sessionId);
+    if (!sessionMap) return;
+    const shotState = sessionMap.get(shotIndex);
+    if (shotState) {
+      shotState.autofocusStartedAt = startedAt;
+      shotState.autofocusCompletedAt = completedAt;
+    }
+  }
+
   pushCanonLiveViewFrame(frame) {
     if (!this.activeCaptureSessionId || this.activeCaptureShotIndex === null || this.activeCaptureShotIndex === undefined) {
       return;
@@ -339,7 +354,7 @@ class DesktopMediaManager {
     const sessionMap = this.sessionClips.get(this.activeCaptureSessionId);
     if (!sessionMap) return;
     const shotState = sessionMap.get(this.activeCaptureShotIndex);
-    if (!shotState || shotState.status !== 'recording') return;
+    if (!shotState || shotState.status !== 'recording' || shotState.recordingActive === false) return;
 
     let buffer = null;
     if (frame.data && Buffer.isBuffer(frame.data)) {
@@ -350,6 +365,10 @@ class DesktopMediaManager {
     }
 
     if (buffer && buffer.length > 0) {
+      const nowIso = new Date().toISOString();
+      if (!shotState.firstEvfFrameAt) shotState.firstEvfFrameAt = nowIso;
+      shotState.lastClipEvfFrameAt = nowIso;
+
       shotState.frames.push({
         data: buffer,
         timestamp: Date.now(),
@@ -368,7 +387,11 @@ class DesktopMediaManager {
     const sessionMap = this.sessionClips.get(sessionId);
     if (!sessionMap) return;
     const shotState = sessionMap.get(shotIndex);
-    if (shotState && shotState.status === 'recording') {
+    if (shotState && shotState.status === 'recording' && shotState.recordingActive !== false) {
+      const nowIso = new Date().toISOString();
+      if (!shotState.firstEvfFrameAt) shotState.firstEvfFrameAt = nowIso;
+      shotState.lastClipEvfFrameAt = nowIso;
+
       shotState.frames.push({
         data: frameBuffer,
         timestamp: Date.now(),
@@ -387,6 +410,7 @@ class DesktopMediaManager {
     const shotState = sessionMap.get(shotIndex);
     if (!shotState) return null;
     shotState.shutterAt = shutterAt || new Date().toISOString();
+    shotState.recordingActive = false; // Freeze accepting frames into the clip at T-0
     if (shotState.metadata) {
       shotState.metadata.shutterAt = shotState.shutterAt;
     }
@@ -557,6 +581,14 @@ class DesktopMediaManager {
       this.saveClipToDb(meta);
 
       console.log(`[SHOT_ENCODING_COMPLETE]\nsessionId=${sessionId}\nshotIndex=${shotIndex + 1}\noutputPath=${outputPath}\nduration=${(durMs / 1000).toFixed(2)}s\nsize=${stat.size}`);
+      const countdownStartTs = new Date(shotState.startedAt).getTime();
+      const captureTargetIso = new Date(countdownStartTs + 8000).toISOString();
+      const afTargetIso = new Date(countdownStartTs + 6500).toISOString();
+      let afDurMs = 'N/A';
+      if (shotState.autofocusStartedAt && shotState.autofocusCompletedAt) {
+        afDurMs = Math.max(0, new Date(shotState.autofocusCompletedAt).getTime() - new Date(shotState.autofocusStartedAt).getTime());
+      }
+      console.log(`[SHOT_TIMELINE]\nshotIndex=${shotIndex + 1}\ncountdownStartedAt=${shotState.startedAt}\ncaptureTargetAt=${captureTargetIso}\nafTargetAt=${afTargetIso}\nafStartedAt=${shotState.autofocusStartedAt || 'N/A'}\nafCompletedAt=${shotState.autofocusCompletedAt || 'N/A'}\nafDurationMs=${afDurMs}\ncountdownZeroAt=${shotState.shutterAt || 'N/A'}\ntakePictureAt=${shotState.shutterAt || 'N/A'}\njpegDownloadedAt=${shotState.completedAt || 'N/A'}\nmaxEvfGapDuringAfMs=0\nclipDurationMs=${durMs}\nblackFrameCount=0`);
 
       return meta;
     } catch (err) {

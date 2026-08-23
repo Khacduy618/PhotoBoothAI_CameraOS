@@ -170,6 +170,28 @@ describe('CanonRuntimeClient State Machine & Event Flow', () => {
     expect(client.state).toBe(STATES.LIVEVIEW);
   });
 
+  it('supports manual focus (MF) production mode with zero AF commands during capture cycle', async () => {
+    await client.start();
+    await client.startLiveView();
+
+    let afTriggered = false;
+    client.on('autoFocusStarted', () => { afTriggered = true; });
+
+    // Simulate 8s countdown with MF mode (no AF triggered)
+    const captureResult = await client.capture({
+      sessionId: 'session_mf_strip_4',
+      shotIndex: 1,
+      targetPath: '/tmp/test_shot_mf_01.jpg',
+      correlationId: 'corr_test_mf_01',
+    });
+
+    expect(afTriggered).toBe(false);
+    expect(captureResult.path).toBe('/tmp/test_shot_mf_01.jpg');
+    expect(captureResult.width).toBe(5472);
+    expect(captureResult.height).toBe(3648);
+    expect(client.state).toBe(STATES.READY);
+  });
+
   it('executes full capture cycle from Live View to high-res JPEG result', async () => {
     await client.start();
     await client.startLiveView();

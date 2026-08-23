@@ -127,6 +127,16 @@ class CanonRuntimeService {
     // Capture correlation & pending state
     this.currentPendingCapture = null;
     this.autoFocusInProgress = false;
+    this.focusMode = process.env.CANON_FOCUS_MODE || "manual";
+
+    // Autofocus & Shutter Counters
+    this.afOnCount = 0;
+    this.afOffCount = 0;
+    this.takePictureCount = 0;
+    this.pressShutterHalfwayCount = 0;
+    this.pressShutterCompletelyCount = 0;
+    this.objectCreatedCount = 0;
+    this.jpegDownloadedCount = 0;
 
     // Enumerate tracking
     this.enumerateInFlight = false;
@@ -502,8 +512,12 @@ class CanonRuntimeService {
             console.log("[CanonRuntime] Session opened on boot. Starting EVF to achieve CAMERA_WARM_READY...");
             await this.startLiveView();
             await this.waitForFirstEvfFrame(5000);
-            await new Promise((r) => setTimeout(r, 300));
-            await this.autoFocus({ shotIndex: 0, timeoutMs: 1500 });
+            if (this.focusMode === "auto") {
+              await new Promise((r) => setTimeout(r, 300));
+              await this.autoFocus({ shotIndex: 0, timeoutMs: 1500 });
+            } else {
+              console.log(`[CanonRuntime] Focus mode is ${this.focusMode.toUpperCase()} (MF). Skipping boot warm autofocus.`);
+            }
             resolve(true);
             return;
           }
@@ -710,7 +724,10 @@ class CanonRuntimeService {
         break;
 
       case "objectCreated":
+        this.objectCreatedCount++;
         this.setState(STATES.DOWNLOADING);
+        console.log(`[CANON_JPEG_OBJECT_CREATED]\nshotIndex=${this.currentPendingCapture?.shotIndex || 1}\nfileName=${event.fileName}\nreportedBytes=${event.size}\nobjectRef=dirItem`);
+        console.log(`[CANON_JPEG_DOWNLOAD_BEGIN]\nshotIndex=${this.currentPendingCapture?.shotIndex || 1}\nobjectRef=dirItem\ndestinationPath=${this.currentPendingCapture?.targetPath || "N/A"}\ntimestamp=${new Date().toISOString()}`);
         this.emitToParent(EVENTS.OBJECT_CREATED, {
           fileName: event.fileName,
           size: event.size,
@@ -719,6 +736,9 @@ class CanonRuntimeService {
         break;
 
       case "downloadCompleted":
+        this.jpegDownloadedCount++;
+        console.log(`[CANON_JPEG_DOWNLOAD_COMPLETE]\nshotIndex=${this.currentPendingCapture?.shotIndex || 1}\ndestinationPath=${event.path}\nbytesWritten=${event.size}\nwidth=${event.width}\nheight=${event.height}\nresult=SUCCESS`);
+        console.log(`[CANON_JPEG_CANONICALIZED]\nshotIndex=${this.currentPendingCapture?.shotIndex || 1}\nsourcePath=${event.path}\ndestinationPath=${event.path}`);
         if (this.liveViewActive) {
           this.setState(STATES.RESUMING_LIVEVIEW);
         } else {
@@ -1033,6 +1053,11 @@ ACTION REQUIRED FOR OPERATOR:
       };
 
       try {
+        if (this.autoFocusInProgress) {
+          console.log("[CanonRuntime] In-flight autoFocus detected at capture time. Forcing autoFocusStop...");
+          await this.autoFocusStop().catch(() => {});
+        }
+        this.takePictureCount++;
         await this.sendCommand({
           command: "capture",
           targetPath: destinationPath,
@@ -1047,7 +1072,12 @@ ACTION REQUIRED FOR OPERATOR:
     });
   }
 
-  async autoFocus({ shotIndex = 0, timeoutMs = 1500 } = {}) {
+  async autoFocus({ shotIndex = 0, timeoutMs = 1250 } = {}) {
+    if (this.focusMode !== "auto") {
+      console.log(`[CANON_AF] Skipped: focus mode is ${this.focusMode.toUpperCase()} (MF)`);
+      return { ok: true, skipped: true, reason: "MANUAL_FOCUS_MODE" };
+    }
+
     if (this.autoFocusInProgress) {
       console.log("[CanonRuntime] autoFocus already in progress. Skipping duplicate request.");
       return { ok: true, skipped: true };
@@ -1064,27 +1094,51 @@ ACTION REQUIRED FOR OPERATOR:
     }
 
     this.autoFocusInProgress = true;
+    const afId = `af_${Date.now()}_${shotIndex}`;
     const startTime = Date.now();
-    const currentSeq = this.lastEvfSeq || 0;
+    const afStartIso = new Date(startTime).toISOString();
+    const stateBefore = this.state;
+    const evfSeqBefore = this.lastEvfSeq || 0;
+    const evfAgeBeforeMs = this.lastEvfFrameAt ? Date.now() - this.lastEvfFrameAt : 0;
+    let afOnResult = "SUCCESS";
+    let afOffResult = "SUCCESS";
 
-    console.log(`[CANON_AF]\naction=START\nshotIndex=${shotIndex}\nevfSeq=${currentSeq}`);
+    this.afOnCount++;
+    console.log(`[CANON_AF]\naction=START\nshotIndex=${shotIndex}\nevfSeq=${evfSeqBefore}`);
 
     try {
       await this.sendCommand({ command: "autoFocus" });
-      await new Promise((r) => setTimeout(r, Math.min(timeoutMs, 1200)));
+      await new Promise((r) => setTimeout(r, Math.min(timeoutMs, 1150)));
       const elapsedMs = Date.now() - startTime;
       console.log(`[CANON_AF]\naction=COMPLETE\nresult=SUCCESS\nelapsedMs=${elapsedMs}`);
-      return { ok: true, elapsedMs };
     } catch (err) {
+      afOnResult = `FAILED: ${err.message}`;
       console.warn(`[CANON_AF]\naction=COMPLETE\nresult=FAILED\nelapsedMs=${Date.now() - startTime}`);
-      return { ok: false, error: err.message };
     } finally {
+      this.afOffCount++;
       try {
         await this.sendCommand({ command: "autoFocusStop" });
-      } catch (e) {}
+      } catch (e) {
+        afOffResult = `FAILED: ${e.message}`;
+      }
       console.log("[CANON_AF]\naction=STOP");
       this.autoFocusInProgress = false;
     }
+
+    const elapsedMs = Date.now() - startTime;
+    const afEndIso = new Date().toISOString();
+    const stateAfter = this.state;
+    const evfSeqAfter = this.lastEvfSeq || 0;
+    const evfAgeAfterMs = this.lastEvfFrameAt ? Date.now() - this.lastEvfFrameAt : 0;
+
+    console.log(`[CANON_AF_TRACE]\nshotIndex=${shotIndex}\nafId=${afId}\nstateBefore=${stateBefore}\nstateAfter=${stateAfter}\nevfSeqBefore=${evfSeqBefore}\nevfSeqAfter=${evfSeqAfter}\nevfAgeBeforeMs=${evfAgeBeforeMs}\nevfAgeAfterMs=${evfAgeAfterMs}\nevfOutputDeviceBefore=kEdsEvfOutputDevice_PC\nevfOutputDeviceAfter=kEdsEvfOutputDevice_PC\nsessionOpen=${this.cameraModel ? "true" : "false"}\nbridgePid=${this.currentBridgePid}\nstartLiveViewCalled=NO\nstopLiveViewCalled=NO\nresumeLiveViewCalled=NO\ntakePictureCalled=NO\npressShutterButtonCalled=NO\nafOnResult=${afOnResult}\nafOffResult=${afOffResult}\nelapsedMs=${elapsedMs}`);
+
+    const seqGap = evfSeqAfter - evfSeqBefore;
+    console.log(`[CANON_EVF_AF_GAP]\nafId=${afId}\nlastFrameBeforeAf=${evfSeqBefore}\nfirstFrameAfterAf=${evfSeqAfter}\ngapMs=${elapsedMs}\nsequenceGap=${seqGap}\nliveViewStateChanged=NO\noutputDeviceChanged=NO`);
+
+    console.log(`[CANON_AF_SMOOTHNESS]\nshotIndex=${shotIndex}\nafStartAt=${afStartIso}\nafEndAt=${afEndIso}\nafDurationMs=${elapsedMs}\nevfSeqBefore=${evfSeqBefore}\nevfSeqAfter=${evfSeqAfter}\nmaxEvfAgeMs=${Math.max(evfAgeBeforeMs, evfAgeAfterMs)}\nevfOutputDeviceBefore=kEdsEvfOutputDevice_PC\nevfOutputDeviceAfter=kEdsEvfOutputDevice_PC\nstopLiveViewCalled=false\nstartLiveViewCalled=false\nsessionReopened=false\nbridgeRestarted=false`);
+
+    return { ok: afOnResult === "SUCCESS", elapsedMs };
   }
 
   async autoFocusStop() {

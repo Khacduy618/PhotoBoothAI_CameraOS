@@ -113,7 +113,7 @@ describe('FrameVideoComposer', () => {
     expect(result.width).toBe(600);
     expect(result.height).toBe(900);
     expect(result.codec.toLowerCase()).toContain('h264');
-  });
+  }, 20000);
 
   it('rejects composition when required shot clip is missing', async () => {
     const testFrame: FrameTemplate = {

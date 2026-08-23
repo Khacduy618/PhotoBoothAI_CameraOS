@@ -27,7 +27,10 @@ function checkRepoHygiene() {
   let trackedFiles = [];
 
   try {
-    const output = execSync('git ls-files', { encoding: 'utf8' });
+    const output = execSync('git ls-files', {
+      encoding: 'utf8',
+      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+    });
     trackedFiles = output.split('\n').filter(Boolean);
   } catch (err) {
     console.error('❌ [CI] Failed to run git ls-files:', err.message);

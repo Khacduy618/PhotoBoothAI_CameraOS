@@ -1,0 +1,11 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /sessions/{publicToken}/{allPaths=**} {
+      // Allow reading media assets for the specific public session
+      allow get: if true;
+      // Disallow listing folder contents or arbitrary uploads from public web clients
+      allow list, write: if false;
+    }
+  }
+}

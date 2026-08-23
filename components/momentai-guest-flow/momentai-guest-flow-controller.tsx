@@ -32,7 +32,7 @@ const EVENT_CONFIG: EventConfig = {
 const CAPTURE_CONFIG: CaptureConfig = {
   availableCounts: [2, 3, 4, 6],
   defaultCount: 4,
-  countdownSeconds: 3,
+  countdownSeconds: 8,
   intervalSeconds: 2,
   allowRetake: false,
 };
@@ -234,6 +234,21 @@ export function MomentAIGuestFlowController() {
     const uniqueTemplates = Array.from(new Map(allAvailableTemplates.map((t) => [t.id, t])).values());
     setFrameTemplates(uniqueTemplates);
     setBackendSession(updatedBackend);
+
+    // Trigger Phase A background upload (non-blocking) upon entering frame selection
+    if (typeof window !== 'undefined') {
+      const cloudBridge = (window as unknown as { momentai?: { guest?: { cloud?: { initSession?: (sid: string, meta?: unknown) => Promise<unknown>; triggerPhaseAUpload?: (sid: string) => Promise<unknown> } } } }).momentai?.guest?.cloud;
+      if (cloudBridge?.initSession) {
+        void cloudBridge.initSession(updatedBackend.sessionId, {
+          productType: currentSession.product?.id,
+          requiredShots: currentSession.captureCount,
+        });
+      }
+      if (cloudBridge?.triggerPhaseAUpload) {
+        void cloudBridge.triggerPhaseAUpload(updatedBackend.sessionId);
+      }
+    }
+
     setScreenState('G04_SELECT_FRAME');
   };
 
@@ -328,17 +343,33 @@ export function MomentAIGuestFlowController() {
 
     // Early QR reservation: get tokenized session share URL
     let qrUrl = '';
-    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { media?: { getPublicToken: (sid: string) => Promise<{ ok: boolean; value?: { publicToken?: string } }> } } } }).momentai?.guest?.media?.getPublicToken) {
-      try {
-        const tokenRes = await (window as unknown as { momentai: { guest: { media: { getPublicToken: (sid: string) => Promise<{ ok: boolean; value?: { publicToken?: string } }> } } } }).momentai.guest.media.getPublicToken(backend.sessionId);
-        const token = tokenRes?.value?.publicToken;
-        if (token) {
-          const origin = window.location.origin.includes('5173') || window.location.origin.includes('5174')
-            ? `http://${window.location.hostname}:3000`
-            : window.location.origin;
-          qrUrl = `${origin}/s/${token}`;
-        }
-      } catch {}
+    if (typeof window !== 'undefined') {
+      const cloudBridge = (window as unknown as { momentai?: { guest?: { cloud?: { getPublicToken?: (sid: string) => Promise<{ ok?: boolean; value?: { publicToken?: string; landingUrl?: string }; publicToken?: string; landingUrl?: string }> } } } }).momentai?.guest?.cloud;
+      const mediaBridge = (window as unknown as { momentai?: { guest?: { media?: { getPublicToken?: (sid: string) => Promise<{ ok?: boolean; value?: { publicToken?: string } }> } } } }).momentai?.guest?.media;
+      
+      if (cloudBridge?.getPublicToken) {
+        try {
+          const res = await cloudBridge.getPublicToken(backend.sessionId);
+          const directUrl = res?.value?.landingUrl || res?.landingUrl;
+          const token = res?.value?.publicToken || res?.publicToken;
+          if (directUrl) {
+            qrUrl = directUrl;
+          } else if (token) {
+            const baseUrl = (process.env.MOMENTAI_LANDING_BASE_URL || process.env.NEXT_PUBLIC_LANDING_BASE_URL || process.env.MOMENTAI_LANDING_DOMAIN || 'http://localhost:5174').replace(/\/+$/, '');
+            qrUrl = `${baseUrl}/s/${token}`;
+          }
+        } catch {}
+      }
+      if (!qrUrl && mediaBridge?.getPublicToken) {
+        try {
+          const tokenRes = await mediaBridge.getPublicToken(backend.sessionId);
+          const token = tokenRes?.value?.publicToken;
+          if (token) {
+            const baseUrl = (process.env.MOMENTAI_LANDING_BASE_URL || process.env.NEXT_PUBLIC_LANDING_BASE_URL || process.env.MOMENTAI_LANDING_DOMAIN || 'http://localhost:5174').replace(/\/+$/, '');
+            qrUrl = `${baseUrl}/s/${token}`;
+          }
+        } catch {}
+      }
     }
 
     const composedBackend = await api('compose', { sessionId: backend.sessionId });

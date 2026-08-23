@@ -1,0 +1,810 @@
+/**
+ * cloud-sync-coordinator.cjs
+ *
+ * Authoritative Cloud Synchronization Coordinator for MomentAI CameraOS Electron Main.
+ * Responsibilities:
+ *  1. Owns Phase A (original photos & clips background upload upon entering frame selection)
+ *  2. Owns Phase B (media-readiness-driven upload of final-image & final-video)
+ *  3. Generates and persists 128-bit cryptographic public tokens mapped to localSessionId in SQLite
+ *  4. Synchronizes session metadata and statuses to Firebase Firestore
+ *  5. Uploads media objects to Firebase Storage with bounded exponential retries
+ *  6. Completely isolates cloud failures from camera, capture, composition, and print hardware pipelines
+ */
+
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const http = require('http');
+const https = require('https');
+
+class CloudSyncCoordinator {
+  constructor(options = {}) {
+    this.db = null;
+    this.sessionMediaPaths = null;
+    this.writeSystemLog = options.writeSystemLog || ((level, event, msg, details) => {
+      console.log(`[${level.toUpperCase()}] [${event}] ${msg}`, details || '');
+    });
+
+    // In-memory cache: sessionId -> sessionSyncState
+    this.sessions = new Map();
+    // In-memory token map: sessionId -> publicToken
+    this.tokenMap = new Map();
+    // In-flight upload promises to guarantee idempotency
+    this.inFlightPhaseA = new Map();
+    this.inFlightPhaseB = new Map();
+
+    // Load local .env / .env.local if present
+    try {
+      const rootEnvLocal = path.resolve(process.cwd(), '.env.local');
+      if (fs.existsSync(rootEnvLocal)) {
+        const lines = fs.readFileSync(rootEnvLocal, 'utf8').split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed && !trimmed.startsWith('#')) {
+            const [k, ...v] = trimmed.split('=');
+            if (k && !process.env[k.trim()]) {
+              process.env[k.trim()] = v.join('=').trim();
+            }
+          }
+        }
+      }
+    } catch {}
+
+    // Firebase Desktop Writer configuration (loaded from env or service account)
+    this.serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH || '';
+    let saProjectId = '';
+    if (this.serviceAccountPath && fs.existsSync(this.serviceAccountPath)) {
+      try {
+        const sa = JSON.parse(fs.readFileSync(this.serviceAccountPath, 'utf8'));
+        saProjectId = sa.project_id || '';
+      } catch {}
+    }
+
+    this.projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || saProjectId || '';
+    this.storageBucket = process.env.FIREBASE_STORAGE_BUCKET || process.env.VITE_FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || (this.projectId ? `${this.projectId}.firebasestorage.app` : '');
+    this.apiKey = process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY || '';
+    
+    // Authoritative Landing Page Base URL (Full origin/base URL with slash normalization)
+    const rawBaseUrl = process.env.MOMENTAI_LANDING_BASE_URL || process.env.MOMENTAI_LANDING_DOMAIN || process.env.LANDING_PAGE_URL || process.env.NEXT_PUBLIC_LANDING_BASE_URL || 'http://localhost:5174';
+    this.landingBaseUrl = String(rawBaseUrl).trim().replace(/\/+$/, '');
+  }
+
+  init(db, sessionMediaPaths) {
+    this.db = db;
+    this.sessionMediaPaths = sessionMediaPaths;
+
+    if (this.db) {
+      try {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS public_session_tokens (
+            session_id TEXT PRIMARY KEY,
+            public_token TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL
+          );
+          CREATE TABLE IF NOT EXISTS cloud_sync_sessions (
+            session_id TEXT PRIMARY KEY,
+            public_token TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL,
+            phase_a_status TEXT NOT NULL DEFAULT 'IDLE',
+            phase_b_status TEXT NOT NULL DEFAULT 'IDLE',
+            photos_uploaded INTEGER NOT NULL DEFAULT 0,
+            clips_uploaded INTEGER NOT NULL DEFAULT 0,
+            final_image_uploaded INTEGER NOT NULL DEFAULT 0,
+            final_video_uploaded INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            payload_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+        `);
+
+        // Load existing token mappings into memory
+        const rows = this.db.prepare('SELECT session_id, public_token FROM public_session_tokens').all();
+        for (const row of rows) {
+          this.tokenMap.set(row.session_id, row.public_token);
+        }
+      } catch (err) {
+        console.warn('[CloudSyncCoordinator] DB init error:', err.message);
+      }
+    }
+  }
+
+  /**
+   * Generates or retrieves a 128-bit cryptographically secure random public token for the session.
+   * 128 bits = 16 bytes = 32 hexadecimal characters.
+   */
+  getPublicToken(sessionId) {
+    if (!sessionId) return '';
+    if (this.tokenMap.has(sessionId)) {
+      return this.tokenMap.get(sessionId);
+    }
+
+    if (this.db) {
+      try {
+        const existing = this.db.prepare('SELECT public_token FROM public_session_tokens WHERE session_id = ?').get(sessionId);
+        if (existing?.public_token) {
+          this.tokenMap.set(sessionId, existing.public_token);
+          return existing.public_token;
+        }
+      } catch {}
+    }
+
+    // Generate 128-bit cryptographic random token
+    const token = crypto.randomBytes(16).toString('hex');
+    this.tokenMap.set(sessionId, token);
+
+    if (this.db) {
+      try {
+        const now = new Date().toISOString();
+        this.db.prepare('INSERT OR IGNORE INTO public_session_tokens (session_id, public_token, created_at) VALUES (?, ?, ?)').run(sessionId, token, now);
+      } catch (err) {
+        console.warn('[CloudSyncCoordinator] Token insert error:', err.message);
+      }
+    }
+
+    return token;
+  }
+
+  /**
+   * Resolves the public Landing Page QR URL for the session.
+   */
+  getLandingUrl(sessionId) {
+    const publicToken = this.getPublicToken(sessionId);
+    return this.buildLandingUrl(publicToken);
+  }
+
+  /**
+   * Authoritative QR / Landing URL Builder with safe slash normalization.
+   */
+  buildLandingUrl(publicToken) {
+    if (!publicToken) return '';
+    return `${this.landingBaseUrl}/s/${publicToken}`;
+  }
+
+  /**
+   * Initializes or returns the cloud session metadata.
+   * Idempotent: multiple calls return the identical cloud session and token.
+   */
+  initSession(sessionId, metadata = {}) {
+    const publicToken = this.getPublicToken(sessionId);
+    const landingUrl = this.getLandingUrl(sessionId);
+    const now = new Date().toISOString();
+
+    let state = this.sessions.get(sessionId);
+    if (!state) {
+      state = {
+        sessionId,
+        publicToken,
+        landingUrl,
+        status: 'CREATED',
+        phaseAStatus: 'IDLE',
+        phaseBStatus: 'IDLE',
+        productType: metadata.productType || metadata.product?.id || 'classic_4_shot',
+        requiredShots: metadata.requiredShots || metadata.captureCount || 4,
+        photos: [],
+        clips: [],
+        finalImage: null,
+        finalVideo: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.sessions.set(sessionId, state);
+
+      if (this.db) {
+        try {
+          this.db.prepare(`
+            INSERT INTO cloud_sync_sessions (
+              session_id, public_token, status, phase_a_status, phase_b_status, payload_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at
+          `).run(sessionId, publicToken, 'CREATED', 'IDLE', 'IDLE', JSON.stringify(state), now, now);
+        } catch {}
+      }
+
+      this.logStructured('info', 'CLOUD_SESSION_CREATED', `Cloud session created for ${sessionId}`, {
+        sessionId,
+        publicToken,
+        landingUrl,
+      });
+
+      // Synchronize initial document to Firestore in background
+      void this.syncFirestoreDoc(state);
+    }
+
+    return {
+      sessionId,
+      publicToken,
+      landingUrl,
+      status: state.status,
+    };
+  }
+
+  /**
+   * Phase A Trigger: Background upload of raw photos (shot_*.jpg) and clips (shot_*.mp4).
+   * Called when guest completes physical shooting and enters frame selection.
+   * NON-BLOCKING: returns immediately while upload proceeds asynchronously in background.
+   */
+  triggerPhaseAUpload(sessionId) {
+    if (!sessionId) return Promise.resolve(null);
+    if (this.inFlightPhaseA.has(sessionId)) {
+      return this.inFlightPhaseA.get(sessionId);
+    }
+
+    const task = this.executePhaseAUpload(sessionId).finally(() => {
+      this.inFlightPhaseA.delete(sessionId);
+    });
+
+    this.inFlightPhaseA.set(sessionId, task);
+    return task;
+  }
+
+  async executePhaseAUpload(sessionId) {
+    const state = this.sessions.get(sessionId) || this.initSession(sessionId);
+    const publicToken = state.publicToken;
+
+    if (state.phaseAStatus === 'COMPLETED') {
+      return { ok: true, state };
+    }
+
+    state.phaseAStatus = 'UPLOADING';
+    state.status = 'UPLOADING_ORIGINALS';
+    state.updatedAt = new Date().toISOString();
+    this.persistLocalState(state);
+    void this.syncFirestoreDoc(state);
+
+    this.logStructured('info', 'CLOUD_UPLOAD_BEGIN', `Phase A upload started for session ${sessionId}`, {
+      sessionId,
+      publicToken,
+      type: 'PHASE_A_ORIGINALS',
+    });
+
+    const startTime = Date.now();
+    let photosUploaded = 0;
+    let clipsUploaded = 0;
+    const errors = [];
+
+    try {
+      const photosDir = this.sessionMediaPaths ? this.sessionMediaPaths.photosDir(sessionId) : null;
+      const clipsDir = this.sessionMediaPaths ? this.sessionMediaPaths.clipsDir(sessionId) : null;
+
+      const requiredShots = state.requiredShots || 4;
+      const photosList = [];
+      const clipsList = [];
+
+      // 1. Upload Photos
+      for (let i = 1; i <= requiredShots; i++) {
+        const photoFilename = `shot_${String(i).padStart(2, '0')}.jpg`;
+        const localPhotoPath = photosDir ? path.join(photosDir, photoFilename) : null;
+
+        if (localPhotoPath && fs.existsSync(localPhotoPath)) {
+          const remotePath = `sessions/${publicToken}/photos/${photoFilename}`;
+          try {
+            const uploadRes = await this.uploadFileWithRetry(localPhotoPath, remotePath, 'image/jpeg');
+            photosUploaded++;
+            photosList.push({
+              shotIndex: i,
+              filename: photoFilename,
+              remotePath,
+              url: uploadRes.downloadUrl,
+              size: uploadRes.size,
+            });
+          } catch (err) {
+            errors.push(`Photo ${i}: ${err.message}`);
+          }
+        }
+      }
+
+      // 2. Upload Clips
+      for (let i = 1; i <= requiredShots; i++) {
+        const clipFilename = `shot_${String(i).padStart(2, '0')}.mp4`;
+        const localClipPath = clipsDir ? path.join(clipsDir, clipFilename) : null;
+
+        if (localClipPath && fs.existsSync(localClipPath)) {
+          const remotePath = `sessions/${publicToken}/clips/${clipFilename}`;
+          try {
+            const uploadRes = await this.uploadFileWithRetry(localClipPath, remotePath, 'video/mp4');
+            clipsUploaded++;
+            clipsList.push({
+              shotIndex: i,
+              filename: clipFilename,
+              remotePath,
+              url: uploadRes.downloadUrl,
+              size: uploadRes.size,
+            });
+          } catch (err) {
+            errors.push(`Clip ${i}: ${err.message}`);
+          }
+        }
+      }
+
+      state.photos = photosList;
+      state.clips = clipsList;
+      state.phaseAStatus = errors.length === 0 ? 'COMPLETED' : 'PARTIAL';
+      state.status = errors.length === 0 ? 'ORIGINALS_READY' : 'PARTIAL';
+      state.updatedAt = new Date().toISOString();
+      this.persistLocalState(state);
+      void this.syncFirestoreDoc(state);
+
+      const elapsedMs = Date.now() - startTime;
+      if (errors.length === 0) {
+        this.logStructured('info', 'CLOUD_UPLOAD_COMPLETE', `Phase A upload completed for session ${sessionId}`, {
+          sessionId,
+          publicToken,
+          photosUploaded,
+          clipsUploaded,
+          elapsedMs,
+        });
+      } else {
+        this.logStructured('warn', 'CLOUD_UPLOAD_FAILED', `Phase A upload partial/errors for session ${sessionId}`, {
+          sessionId,
+          publicToken,
+          photosUploaded,
+          clipsUploaded,
+          errors,
+          elapsedMs,
+        });
+      }
+
+      return { ok: errors.length === 0, state, errors };
+    } catch (err) {
+      state.phaseAStatus = 'FAILED';
+      state.status = 'PARTIAL';
+      state.lastError = err.message;
+      state.updatedAt = new Date().toISOString();
+      this.persistLocalState(state);
+      void this.syncFirestoreDoc(state);
+
+      this.logStructured('error', 'CLOUD_UPLOAD_FAILED', `Phase A upload fatal error for session ${sessionId}: ${err.message}`, {
+        sessionId,
+        publicToken,
+        error: err.message,
+      });
+
+      return { ok: false, error: err.message };
+    }
+  }
+
+  /**
+   * Media-Readiness Listener: called when a final output image is saved.
+   */
+  onOutputSaved(sessionId, outputType, filePath) {
+    if (outputType === 'share' || outputType === 'final-image' || filePath?.endsWith('final-image.jpg')) {
+      void this.checkMediaReadinessAndTriggerPhaseB(sessionId);
+    }
+  }
+
+  /**
+   * Media-Readiness Listener: called when DesktopMediaManager completes a media job.
+   */
+  onJobCompleted(job) {
+    if (job?.jobType === 'FRAME_VIDEO_COMPOSE') {
+      void this.checkMediaReadinessAndTriggerPhaseB(job.sessionId, job);
+    }
+  }
+
+  /**
+   * Authoritative Media-Readiness Evaluator for Phase B.
+   * Condition for normal READY:
+   *  - final-image.jpg exists
+   *  - final-video.mp4 exists
+   *  - FRAME_VIDEO_COMPOSE job == COMPLETED
+   */
+  async checkMediaReadinessAndTriggerPhaseB(sessionId, completedJob = null) {
+    if (!sessionId || !this.sessionMediaPaths) return;
+
+    const finalImagePath = this.sessionMediaPaths.finalImage(sessionId);
+    const finalVideoPath = this.sessionMediaPaths.finalVideo(sessionId);
+
+    const imageExists = fs.existsSync(finalImagePath);
+    const videoExists = fs.existsSync(finalVideoPath);
+
+    // If video composition explicitly failed
+    if (completedJob && completedJob.jobType === 'FRAME_VIDEO_COMPOSE' && completedJob.status === 'FAILED') {
+      const state = this.sessions.get(sessionId) || this.initSession(sessionId);
+      state.phaseBStatus = 'FAILED';
+      state.status = 'COMPOSE_FAILED';
+      state.lastError = completedJob.error || 'Video composition failed';
+      state.updatedAt = new Date().toISOString();
+      this.persistLocalState(state);
+      void this.syncFirestoreDoc(state);
+      this.logStructured('warn', 'CLOUD_UPLOAD_FAILED', `Video composition failed for session ${sessionId}; status marked COMPOSE_FAILED (never READY)`, {
+        sessionId,
+        status: state.status,
+      });
+      return;
+    }
+
+    if (imageExists && videoExists) {
+      void this.triggerPhaseBUpload(sessionId, finalImagePath, finalVideoPath);
+    }
+  }
+
+  /**
+   * Phase B Trigger: Upload of final-image.jpg and final-video.mp4.
+   * Automatically triggered by media-readiness in Electron Main.
+   */
+  triggerPhaseBUpload(sessionId, finalImagePath, finalVideoPath) {
+    if (!sessionId) return Promise.resolve(null);
+    if (this.inFlightPhaseB.has(sessionId)) {
+      return this.inFlightPhaseB.get(sessionId);
+    }
+
+    const task = this.executePhaseBUpload(sessionId, finalImagePath, finalVideoPath).finally(() => {
+      this.inFlightPhaseB.delete(sessionId);
+    });
+
+    this.inFlightPhaseB.set(sessionId, task);
+    return task;
+  }
+
+  async executePhaseBUpload(sessionId, finalImagePath, finalVideoPath) {
+    const state = this.sessions.get(sessionId) || this.initSession(sessionId);
+    const publicToken = state.publicToken;
+
+    if (state.phaseBStatus === 'COMPLETED' && state.status === 'READY') {
+      return { ok: true, state };
+    }
+
+    state.phaseBStatus = 'UPLOADING';
+    state.status = 'UPLOADING_FINAL';
+    state.updatedAt = new Date().toISOString();
+    this.persistLocalState(state);
+    void this.syncFirestoreDoc(state);
+
+    this.logStructured('info', 'CLOUD_UPLOAD_BEGIN', `Phase B final outputs upload started for session ${sessionId}`, {
+      sessionId,
+      publicToken,
+      type: 'PHASE_B_FINAL_OUTPUTS',
+    });
+
+    const startTime = Date.now();
+    let finalImageUploaded = false;
+    let finalVideoUploaded = false;
+    const errors = [];
+
+    const resolvedImagePath = finalImagePath || (this.sessionMediaPaths ? this.sessionMediaPaths.finalImage(sessionId) : null);
+    const resolvedVideoPath = finalVideoPath || (this.sessionMediaPaths ? this.sessionMediaPaths.finalVideo(sessionId) : null);
+
+    // 1. Upload Final Image
+    if (resolvedImagePath && fs.existsSync(resolvedImagePath)) {
+      const remoteImagePath = `sessions/${publicToken}/outputs/final-image.jpg`;
+      try {
+        const imgRes = await this.uploadFileWithRetry(resolvedImagePath, remoteImagePath, 'image/jpeg');
+        finalImageUploaded = true;
+        state.finalImage = {
+          name: 'final-image.jpg',
+          remotePath: remoteImagePath,
+          url: imgRes.downloadUrl,
+          width: 1800,
+          height: 2700,
+          size: imgRes.size,
+        };
+      } catch (err) {
+        errors.push(`Final Image: ${err.message}`);
+      }
+    } else {
+      errors.push('Final image file does not exist on disk.');
+    }
+
+    // 2. Upload Final Video
+    if (resolvedVideoPath && fs.existsSync(resolvedVideoPath)) {
+      const remoteVideoPath = `sessions/${publicToken}/outputs/final-video.mp4`;
+      try {
+        const vidRes = await this.uploadFileWithRetry(resolvedVideoPath, remoteVideoPath, 'video/mp4');
+        finalVideoUploaded = true;
+        state.finalVideo = {
+          name: 'final-video.mp4',
+          remotePath: remoteVideoPath,
+          url: vidRes.downloadUrl,
+          duration: 4.0,
+          width: 1800,
+          height: 2700,
+          size: vidRes.size,
+        };
+      } catch (err) {
+        errors.push(`Final Video: ${err.message}`);
+      }
+    } else {
+      errors.push('Final video file does not exist on disk.');
+    }
+
+    const elapsedMs = Date.now() - startTime;
+
+    // Strict invariant: READY requires BOTH final image and final video uploads to have succeeded!
+    if (finalImageUploaded && finalVideoUploaded && errors.length === 0) {
+      state.phaseBStatus = 'COMPLETED';
+      state.status = 'READY';
+      state.updatedAt = new Date().toISOString();
+      this.persistLocalState(state);
+      void this.syncFirestoreDoc(state);
+
+      this.logStructured('info', 'CLOUD_FINAL_READY', `Session ${sessionId} is now READY on Cloud`, {
+        sessionId,
+        publicToken,
+        landingUrl: state.landingUrl,
+        finalImageUrl: state.finalImage?.url,
+        finalVideoUrl: state.finalVideo?.url,
+        elapsedMs,
+      });
+
+      return { ok: true, state };
+    } else {
+      // Degraded / Partial state - NEVER mark READY if video or image failed
+      state.phaseBStatus = finalImageUploaded ? 'PARTIAL' : 'FAILED';
+      state.status = finalImageUploaded ? 'PARTIAL' : 'UPLOAD_FAILED';
+      state.lastError = errors.join('; ');
+      state.updatedAt = new Date().toISOString();
+      this.persistLocalState(state);
+      void this.syncFirestoreDoc(state);
+
+      this.logStructured('warn', 'CLOUD_UPLOAD_FAILED', `Phase B upload incomplete for session ${sessionId}: ${errors.join('; ')}`, {
+        sessionId,
+        publicToken,
+        status: state.status,
+        finalImageUploaded,
+        finalVideoUploaded,
+        errors,
+        elapsedMs,
+      });
+
+      return { ok: false, state, errors };
+    }
+  }
+
+  /**
+   * Uploads a file with bounded exponential backoff (up to 3 attempts: 0s, 1s, 2s).
+   */
+  async uploadFileWithRetry(localFilePath, remotePath, mimeType, maxAttempts = 3) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const result = await this.uploadToFirebaseStorage(localFilePath, remotePath, mimeType);
+        return result;
+      } catch (err) {
+        lastError = err;
+        this.logStructured('warn', 'CLOUD_UPLOAD_RETRY', `Upload retry attempt ${attempt}/${maxAttempts} for ${remotePath}: ${err.message}`, {
+          remotePath,
+          attempt,
+          error: err.message,
+        });
+        if (attempt < maxAttempts) {
+          const delayMs = attempt * 1000;
+          await new Promise((res) => setTimeout(res, delayMs));
+        }
+      }
+    }
+    throw lastError || new Error(`Upload failed after ${maxAttempts} attempts`);
+  }
+
+  /**
+   * Low-level Firebase Storage upload using standard HTTP/HTTPS API.
+   * If credentials / bucket not configured, returns deterministic mock cloud URL for offline/test dev.
+   */
+  async uploadToFirebaseStorage(localFilePath, remotePath, mimeType) {
+    const stat = fs.statSync(localFilePath);
+    if (!stat.size) {
+      throw new Error(`File is empty (0 bytes): ${localFilePath}`);
+    }
+
+    if (!this.storageBucket) {
+      // Mock / Offline mode fallback
+      const mockDownloadUrl = `https://firebasestorage.googleapis.com/v0/b/mock-bucket/o/${encodeURIComponent(remotePath)}?alt=media`;
+      return {
+        remotePath,
+        downloadUrl: mockDownloadUrl,
+        size: stat.size,
+        mock: true,
+      };
+    }
+
+    const bucketName = this.storageBucket.replace(/^gs:\/\//, '');
+    const encodedPath = encodeURIComponent(remotePath);
+    const uploadUrl = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o?uploadType=media&name=${encodedPath}`;
+
+    return new Promise((resolve, reject) => {
+      const fileBuffer = fs.readFileSync(localFilePath);
+      const urlObj = new URL(uploadUrl);
+
+      const options = {
+        hostname: urlObj.hostname,
+        port: 443,
+        path: urlObj.pathname + urlObj.search,
+        method: 'POST',
+        headers: {
+          'Content-Type': mimeType,
+          'Content-Length': fileBuffer.length,
+        },
+      };
+
+      const req = https.request(options, (res) => {
+        let responseBody = '';
+        res.on('data', (chunk) => {
+          responseBody += chunk;
+        });
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            let parsed = {};
+            try {
+              parsed = JSON.parse(responseBody);
+            } catch {}
+            const downloadToken = parsed.downloadTokens || '';
+            const downloadUrl = downloadToken
+              ? `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media&token=${downloadToken}`
+              : `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media`;
+
+            resolve({
+              remotePath,
+              downloadUrl,
+              size: stat.size,
+              token: downloadToken,
+            });
+          } else {
+            reject(new Error(`Firebase Storage error HTTP ${res.statusCode}: ${responseBody.slice(0, 300)}`));
+          }
+        });
+      });
+
+      req.on('error', (err) => reject(err));
+      req.setTimeout(30000, () => {
+        req.destroy();
+        reject(new Error('Firebase Storage upload request timed out after 30s'));
+      });
+
+      req.write(fileBuffer);
+      req.end();
+    });
+  }
+
+  /**
+   * Synchronizes the session metadata document to Firestore `sessions/{publicToken}`.
+   * Sanitizes internal localSessionId from public fields.
+   */
+  async syncFirestoreDoc(state) {
+    if (!this.projectId) {
+      return; // Offline / dev mode without project ID
+    }
+
+    try {
+      const publicToken = state.publicToken;
+      const docPath = `https://firestore.googleapis.com/v1/projects/${this.projectId}/databases/(default)/documents/sessions/${publicToken}`;
+
+      // Convert session state into Firestore Document Fields format
+      const fields = {
+        publicToken: { stringValue: publicToken },
+        status: { stringValue: state.status || 'CREATED' },
+        productType: { stringValue: state.productType || 'classic_4_shot' },
+        requiredShots: { integerValue: String(state.requiredShots || 4) },
+        createdAt: { stringValue: state.createdAt },
+        updatedAt: { stringValue: state.updatedAt },
+        boothName: { stringValue: 'TIỆM ẢNH DI SẢN • MOMENTAI' },
+      };
+
+      if (state.finalImage?.url) {
+        fields.finalImage = {
+          mapValue: {
+            fields: {
+              url: { stringValue: state.finalImage.url },
+              name: { stringValue: state.finalImage.name || 'final-image.jpg' },
+              width: { integerValue: String(state.finalImage.width || 1800) },
+              height: { integerValue: String(state.finalImage.height || 2700) },
+            },
+          },
+        };
+      }
+
+      if (state.finalVideo?.url) {
+        fields.finalVideo = {
+          mapValue: {
+            fields: {
+              url: { stringValue: state.finalVideo.url },
+              name: { stringValue: state.finalVideo.name || 'final-video.mp4' },
+              duration: { doubleValue: state.finalVideo.duration || 4.0 },
+              width: { integerValue: String(state.finalVideo.width || 1800) },
+              height: { integerValue: String(state.finalVideo.height || 2700) },
+            },
+          },
+        };
+      }
+
+      if (Array.isArray(state.photos) && state.photos.length > 0) {
+        fields.rawPhotos = {
+          arrayValue: {
+            values: state.photos.map((p) => ({
+              mapValue: {
+                fields: {
+                  shotIndex: { integerValue: String(p.shotIndex) },
+                  url: { stringValue: p.url || '' },
+                  name: { stringValue: p.filename || `shot_${p.shotIndex}.jpg` },
+                },
+              },
+            })),
+          },
+        };
+      }
+
+      const body = JSON.stringify({ fields });
+      const urlObj = new URL(docPath);
+
+      const options = {
+        hostname: urlObj.hostname,
+        port: 443,
+        path: urlObj.pathname + (this.apiKey ? `?key=${this.apiKey}` : ''),
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+        },
+      };
+
+      await new Promise((resolve) => {
+        const req = https.request(options, (res) => {
+          res.on('data', () => {});
+          res.on('end', () => resolve());
+        });
+        req.on('error', (err) => {
+          console.warn('[CloudSyncCoordinator] Firestore sync error:', err.message);
+          resolve(); // Non-blocking: resolve anyway
+        });
+        req.setTimeout(10000, () => {
+          req.destroy();
+          resolve();
+        });
+        req.write(body);
+        req.end();
+      });
+    } catch (err) {
+      console.warn('[CloudSyncCoordinator] Firestore update error:', err.message);
+    }
+  }
+
+  persistLocalState(state) {
+    if (!this.db) return;
+    try {
+      this.db.prepare(`
+        INSERT INTO cloud_sync_sessions (
+          session_id, public_token, status, phase_a_status, phase_b_status,
+          photos_uploaded, clips_uploaded, final_image_uploaded, final_video_uploaded,
+          last_error, payload_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+          status = excluded.status,
+          phase_a_status = excluded.phase_a_status,
+          phase_b_status = excluded.phase_b_status,
+          photos_uploaded = excluded.photos_uploaded,
+          clips_uploaded = excluded.clips_uploaded,
+          final_image_uploaded = excluded.final_image_uploaded,
+          final_video_uploaded = excluded.final_video_uploaded,
+          last_error = excluded.last_error,
+          payload_json = excluded.payload_json,
+          updated_at = excluded.updated_at
+      `).run(
+        state.sessionId,
+        state.publicToken,
+        state.status,
+        state.phaseAStatus || 'IDLE',
+        state.phaseBStatus || 'IDLE',
+        state.photos?.length || 0,
+        state.clips?.length || 0,
+        state.finalImage ? 1 : 0,
+        state.finalVideo ? 1 : 0,
+        state.lastError || null,
+        JSON.stringify(state),
+        state.createdAt,
+        state.updatedAt
+      );
+    } catch (err) {
+      console.warn('[CloudSyncCoordinator] SQLite state save error:', err.message);
+    }
+  }
+
+  logStructured(level, event, message, details = {}) {
+    this.writeSystemLog(level, event, message, details);
+  }
+}
+
+const cloudSyncCoordinator = new CloudSyncCoordinator();
+
+module.exports = {
+  CloudSyncCoordinator,
+  cloudSyncCoordinator,
+};

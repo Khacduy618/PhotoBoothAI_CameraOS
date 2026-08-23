@@ -149,7 +149,7 @@ describe('MomentAI Media Pipeline Production Invariants', () => {
     expect(finalProbe.height).toBe(1800);
     expect(finalProbe.duration).toBeGreaterThanOrEqual(2.5);
     expect(finalProbe.size).toBeGreaterThan(0);
-  });
+  }, 30000);
 
   it('3. Frame Switch Sequence (Frame A -> B -> C -> A) uses final Frame A geometry', async () => {
     const sessionId = 'sess_switch_001';

@@ -28,6 +28,7 @@ import { VideoEncoderService, videoEncoderService } from './video-encoder.servic
 interface ActiveShotState {
   shotIndex: number;
   status: ShotClipStatus;
+  recordingActive?: boolean;
   startedAt: string;
   shutterAt?: string;
   completedAt?: string;
@@ -94,6 +95,7 @@ export class ShotClipRecorderService {
     const shotState: ActiveShotState = {
       shotIndex,
       status: 'recording',
+      recordingActive: true,
       startedAt,
       frames: [],
       provider,
@@ -125,7 +127,7 @@ export class ShotClipRecorderService {
 
     // Find currently recording shot
     for (const shotState of sessionMap.values()) {
-      if (shotState.status === 'recording') {
+      if (shotState.status === 'recording' && shotState.recordingActive !== false) {
         let buffer: Buffer | null = null;
         if (frame.data && Buffer.isBuffer(frame.data)) {
           buffer = frame.data;
@@ -161,7 +163,7 @@ export class ShotClipRecorderService {
     const sessionMap = this.sessionClips.get(sessionId);
     if (!sessionMap) return;
     const shotState = sessionMap.get(shotIndex);
-    if (shotState && shotState.status === 'recording') {
+    if (shotState && shotState.status === 'recording' && shotState.recordingActive !== false) {
       shotState.frames.push({
         data: frameBuffer,
         timestamp: Date.now(),
@@ -185,6 +187,7 @@ export class ShotClipRecorderService {
     if (!shotState) return null;
 
     shotState.shutterAt = shutterAt || new Date().toISOString();
+    shotState.recordingActive = false; // Stop accepting frames into the clip at T-0
     if (shotState.metadata) {
       shotState.metadata.shutterAt = shotState.shutterAt;
     }

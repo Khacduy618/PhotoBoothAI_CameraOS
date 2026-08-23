@@ -6,6 +6,7 @@ const { CanonRuntimeClient } = require('../../camera-runtime/canon-runtime-clien
 const { STATES } = require('../../camera-runtime/protocol.cjs');
 const { desktopMediaManager } = require('./media/desktop-media-manager.cjs');
 const { SessionMediaPaths } = require('./storage/session-media-paths.cjs');
+const { cloudSyncCoordinator } = require('./cloud/cloud-sync-coordinator.cjs');
 
 const canonRuntime = new CanonRuntimeClient();
 let sessionMediaPaths = null;
@@ -1146,6 +1147,7 @@ function registerSkeletonIpc() {
     const stored = saveStorageFile(safeSessionId, relativePath, `output_${safeSessionId}_${outputType}`, { ...file, mimeType }, outputType, true);
 
     writeSessionManifestAndMetadata(safeSessionId);
+    cloudSyncCoordinator.onOutputSaved(safeSessionId, outputType, relativePath);
 
     return stored;
   }));
@@ -1318,7 +1320,12 @@ function registerSkeletonIpc() {
 
     if (canonRuntime.state === 'READY' || canonRuntime.state === 'LIVEVIEW' || canonRuntime.state === 'STARTING_LIVEVIEW') {
       try {
+        const afStart = new Date().toISOString();
         const res = await canonRuntime.autoFocus({ sessionId, shotIndex, correlationId, timeoutMs: 1500 });
+        const afEnd = new Date().toISOString();
+        if (desktopMediaManager) {
+          desktopMediaManager.markAutofocus(sessionId, shotIndex - 1, afStart, afEnd);
+        }
         return { ok: res?.ok ?? true, provider: 'canon', status: 'focused', correlationId, ...res };
       } catch (err) {
         console.warn('[Main] Canon autoFocus error:', err.message);
@@ -1519,6 +1526,29 @@ function registerSkeletonIpc() {
     checkAndCompleteSession(session.sessionId);
     return ok(updated);
   }));
+
+  // Cloud Synchronization IPC
+  ipcMain.handle('cameraos:cloud:session:init', (_event, sessionId, metadata) => safeGuest(() => {
+    const safeId = assertStorageId(sessionId, 'session id');
+    return cloudSyncCoordinator.initSession(safeId, metadata);
+  }));
+  ipcMain.handle('cameraos:cloud:session:get-token', (_event, sessionId) => safeGuest(() => {
+    const safeId = assertStorageId(sessionId, 'session id');
+    return {
+      publicToken: cloudSyncCoordinator.getPublicToken(safeId),
+      landingUrl: cloudSyncCoordinator.getLandingUrl(safeId),
+    };
+  }));
+  ipcMain.handle('cameraos:cloud:upload:phase-a', (_event, sessionId) => safeGuest(() => {
+    const safeId = assertStorageId(sessionId, 'session id');
+    void cloudSyncCoordinator.triggerPhaseAUpload(safeId);
+    return { ok: true, triggered: true };
+  }));
+  ipcMain.handle('cameraos:cloud:session:get-status', (_event, sessionId) => safeGuest(() => {
+    const safeId = assertStorageId(sessionId, 'session id');
+    const state = cloudSyncCoordinator.sessions.get(safeId);
+    return state || null;
+  }));
 }
 
 let lastFrameBroadcast = 0;
@@ -1620,6 +1650,7 @@ app.whenReady().then(async () => {
   registerSkeletonIpc();
   printQueue.init();
   ensureStorageDb();
+  cloudSyncCoordinator.init(storageDb, sessionMediaPaths);
   desktopMediaManager.init(storageDb);
   desktopMediaManager.onJobCompleted((job) => {
     const session = sessions.get(job.sessionId);
@@ -1629,6 +1660,7 @@ app.whenReady().then(async () => {
     }
     writeSessionManifestAndMetadata(job.sessionId);
     checkAndCompleteSession(job.sessionId);
+    cloudSyncCoordinator.onJobCompleted(job);
   });
   initSessionCleanupScheduler();
   createWindow('guest');

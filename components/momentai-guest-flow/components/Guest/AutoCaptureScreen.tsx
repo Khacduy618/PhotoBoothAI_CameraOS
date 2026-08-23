@@ -37,7 +37,7 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
   onCaptureCompleted,
 }) => {
   const [currentShot, setCurrentShot] = useState<number>(0);
-  const [countdown, setCountdown] = useState<number>(captureConfig.countdownSeconds || 3);
+  const [countdown, setCountdown] = useState<number>(captureConfig.countdownSeconds || 8);
   const [captureStep, setCaptureStep] = useState<CaptureStep>('ready');
   const [isFlashing, setIsFlashing] = useState<boolean>(false);
   const [capturedPool, setCapturedPool] = useState<PhotoItem[]>([]);
@@ -172,15 +172,31 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
           }
         }
 
-        for (let value = captureConfig.countdownSeconds || 3; value > 0; value -= 1) {
-          setCountdown(value);
-          if (value === (captureConfig.countdownSeconds || 3)) {
-            // Trigger autofocus once at approximately T-3s before physical shot
-            void cameraService.autofocus(session.sessionId, shot + 1);
+        const countdownSec = captureConfig.countdownSeconds || 8;
+        const totalDurationMs = countdownSec * 1000;
+        const countdownStartMs = Date.now();
+        const targetCaptureMs = countdownStartMs + totalDurationMs;
+
+        let lastBeepSec = -1;
+
+        while (Date.now() < targetCaptureMs) {
+          const now = Date.now();
+          const remainingMs = Math.max(0, targetCaptureMs - now);
+          const currentDisplaySec = Math.max(1, Math.ceil(remainingMs / 1000));
+
+          setCountdown(currentDisplaySec);
+
+          if (currentDisplaySec !== lastBeepSec) {
+            lastBeepSec = currentDisplaySec;
+            const beepPitch = currentDisplaySec <= 3 ? 1000 + (3 - currentDisplaySec) * 150 : 800;
+            cameraService.playBeepSound(beepPitch, 120);
           }
-          cameraService.playBeepSound(800 + (4 - value) * 100, 120);
-          await wait(1000);
+
+          const sleepMs = Math.min(50, Math.max(10, remainingMs));
+          await wait(sleepMs);
         }
+
+        setCountdown(0);
 
         // 2. SHUTTER_TRIGGERED(shot) -> Mark shutter timestamp (recording continues)
         setCaptureStep('capturing');
@@ -354,16 +370,27 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
           )}
 
           {captureStep === 'countdown' && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center pointer-events-none gap-4">
               <motion.div
                 key={countdown}
                 initial={{ scale: 1.25, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ duration: 0.2 }}
-                className="flex h-44 w-44 items-center justify-center rounded-full border-4 border-white/90 bg-black/40 font-serif text-8xl font-black text-white shadow-[0_0_80px_rgba(0,0,0,0.5)]"
+                className={`flex h-44 w-44 items-center justify-center rounded-full border-4 ${
+                  countdown <= 1 ? 'border-amber-400 bg-amber-950/70 text-amber-300 ring-4 ring-amber-400/50' : 'border-white/90 bg-black/40 text-white'
+                } font-serif text-8xl font-black shadow-[0_0_80px_rgba(0,0,0,0.5)]`}
               >
                 {countdown}
               </motion.div>
+              {countdown <= 1 && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="bg-amber-400 text-black px-6 py-2 rounded-full font-mono text-sm font-black uppercase tracking-widest shadow-2xl animate-pulse"
+                >
+                  GIỮ NGUYÊN DÁNG — CHUẨN BỊ CHỤP!
+                </motion.div>
+              )}
             </div>
           )}
 

@@ -42,6 +42,12 @@ export interface WindowMiniGuestApi {
     getPackage(sessionId: string, origin?: string): Promise<unknown>;
     getPublicToken(sessionId: string): Promise<unknown>;
   };
+  cloud: {
+    initSession(sessionId: string, metadata?: unknown): Promise<unknown>;
+    getPublicToken(sessionId: string): Promise<unknown>;
+    triggerPhaseAUpload(sessionId: string): Promise<unknown>;
+    getStatus(sessionId: string): Promise<unknown>;
+  };
 }
 
 export function createGuestApiPlaceholder(): WindowMiniGuestApi {
@@ -75,6 +81,12 @@ export function createGuestApiPlaceholder(): WindowMiniGuestApi {
       composeVideo: unavailable,
       getPackage: unavailable,
       getPublicToken: unavailable,
+    },
+    cloud: {
+      initSession: unavailable,
+      getPublicToken: unavailable,
+      triggerPhaseAUpload: unavailable,
+      getStatus: unavailable,
     },
   };
 }

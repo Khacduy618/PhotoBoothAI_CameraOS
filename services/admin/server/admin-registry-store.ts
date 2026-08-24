@@ -238,7 +238,16 @@ export function createAdminEvent(name: string): AdminEventRecord {
 
 function validateFrameDefinition(definition: FrameDefinition): void {
     if (!definition.id || !definition.name || definition.kind !== "png-overlay") throw new Error("Frame definition is invalid.");
-    if (definition.assetUrl && !definition.assetUrl.startsWith("data:image/png") && !definition.assetUrl.startsWith("/api/local-media/")) {
+    if (
+        definition.assetUrl &&
+        !definition.assetUrl.startsWith("data:image/") &&
+        !definition.assetUrl.startsWith("blob:") &&
+        !definition.assetUrl.startsWith("/api/local-media/") &&
+        !definition.assetUrl.startsWith("/frames/") &&
+        !definition.assetUrl.startsWith("/backgrounds/") &&
+        !definition.assetUrl.startsWith("/") &&
+        !definition.assetUrl.startsWith("./")
+    ) {
         throw new Error("Frame asset URL is not allowed.");
     }
     if (!Number.isFinite(definition.outputWidth) || definition.outputWidth <= 0) throw new Error("Frame width is invalid.");

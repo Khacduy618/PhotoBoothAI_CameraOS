@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <queue>
 #include <map>
 #include <thread>
 #include <mutex>
@@ -42,7 +43,7 @@ typedef EdsBaseRef EdsCameraListRef;
 typedef EdsBaseRef EdsCameraRef;
 typedef EdsBaseRef EdsEvfImageRef;
 typedef EdsBaseRef EdsStreamRef;
-typedef EdsBaseRef EdsDirectoryItemRef;
+typedef EdsDirectoryItemRef;
 typedef unsigned int EdsUInt32;
 typedef unsigned long long EdsUInt64;
 typedef int EdsInt32;
@@ -123,22 +124,22 @@ typedef struct {
 #define kEdsAccess_ReadWrite                          2
 
 // ============================================================
-// 3. EDSDK Function Pointer Types
+// 3. EDSDK Function Pointer Types (Exact EDSDK 3.x+ Signatures)
 // ============================================================
 
 typedef EdsError (EDSAPI *FnEdsInitializeSDK)(void);
 typedef EdsError (EDSAPI *FnEdsTerminateSDK)(void);
 typedef EdsError (EDSAPI *FnEdsGetCameraList)(EdsCameraListRef *outCameraListRef);
 typedef EdsError (EDSAPI *FnEdsGetChildCount)(EdsBaseRef inRef, EdsUInt32 *outCount);
-typedef EdsError (EDSAPI *FnEdsGetChildAtIndex)(EdsBaseRef inRef, EdsUInt32 inIndex, EdsBaseRef *outBaseRef);
+typedef EdsError (EDSAPI *FnEdsGetChildAtIndex)(EdsBaseRef inRef, EdsInt32 inIndex, EdsBaseRef *outBaseRef);
 typedef EdsError (EDSAPI *FnEdsGetDeviceInfo)(EdsCameraRef inCameraRef, EdsDeviceInfo *outDeviceInfo);
-typedef EdsError (EDSAPI *FnEdsGetPropertyData)(EdsBaseRef inRef, EdsPropertyID inPropertyID, EdsUInt32 inParam, EdsUInt32 inSize, void *outData);
+typedef EdsError (EDSAPI *FnEdsGetPropertyData)(EdsBaseRef inRef, EdsPropertyID inPropertyID, EdsInt32 inParam, EdsUInt32 inSize, void *outData);
 typedef EdsError (EDSAPI *FnEdsOpenSession)(EdsCameraRef inCameraRef);
 typedef EdsError (EDSAPI *FnEdsCloseSession)(EdsCameraRef inCameraRef);
-typedef EdsError (EDSAPI *FnEdsSendCommand)(EdsCameraRef inCameraRef, EdsCameraCommand inCommand, EdsUInt32 inParam);
-typedef EdsError (EDSAPI *FnEdsSetPropertyData)(EdsBaseRef inRef, EdsPropertyID inPropertyID, EdsUInt32 inParam, EdsUInt32 inSize, const void *inData);
+typedef EdsError (EDSAPI *FnEdsSendCommand)(EdsCameraRef inCameraRef, EdsCameraCommand inCommand, EdsInt32 inParam);
+typedef EdsError (EDSAPI *FnEdsSetPropertyData)(EdsBaseRef inRef, EdsPropertyID inPropertyID, EdsInt32 inParam, EdsUInt32 inSize, const void *inData);
 typedef EdsError (EDSAPI *FnEdsSetCapacity)(EdsCameraRef inCameraRef, EdsCapacity inCapacity);
-typedef EdsError (EDSAPI *FnEdsCreateMemoryStream)(EdsUInt32 inBufferSize, EdsStreamRef *outStreamRef);
+typedef EdsError (EDSAPI *FnEdsCreateMemoryStream)(EdsUInt64 inBufferSize, EdsStreamRef *outStreamRef);
 typedef EdsError (EDSAPI *FnEdsCreateFileStream)(const char *inFileName, EdsUInt32 inCreateDisposition, EdsUInt32 inDesiredAccess, EdsStreamRef *outStreamRef);
 typedef EdsError (EDSAPI *FnEdsCreateEvfImageRef)(EdsStreamRef inStreamRef, EdsEvfImageRef *outEvfImageRef);
 typedef EdsError (EDSAPI *FnEdsDownloadEvfImage)(EdsCameraRef inCameraRef, EdsEvfImageRef inEvfImageRef);
@@ -177,7 +178,7 @@ static FnEdsRelease pEdsRelease = nullptr;
 static FnEdsRetain pEdsRetain = nullptr;
 
 // ============================================================
-// 4. Global State
+// 4. Global State & Command Queue
 // ============================================================
 
 static HMODULE g_edsdkHandle = nullptr;
@@ -199,6 +200,22 @@ static int g_downloadedHeight = 0;
 
 static std::mutex g_ioMutex;
 static std::atomic<int> g_resourcesReleased{0};
+
+static std::queue<std::string> g_commandQueue;
+static std::mutex g_queueMutex;
+
+static void pushCommand(const std::string& line) {
+    std::lock_guard<std::mutex> lock(g_queueMutex);
+    g_commandQueue.push(line);
+}
+
+static bool popCommand(std::string& outLine) {
+    std::lock_guard<std::mutex> lock(g_queueMutex);
+    if (g_commandQueue.empty()) return false;
+    outLine = g_commandQueue.front();
+    g_commandQueue.pop();
+    return true;
+}
 
 // ============================================================
 // 5. High-Precision Timing & Utilities
@@ -526,7 +543,7 @@ static EdsError EDSCALLBACK handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef
 }
 
 // ============================================================
-// 9. Command Dispatcher
+// 9. Command Dispatcher (Single SDK Thread Execution)
 // ============================================================
 
 static void processCommandJson(const std::string& line) {
@@ -897,12 +914,12 @@ static BOOL WINAPI consoleCtrlHandler(DWORD ctrlType) {
 int main(int argc, char* argv[]) {
     SetConsoleCtrlHandler(consoleCtrlHandler, TRUE);
 
-    // Spawn stdin reader thread
+    // Spawn stdin reader thread (only pushes to synchronized queue)
     std::thread stdinThread([]() {
         std::string line;
         while (g_running && std::getline(std::cin, line)) {
             if (line.empty()) continue;
-            processCommandJson(line);
+            pushCommand(line);
         }
         g_running = 0;
     });
@@ -912,9 +929,18 @@ int main(int argc, char* argv[]) {
     uint64_t frameSeq = 0;
 
     while (g_running) {
+        // 1. Process all pending commands sequentially on the main SDK thread
+        std::string cmdLine;
+        while (popCommand(cmdLine)) {
+            processCommandJson(cmdLine);
+        }
+
+        if (!g_running) break;
+
+        // 2. Perform EVF LiveView frame download if active
         if (g_liveViewActive && g_sessionOpen && g_camera) {
             EdsStreamRef evfStream = nullptr;
-            EdsError err = pEdsCreateMemoryStream ? pEdsCreateMemoryStream(0, &evfStream) : 0xFFFFFFFF;
+            EdsError err = pEdsCreateMemoryStream ? pEdsCreateMemoryStream(0ULL, &evfStream) : 0xFFFFFFFF;
             if (err == EDS_ERR_OK && evfStream) {
                 EdsEvfImageRef evfImage = nullptr;
                 err = pEdsCreateEvfImageRef ? pEdsCreateEvfImageRef(evfStream, &evfImage) : 0xFFFFFFFF;
@@ -954,14 +980,13 @@ int main(int argc, char* argv[]) {
             }
             Sleep(10);
         } else {
-            Sleep(20);
+            Sleep(15);
         }
     }
 
     releaseAllCanonResources();
 
     if (stdinThread.joinable()) {
-        // Detach if stdin reader is blocked on getline
         stdinThread.detach();
     }
 

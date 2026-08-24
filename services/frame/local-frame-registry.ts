@@ -47,9 +47,12 @@ function isValidFrameDefinition(definition: FrameDefinition): boolean {
     if (
         definition.assetUrl &&
         !definition.assetUrl.startsWith("data:image/") &&
+        !definition.assetUrl.startsWith("blob:") &&
         !definition.assetUrl.startsWith("/api/local-media/") &&
         !definition.assetUrl.startsWith("/frames/") &&
+        !definition.assetUrl.startsWith("/backgrounds/") &&
         !definition.assetUrl.startsWith("/") &&
+        !definition.assetUrl.startsWith("./") &&
         !definition.assetUrl.startsWith("http://") &&
         !definition.assetUrl.startsWith("https://")
     ) return false;

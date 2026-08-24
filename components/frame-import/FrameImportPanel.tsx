@@ -351,16 +351,26 @@ export function FrameImportPanel() {
 
     const handleDeleteFrame = async (frame: AdminFrameDefinition) => {
         if (!window.confirm(`Bạn có muốn xoá khung "${frame.name}" khỏi SQLite Registry?`)) return;
+        const bridge = getAdminBridge();
+        if (bridge?.templates?.remove) {
+            await bridge.templates.remove(selectedEventId, frame.id).catch(() => undefined);
+            LocalFrameRegistry.removeFrame(frame.id);
+            LocalFrameRegistry.notifyExternalChange();
+            await refreshAdminRegistry(selectedEventId);
+            return;
+        }
+        if (isElectronAdminRequired()) {
+            LocalFrameRegistry.removeFrame(frame.id);
+            LocalFrameRegistry.notifyExternalChange();
+            await refreshAdminRegistry(selectedEventId);
+            return;
+        }
         try {
-            const bridge = getAdminBridge();
-            if (bridge?.templates?.remove) {
-                await bridge.templates.remove(selectedEventId, frame.id).catch(() => undefined);
-            }
             await fetch(`/api/admin/frames?eventId=${encodeURIComponent(selectedEventId)}&frameId=${encodeURIComponent(frame.id)}`, {
                 method: "DELETE",
             });
         } catch (err) {
-            console.warn("Error deleting frame:", err);
+            console.warn("Error deleting frame via web API:", err);
         }
         LocalFrameRegistry.removeFrame(frame.id);
         LocalFrameRegistry.notifyExternalChange();
@@ -369,16 +379,26 @@ export function FrameImportPanel() {
 
     const handleClearSelectedEventFrames = async () => {
         if (!window.confirm("Bạn có chắc chắn muốn xoá TOÀN BỘ khung trong event đang chọn khỏi SQLite Registry?")) return;
+        const bridge = getAdminBridge();
+        if (bridge?.templates?.clear) {
+            await bridge.templates.clear(selectedEventId).catch(() => undefined);
+            LocalFrameRegistry.clear();
+            LocalFrameRegistry.notifyExternalChange();
+            await refreshAdminRegistry(selectedEventId);
+            return;
+        }
+        if (isElectronAdminRequired()) {
+            LocalFrameRegistry.clear();
+            LocalFrameRegistry.notifyExternalChange();
+            await refreshAdminRegistry(selectedEventId);
+            return;
+        }
         try {
-            const bridge = getAdminBridge();
-            if (bridge?.templates?.clear) {
-                await bridge.templates.clear(selectedEventId).catch(() => undefined);
-            }
             await fetch(`/api/admin/frames?eventId=${encodeURIComponent(selectedEventId)}`, {
                 method: "DELETE",
             });
         } catch (err) {
-            console.warn("Error clearing frames:", err);
+            console.warn("Error clearing frames via web API:", err);
         }
         LocalFrameRegistry.clear();
         LocalFrameRegistry.notifyExternalChange();

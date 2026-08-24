@@ -47,11 +47,17 @@ class CanonCameraBridgeManager extends EventEmitter {
   checkContention() {
     try {
       const { execSync } = require('child_process');
-      const stdout = execSync('ps -eo comm', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
-      const lines = stdout.split('\n');
-      for (const line of lines) {
-        if (line.includes('EOS Utility') || line.includes('PTPCamera') || line.includes('ptpcamerad') || line.includes('Photos')) {
-          return true;
+      if (process.platform === 'win32') {
+        const stdout = execSync('tasklist /NH', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'], timeout: 2000 });
+        const lower = stdout.toLowerCase();
+        return lower.includes('eos utility') || lower.includes('eosupnpsv');
+      } else {
+        const stdout = execSync('ps -eo comm', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'], timeout: 2000 });
+        const lines = stdout.split('\n');
+        for (const line of lines) {
+          if (line.includes('EOS Utility') || line.includes('PTPCamera') || line.includes('ptpcamerad') || line.includes('Photos')) {
+            return true;
+          }
         }
       }
     } catch (e) {

@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, screen } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const url = require('node:url');
 const Database = require('better-sqlite3');
 const { CanonRuntimeClient } = require('../../camera-runtime/canon-runtime-client.cjs');
 const { STATES } = require('../../camera-runtime/protocol.cjs');
@@ -116,10 +117,7 @@ function createWindow(mode = 'guest') {
 
   const target = isDev
     ? `${rendererUrl}/#/${mode}`
-    : `file://${path.join(
-      __dirname,
-      '../../renderer/dist/index.html'
-    )}#/${mode}`;
+    : `${url.pathToFileURL(path.join(__dirname, '../../renderer/dist/index.html')).toString()}#/${mode}`;
 
   void win.loadURL(target);
 

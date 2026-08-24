@@ -719,7 +719,11 @@ static void processCommandJson(const std::string& line) {
             sendJsonLine("{\"event\":\"error\",\"code\":\"SESSION_NOT_OPEN\"}");
             return;
         }
-        EdsUInt32 evfDevice = kEdsEvfOutputDevice_PC;
+        EdsUInt32 evfDevice = 0;
+        if (pEdsGetPropertyData) {
+            pEdsGetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfDevice), &evfDevice);
+        }
+        evfDevice |= kEdsEvfOutputDevice_PC;
         EdsError err = pEdsSetPropertyData ? pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfDevice), &evfDevice) : 0xFFFFFFFF;
         if (err == EDS_ERR_OK) {
             g_liveViewActive = 1;
@@ -730,6 +734,10 @@ static void processCommandJson(const std::string& line) {
     } else if (action == "stopLiveView") {
         if (g_camera && pEdsSetPropertyData) {
             EdsUInt32 evfDevice = 0;
+            if (pEdsGetPropertyData) {
+                pEdsGetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfDevice), &evfDevice);
+            }
+            evfDevice &= ~kEdsEvfOutputDevice_PC;
             pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfDevice), &evfDevice);
             g_liveViewActive = 0;
             sendJsonLine("{\"event\":\"liveViewStopped\",\"status\":\"ok\"}");

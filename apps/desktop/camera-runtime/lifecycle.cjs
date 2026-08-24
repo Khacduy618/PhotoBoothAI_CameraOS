@@ -9,9 +9,10 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 
 function resolveBridgeBinary() {
-  if (process.env.CANON_BRIDGE_PATH && fs.existsSync(process.env.CANON_BRIDGE_PATH)) {
+  const envBridge = process.env.MOMENTAI_CANON_BRIDGE_PATH || process.env.CANON_BRIDGE_PATH;
+  if (envBridge && fs.existsSync(envBridge)) {
     return {
-      path: path.resolve(process.env.CANON_BRIDGE_PATH),
+      path: path.resolve(envBridge),
       source: 'ENV_CANON_BRIDGE_PATH',
       platform: process.platform,
       arch: process.arch,
@@ -20,13 +21,16 @@ function resolveBridgeBinary() {
 
   const projectRoot = path.resolve(__dirname, '../../..');
   const isWindows = process.platform === 'win32';
-  const binaryName = isWindows ? 'canon_bridge_win.exe' : 'canon_bridge_mac';
+  const binaryNames = isWindows
+    ? ['canon_bridge_win32.exe', 'canon_bridge_win.exe']
+    : ['canon_bridge_mac'];
 
-  const candidatePaths = [
-    path.join(projectRoot, 'apps/desktop/electron/main/camera/canon/bin', binaryName),
-    path.join(__dirname, 'bin', binaryName),
-    path.join(projectRoot, 'vendor/canon/bin', binaryName),
-  ];
+  const candidatePaths = [];
+  for (const bName of binaryNames) {
+    candidatePaths.push(path.join(projectRoot, 'apps/desktop/electron/main/camera/canon/bin', bName));
+    candidatePaths.push(path.join(__dirname, 'bin', bName));
+    candidatePaths.push(path.join(projectRoot, 'vendor/canon/bin', bName));
+  }
 
   for (const candidate of candidatePaths) {
     if (fs.existsSync(candidate)) {
@@ -48,9 +52,10 @@ function resolveBridgeBinary() {
 }
 
 function resolveEdsdkPath() {
-  if (process.env.CANON_EDSDK_PATH && fs.existsSync(process.env.CANON_EDSDK_PATH)) {
+  const envEdsdk = process.env.MOMENTAI_EDSDK_PATH || process.env.CANON_EDSDK_PATH;
+  if (envEdsdk && fs.existsSync(envEdsdk)) {
     return {
-      path: path.resolve(process.env.CANON_EDSDK_PATH),
+      path: path.resolve(envEdsdk),
       source: 'ENV_CANON_EDSDK_PATH',
     };
   }
@@ -60,9 +65,12 @@ function resolveEdsdkPath() {
 
   if (isWindows) {
     const winCandidates = [
-      path.join(projectRoot, 'apps/desktop/electron/main/camera/canon/bin/EDSDK.dll'),
-      'C:\\Program Files\\Canon\\EOS Utility\\EDSDK.dll',
+      'C:\\Program Files (x86)\\Canon\\EOS Utility\\EU3\\EDSDK.dll',
       'C:\\Program Files (x86)\\Canon\\EOS Utility\\EDSDK.dll',
+      'C:\\Program Files\\Canon\\EOS Utility\\EU3\\EDSDK.dll',
+      'C:\\Program Files\\Canon\\EOS Utility\\EDSDK.dll',
+      path.join(projectRoot, 'apps/desktop/electron/main/camera/canon/bin/EDSDK.dll'),
+      path.join(projectRoot, 'vendor/canon/bin/EDSDK.dll'),
     ];
     for (const c of winCandidates) {
       if (fs.existsSync(c)) {
@@ -90,18 +98,33 @@ function resolveEdsdkPath() {
 }
 
 function checkSystemContention() {
-  if (process.platform !== 'darwin') return false;
-  try {
-    const stdout = execSync('ps -eo comm', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
-    const lines = stdout.split('\n');
-    for (const line of lines) {
-      if (line.includes('EOS Utility') || line.includes('PTPCamera') || line.includes('ptpcamerad') || line.includes('Photos')) {
+  if (process.platform === 'darwin') {
+    try {
+      const stdout = execSync('ps -eo comm', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+      const lines = stdout.split('\n');
+      for (const line of lines) {
+        if (line.includes('EOS Utility') || line.includes('PTPCamera') || line.includes('ptpcamerad') || line.includes('Photos')) {
+          return true;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    return false;
+  }
+
+  if (process.platform === 'win32') {
+    try {
+      const stdout = execSync('tasklist /NH', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] });
+      if (/EOS Utility|EOSUPNPSV|EOS Web/i.test(stdout)) {
         return true;
       }
+    } catch (e) {
+      // ignore
     }
-  } catch (e) {
-    // ignore
+    return false;
   }
+
   return false;
 }
 

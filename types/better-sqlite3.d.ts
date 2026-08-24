@@ -9,6 +9,7 @@ declare module "better-sqlite3" {
         pragma(source: string): unknown;
         exec(source: string): Database;
         prepare<BindParameters extends unknown[] = unknown[]>(source: string): Statement<BindParameters>;
+        close(): Database;
     }
 
     interface DatabaseConstructor {

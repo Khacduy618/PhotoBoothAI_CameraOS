@@ -22,7 +22,11 @@ beforeEach(async () => {
 afterEach(async () => {
     resetLocalMediaStoreForTests();
     delete process.env.CAMERAOS_DATA_DIR;
-    await rm(tempDir, { recursive: true, force: true });
+    try {
+        await rm(tempDir, { recursive: true, force: true });
+    } catch {
+        // Windows delayed lock cleanup safety
+    }
 });
 
 describe("local SQLite media store", () => {

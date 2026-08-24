@@ -14,7 +14,7 @@ const DEFAULT_ROOT_DIR = path.join(process.cwd(), 'artifacts', 'windowmini-stora
 const SQLITE_FILE = 'cameraos-storage.sqlite';
 
 export class LocalFilesystemSQLiteStorageAdapter implements StorageAdapter {
-  private db: InstanceType<typeof Database> | null = null;
+  private db: Database | null = null;
   private readonly rootDir: string;
   private readonly now: () => string;
 
@@ -188,6 +188,17 @@ export class LocalFilesystemSQLiteStorageAdapter implements StorageAdapter {
       ON CONFLICT(id) DO UPDATE SET relative_path = excluded.relative_path, mime_type = excluded.mime_type, width = excluded.width, height = excluded.height, bytes = excluded.bytes, output_type = excluded.output_type, created_at = excluded.created_at
     `).run(stored.id, stored.sessionId, stored.relativePath, stored.mimeType, stored.width ?? null, stored.height ?? null, stored.bytes ?? 0, stored.outputType ?? null, stored.createdAt);
     return stored;
+  }
+
+  close(): void {
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {
+        // ignore
+      }
+      this.db = null;
+    }
   }
 
   private ensureInitialized(): void {

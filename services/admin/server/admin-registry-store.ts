@@ -195,6 +195,13 @@ function mapFrameRow(row: FrameRow): AdminFrameRecord {
 }
 
 export function resetAdminRegistryStoreForTests(): void {
+    if (cachedDb) {
+        try {
+            cachedDb.close();
+        } catch {
+            // ignore
+        }
+    }
     cachedDb = null;
 }
 

@@ -73,6 +73,13 @@ function getSqlitePath(): string {
 let cachedDb: Database | null = null;
 
 export function resetLocalMediaStoreForTests(): void {
+    if (cachedDb) {
+        try {
+            cachedDb.close();
+        } catch {
+            // ignore
+        }
+    }
     cachedDb = null;
 }
 

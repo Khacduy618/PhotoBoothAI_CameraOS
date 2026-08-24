@@ -33,8 +33,12 @@ describe("admin registry SQLite store", () => {
 
     afterEach(() => {
         resetAdminRegistryStoreForTests();
-        rmSync(tempDir, { recursive: true, force: true });
         delete process.env.CAMERAOS_DATA_DIR;
+        try {
+            rmSync(tempDir, { recursive: true, force: true });
+        } catch {
+            // Windows delayed lock cleanup safety
+        }
     });
 
     it("creates manual events and stores frames inside the selected event folder", () => {

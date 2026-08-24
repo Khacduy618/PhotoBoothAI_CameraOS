@@ -94,7 +94,7 @@ async function run() {
     console.log(`  • Target Paper:       POSTCARD (100mm × 148mm)`);
     console.log(`  • Raster Resolution:  1181 × 1748 px (300 DPI, sRGB)`);
     console.log(`  • Copies to Spool:    1 tờ vật lý`);
-    console.log(`  • Lệnh Spooler:       Start-Process -FilePath '${masterPath}' -Verb PrintTo -ArgumentList '"${matched ? matched.name : printerName}"'`);
+    console.log(`  • Lệnh Spooler:       Direct .NET System.Drawing.Printing.PrintDocument (Unattended Headless Spooler)`);
     console.log('\n💡 KẾT LUẬN DRY-RUN: Mọi tham số và kết nối đã HOÀN TẤT VÀ CHÍNH XÁC.');
     console.log('👉 Để in thật 1 bản giấy test ra máy in, hãy chạy lệnh:');
     console.log('   node scripts/test-printer-windows-real.cjs --print\n');

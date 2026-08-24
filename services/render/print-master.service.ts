@@ -107,62 +107,70 @@ export async function buildPrintMaster(
     sourceImg.height ||
     2700;
 
+  const insetTop = printerProfile.safeAreaInsetsPx?.top ?? 47;
+  const insetBottom = printerProfile.safeAreaInsetsPx?.bottom ?? 47;
+  const insetLeft = printerProfile.safeAreaInsetsPx?.left ?? 47;
+  const insetRight = printerProfile.safeAreaInsetsPx?.right ?? 47;
+
+  const printableW = targetW - insetLeft - insetRight;
+  const printableH = targetH - insetTop - insetBottom;
+
   if (isStrip) {
     // Physical 100x148mm sheet holds TWO identical 5x15 strips side-by-side.
-    // 1181px total width: Left strip = 590px (0..590), Right strip = 591px (590..1181)
-    const leftW = 590;
-    const rightW = targetW - leftW; // 591 px
+    // Inset by 4mm (47px) on all outer borders (top, bottom, left, right)
+    // so nothing is cut off by physical printer margins or overscan.
+    const leftStripW = Math.round(printableW / 2);
+    const rightStripW = printableW - leftStripW;
 
-    // Left strip direct render (full 5x15 template without header/footer crop)
+    // Left strip direct render
     ctx.drawImage(
       sourceImg,
       0,
       0,
       srcW,
       srcH,
-      0,
-      0,
-      leftW,
-      targetH,
+      insetLeft,
+      insetTop,
+      leftStripW,
+      printableH,
     );
 
-    // Right strip direct render (identical full source)
+    // Right strip direct render
     ctx.drawImage(
       sourceImg,
       0,
       0,
       srcW,
       srcH,
-      leftW,
-      0,
-      rightW,
-      targetH,
+      insetLeft + leftStripW,
+      insetTop,
+      rightStripW,
+      printableH,
     );
 
-    // Subtle dashed centerline cut guide between the two 5x15 strips (x = 590.5 px)
-    // 1px at 300 DPI (~0.084mm) with [8, 8] dash pattern: discernible to naked eye for cutter alignment,
-    // yet disappears cleanly when sliced down the center seam.
+    // Subtle dashed centerline cut guide between the two 5x15 strips (x = targetW / 2 = 590.5 px)
+    const centerX = targetW / 2;
     ctx.save();
     ctx.beginPath();
     ctx.setLineDash([8, 8]);
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
     ctx.lineWidth = 1;
-    ctx.moveTo(leftW + 0.5, 0);
-    ctx.lineTo(leftW + 0.5, targetH);
+    ctx.moveTo(centerX, 0);
+    ctx.lineTo(centerX, targetH);
     ctx.stroke();
     ctx.restore();
   } else {
-    // Single full 10x15 master sheet (1181x1748 or 1748x1181)
+    // Single full 10x15 master sheet (1181x1748 or 1748x1181) with 4mm safe margin
     ctx.drawImage(
       sourceImg,
       0,
       0,
       srcW,
       srcH,
-      0,
-      0,
-      targetW,
-      targetH,
+      insetLeft,
+      insetTop,
+      printableW,
+      printableH,
     );
   }
 

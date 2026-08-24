@@ -13,6 +13,9 @@ function createMockCanvas(w = 1800, h = 2700) {
   const fillText = vi.fn();
   const setLineDash = vi.fn();
 
+  const save = vi.fn();
+  const restore = vi.fn();
+
   const ctx = {
     fillStyle: '#ffffff',
     strokeStyle: '#000000',
@@ -31,6 +34,8 @@ function createMockCanvas(w = 1800, h = 2700) {
     stroke,
     fillText,
     setLineDash,
+    save,
+    restore,
   };
 
   const canvas = {
@@ -41,7 +46,7 @@ function createMockCanvas(w = 1800, h = 2700) {
     toBlob: (cb: (b: Blob) => void, format = 'image/jpeg') => cb(new Blob(['mock'], { type: format })),
   } as unknown as HTMLCanvasElement;
 
-  return { canvas, ctx, drawImage, fillRect, stroke, beginPath, moveTo, lineTo };
+  return { canvas, ctx, drawImage, fillRect, stroke, beginPath, moveTo, lineTo, setLineDash, save, restore };
 }
 
 describe('buildPrintMaster & CP1000 Physical Raster', () => {
@@ -188,8 +193,8 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
     expect(dataUrl).toContain('image/jpeg');
   });
 
-  it('L. Production strip master contains NO visible calibration cut marks', async () => {
-    const { canvas, stroke } = createMockCanvas();
+  it('L. Production strip master draws subtle dashed cut guide line at center', async () => {
+    const { canvas, stroke, setLineDash, moveTo, lineTo } = createMockCanvas();
     const { canvas: stripCanvas } = createMockCanvas(900, 2700);
 
     await buildPrintMaster({
@@ -198,8 +203,11 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
       targetCanvas: canvas,
     });
 
-    // Stroke must not be called during production strip printing (no calibration lines)
-    expect(stroke).not.toHaveBeenCalled();
+    // Stroke is called for the center dashed cut guide line
+    expect(stroke).toHaveBeenCalled();
+    expect(setLineDash).toHaveBeenCalledWith([8, 8]);
+    expect(moveTo).toHaveBeenCalledWith(590.5, 0);
+    expect(lineTo).toHaveBeenCalledWith(590.5, 1748);
   });
 
   it('Calibration sheet generator produces exact 1181x1748 calibration raster', () => {

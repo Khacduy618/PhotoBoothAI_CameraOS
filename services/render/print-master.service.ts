@@ -150,6 +150,19 @@ export async function buildPrintMaster(
       rightW,
       targetH,
     );
+
+    // Subtle dashed centerline cut guide between the two 5x15 strips (x = 590.5 px)
+    // 1px at 300 DPI (~0.084mm) with [8, 8] dash pattern: discernible to naked eye for cutter alignment,
+    // yet disappears cleanly when sliced down the center seam.
+    ctx.save();
+    ctx.beginPath();
+    ctx.setLineDash([8, 8]);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.moveTo(leftW + 0.5, 0);
+    ctx.lineTo(leftW + 0.5, targetH);
+    ctx.stroke();
+    ctx.restore();
   } else {
     // Single full 10x15 master sheet (1181x1748 or 1748x1181)
     const crop = calculateSourceCropRect(srcW, srcH, targetW, targetH, {

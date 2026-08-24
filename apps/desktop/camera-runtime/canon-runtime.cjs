@@ -884,9 +884,6 @@ class CanonRuntimeService {
   }
 
   canPerformStaleLockRecovery() {
-    if (!this.abnormalPredecessorConfirmed) {
-      return false;
-    }
     const audit = auditProcessOwners(this.currentBridgePid);
     if (audit.eosUtilityRunning || audit.ptpCameraRunning || audit.canonBridgeCount > 1) {
       console.warn("[CanonRuntime] Refusing stale lock cleanup due to active camera daemon or second bridge.");
@@ -997,7 +994,7 @@ ACTION REQUIRED FOR OPERATOR:
     this.setState(STATES.OPENING_SESSION);
     console.log(`[CanonRuntime] Opening session with camera: ${this.cameraModel}`);
 
-    const sessionPromise = this.waitForBridgeEvent("sessionOpened", 3500);
+    const sessionPromise = this.waitForBridgeEvent("sessionOpened", 6000);
     await this.sendCommand({ command: "openSession" });
     const evt = await sessionPromise;
     const opened = Boolean(evt);
@@ -1010,18 +1007,18 @@ ACTION REQUIRED FOR OPERATOR:
 
     if (!opened && this.state !== STATES.READY && this.state !== STATES.LIVEVIEW) {
       if (checkSystemContention()) {
-        console.warn("[CanonRuntime] OpenSession contention detected with macOS photo/camera daemons.");
+        console.warn("[CanonRuntime] OpenSession contention detected with camera daemons.");
         this.setState(STATES.ERROR, { error: "CAMERA_BUSY_CONTENTION" });
         return false;
       }
 
       if (this.canPerformStaleLockRecovery()) {
-        console.log("[CanonRuntime] Abnormal predecessor confirmed. Executing safe stale lock recovery...");
+        console.log("[CanonRuntime] Executing safe stale lock recovery...");
         const cleanPromise = this.waitForBridgeEvent("staleLockCleaned", 2000);
         await this.sendCommand({ command: "cleanStaleLock" });
         await cleanPromise;
 
-        const retryPromise = this.waitForBridgeEvent("sessionOpened", 3000);
+        const retryPromise = this.waitForBridgeEvent("sessionOpened", 5000);
         await this.sendCommand({ command: "openSession" });
         const retryEvt = await retryPromise;
         if (retryEvt) {
@@ -1029,9 +1026,10 @@ ACTION REQUIRED FOR OPERATOR:
           this.setState(STATES.READY);
           return true;
         }
-      } else {
-        console.warn("[CanonRuntime] OpenSession timeout/failed. STALE_LOCK_CLEANUP_ALLOWED = NO.");
       }
+
+      console.warn("[CanonRuntime] OpenSession failed after retry. Setting DISCONNECTED state.");
+      this.setState(STATES.DISCONNECTED);
       return false;
     }
     return true;

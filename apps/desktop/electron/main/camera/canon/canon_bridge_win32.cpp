@@ -9,6 +9,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <objbase.h>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -149,6 +150,7 @@ typedef EdsError (EDSAPI *FnEdsGetDirectoryItemInfo)(EdsDirectoryItemRef inDirIt
 typedef EdsError (EDSAPI *FnEdsDownload)(EdsDirectoryItemRef inDirItemRef, EdsUInt64 inReadSize, EdsStreamRef outStreamRef);
 typedef EdsError (EDSAPI *FnEdsDownloadComplete)(EdsDirectoryItemRef inDirItemRef);
 typedef EdsError (EDSAPI *FnEdsSetObjectEventHandler)(EdsCameraRef inCameraRef, EdsObjectEvent inEvent, void *inHandler, void *inContext);
+typedef EdsError (EDSAPI *FnEdsGetEvent)(void);
 typedef EdsUInt32 (EDSAPI *FnEdsRelease)(EdsBaseRef inRef);
 typedef EdsUInt32 (EDSAPI *FnEdsRetain)(EdsBaseRef inRef);
 
@@ -174,6 +176,7 @@ static FnEdsGetDirectoryItemInfo pEdsGetDirectoryItemInfo = nullptr;
 static FnEdsDownload pEdsDownload = nullptr;
 static FnEdsDownloadComplete pEdsDownloadComplete = nullptr;
 static FnEdsSetObjectEventHandler pEdsSetObjectEventHandler = nullptr;
+static FnEdsGetEvent pEdsGetEvent = nullptr;
 static FnEdsRelease pEdsRelease = nullptr;
 static FnEdsRetain pEdsRetain = nullptr;
 
@@ -311,6 +314,46 @@ static void sendJsonLine(const std::string& json) {
     std::cout.flush();
 }
 
+static std::string unescapeJsonString(const std::string& input) {
+    std::string result;
+    result.reserve(input.length());
+    for (size_t i = 0; i < input.length(); ++i) {
+        if (input[i] == '\\' && i + 1 < input.length()) {
+            char next = input[i + 1];
+            if (next == '\\') {
+                result += '\\';
+                i++;
+            } else if (next == '"') {
+                result += '"';
+                i++;
+            } else if (next == 'n') {
+                result += '\n';
+                i++;
+            } else if (next == 'r') {
+                result += '\r';
+                i++;
+            } else if (next == 't') {
+                result += '\t';
+                i++;
+            } else if (next == 'b') {
+                result += '\b';
+                i++;
+            } else if (next == 'f') {
+                result += '\f';
+                i++;
+            } else if (next == '/') {
+                result += '/';
+                i++;
+            } else {
+                result += input[i];
+            }
+        } else {
+            result += input[i];
+        }
+    }
+    return result;
+}
+
 // Helper to extract JSON string fields from simple command strings
 static std::string getJsonStringField(const std::string& json, const std::string& key) {
     std::string searchKey = "\"" + key + "\":";
@@ -326,9 +369,19 @@ static std::string getJsonStringField(const std::string& json, const std::string
 
     if (json[pos] == '"') {
         pos++;
-        size_t endPos = json.find('"', pos);
-        if (endPos != std::string::npos) {
-            return json.substr(pos, endPos - pos);
+        size_t cur = pos;
+        while (cur < json.length()) {
+            if (json[cur] == '\\' && cur + 1 < json.length()) {
+                cur += 2; // skip escaped char
+            } else if (json[cur] == '"') {
+                break;
+            } else {
+                cur++;
+            }
+        }
+        if (cur <= json.length()) {
+            std::string raw = json.substr(pos, cur - pos);
+            return unescapeJsonString(raw);
         }
     } else {
         size_t endPos = json.find_first_of(",}\r\n ", pos);
@@ -427,6 +480,7 @@ static int loadEdsdk() {
     pEdsDownload = (FnEdsDownload)GetProcAddress(g_edsdkHandle, "EdsDownload");
     pEdsDownloadComplete = (FnEdsDownloadComplete)GetProcAddress(g_edsdkHandle, "EdsDownloadComplete");
     pEdsSetObjectEventHandler = (FnEdsSetObjectEventHandler)GetProcAddress(g_edsdkHandle, "EdsSetObjectEventHandler");
+    pEdsGetEvent = (FnEdsGetEvent)GetProcAddress(g_edsdkHandle, "EdsGetEvent");
     pEdsRelease = (FnEdsRelease)GetProcAddress(g_edsdkHandle, "EdsRelease");
     pEdsRetain = (FnEdsRetain)GetProcAddress(g_edsdkHandle, "EdsRetain");
 
@@ -443,7 +497,7 @@ static int loadEdsdk() {
 // ============================================================
 
 static EdsError EDSCALLBACK handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef inRef, void *inContext) {
-    fprintf(stderr, "[CanonBridge] Object event received: 0x%08X\n", inEvent);
+    fprintf(stderr, "[CanonBridge] Object event received: 0x%08X inRef=%p\n", inEvent, inRef);
 
     if (inEvent == kEdsObjectEvent_DirItemCreated || inEvent == kEdsObjectEvent_DirItemRequestTransfer) {
         if (!g_capturePending && g_captureCompleted) {
@@ -455,11 +509,16 @@ static EdsError EDSCALLBACK handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef
         EdsDirectoryItemInfo dirInfo;
         memset(&dirInfo, 0, sizeof(dirInfo));
 
-        EdsError err = pEdsGetDirectoryItemInfo(dirItem, &dirInfo);
+        EdsError err = pEdsGetDirectoryItemInfo ? pEdsGetDirectoryItemInfo(dirItem, &dirInfo) : 0xFFFFFFFF;
         if (err != EDS_ERR_OK) {
             fprintf(stderr, "[CanonBridge] Failed to get dir item info: 0x%08X\n", err);
             sendJsonLine("{\"event\":\"error\",\"code\":\"GET_DIR_ITEM_INFO_FAILED\",\"edsdkError\":" + std::to_string(err) + "}");
             return err;
+        }
+
+        if (dirInfo.isFolder) {
+            fprintf(stderr, "[CanonBridge] Ignoring directory item folder: %s\n", dirInfo.szFileName);
+            return EDS_ERR_OK;
         }
 
         fprintf(stderr, "[CanonBridge] Object ready: %s (size %llu bytes)\n", dirInfo.szFileName, dirInfo.size);
@@ -475,6 +534,19 @@ static EdsError EDSCALLBACK handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef
             char uniqueName[MAX_PATH];
             snprintf(uniqueName, sizeof(uniqueName), "%scanon_%lld_%s", tempDir, (long long)std::chrono::system_clock::now().time_since_epoch().count(), dirInfo.szFileName);
             destPath = uniqueName;
+        }
+
+        // Ensure parent directory exists for destPath
+        size_t lastSlash = destPath.find_last_of("\\/");
+        if (lastSlash != std::string::npos) {
+            std::string dirPath = destPath.substr(0, lastSlash);
+            std::string current;
+            for (size_t d = 0; d < dirPath.length(); d++) {
+                current += dirPath[d];
+                if (dirPath[d] == '\\' || dirPath[d] == '/' || d == dirPath.length() - 1) {
+                    CreateDirectoryA(current.c_str(), NULL);
+                }
+            }
         }
 
         // Create file stream
@@ -528,7 +600,11 @@ static EdsError EDSCALLBACK handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef
         if (g_wasLiveViewBeforeCapture) {
             g_wasLiveViewBeforeCapture = 0;
             Sleep(150);
-            EdsUInt32 evfOn = kEdsEvfOutputDevice_PC;
+            EdsUInt32 evfOn = 0;
+            if (pEdsGetPropertyData) {
+                pEdsGetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn);
+            }
+            evfOn |= kEdsEvfOutputDevice_PC;
             EdsError errEvf = pEdsSetPropertyData ? pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn) : EDS_ERR_OK;
             if (errEvf == EDS_ERR_OK) {
                 g_liveViewActive = 1;
@@ -540,6 +616,18 @@ static EdsError EDSCALLBACK handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef
         }
     }
     return EDS_ERR_OK;
+}
+
+// Windows Message Pump & EDSDK Event Pump (Required for STA & ObjectEvent Callbacks)
+static void pumpWindowsAndEdsdkEvents() {
+    MSG msg;
+    while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+    if (pEdsGetEvent) {
+        pEdsGetEvent();
+    }
 }
 
 // ============================================================
@@ -703,7 +791,8 @@ static void processCommandJson(const std::string& line) {
                     saveToBefore, errSaveToBefore, saveTo, errSetSaveTo, saveToAfter, errSaveToAfter, errSetCapacity);
 
             if (pEdsSetObjectEventHandler) {
-                pEdsSetObjectEventHandler(g_camera, kEdsObjectEvent_All, (void*)handleObjectEvent, NULL);
+                EdsError evErr = pEdsSetObjectEventHandler(g_camera, kEdsObjectEvent_All, (void*)handleObjectEvent, NULL);
+                fprintf(stderr, "[DEBUG] SetObjectEventHandler result=0x%08X\n", evErr);
             }
 
             sendJsonLine("{\"event\":\"sessionOpened\",\"status\":\"ok\",\"model\":\"" + escapeJsonString(g_cameraModel) +
@@ -785,6 +874,10 @@ static void processCommandJson(const std::string& line) {
 
         if (g_wasLiveViewBeforeCapture) {
             EdsUInt32 evfOff = 0;
+            if (pEdsGetPropertyData) {
+                pEdsGetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOff), &evfOff);
+            }
+            evfOff &= ~kEdsEvfOutputDevice_PC;
             if (pEdsSetPropertyData) {
                 pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOff), &evfOff);
             }
@@ -815,7 +908,11 @@ static void processCommandJson(const std::string& line) {
             sendJsonLine("{\"event\":\"error\",\"code\":\"TAKE_PICTURE_FAILED\",\"edsdkError\":" + std::to_string(err) + ",\"command\":\"" + usedCmd + "\"}");
             if (g_wasLiveViewBeforeCapture) {
                 g_wasLiveViewBeforeCapture = 0;
-                EdsUInt32 evfOn = kEdsEvfOutputDevice_PC;
+                EdsUInt32 evfOn = 0;
+                if (pEdsGetPropertyData) {
+                    pEdsGetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn);
+                }
+                evfOn |= kEdsEvfOutputDevice_PC;
                 if (pEdsSetPropertyData) {
                     pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn);
                 }
@@ -826,6 +923,10 @@ static void processCommandJson(const std::string& line) {
         if (g_camera && g_sessionOpen) {
             if (g_liveViewActive && pEdsSetPropertyData) {
                 EdsUInt32 evfDevice = 0;
+                if (pEdsGetPropertyData) {
+                    pEdsGetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfDevice), &evfDevice);
+                }
+                evfDevice &= ~kEdsEvfOutputDevice_PC;
                 pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfDevice), &evfDevice);
                 g_liveViewActive = 0;
             }
@@ -851,6 +952,10 @@ static void releaseAllCanonResources() {
         g_liveViewActive = 0;
         if (g_camera && pEdsSetPropertyData) {
             EdsUInt32 evfOff = 0;
+            if (pEdsGetPropertyData) {
+                pEdsGetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOff), &evfOff);
+            }
+            evfOff &= ~kEdsEvfOutputDevice_PC;
             EdsError err = pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOff), &evfOff);
             fprintf(stderr, "[EVF_STOP] result=0x%08X\n", err);
         } else {
@@ -920,6 +1025,9 @@ static BOOL WINAPI consoleCtrlHandler(DWORD ctrlType) {
 // ============================================================
 
 int main(int argc, char* argv[]) {
+    // Initialize COM Apartment for EDSDK Windows callbacks
+    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
     SetConsoleCtrlHandler(consoleCtrlHandler, TRUE);
 
     // Spawn stdin reader thread (only pushes to synchronized queue)
@@ -945,7 +1053,16 @@ int main(int argc, char* argv[]) {
 
         if (!g_running) break;
 
-        // 2. Perform EVF LiveView frame download if active
+        // 2. Pump Windows messages and EDSDK events (Required for ObjectEvent callbacks)
+        pumpWindowsAndEdsdkEvents();
+
+        // 3. If capture is in flight, yield briefly and continue pumping events
+        if (g_capturePending) {
+            Sleep(10);
+            continue;
+        }
+
+        // 4. Perform EVF LiveView frame download if active
         if (g_liveViewActive && g_sessionOpen && g_camera) {
             EdsStreamRef evfStream = nullptr;
             EdsError err = pEdsCreateMemoryStream ? pEdsCreateMemoryStream(0ULL, &evfStream) : 0xFFFFFFFF;
@@ -988,7 +1105,7 @@ int main(int argc, char* argv[]) {
             }
             Sleep(10);
         } else {
-            Sleep(15);
+            Sleep(10);
         }
     }
 
@@ -997,6 +1114,8 @@ int main(int argc, char* argv[]) {
     if (stdinThread.joinable()) {
         stdinThread.detach();
     }
+
+    CoUninitialize();
 
     return 0;
 }

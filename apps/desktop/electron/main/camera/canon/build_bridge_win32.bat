@@ -17,7 +17,7 @@ echo [BUILD_BEGIN] Compiling canon_bridge_win32.cpp targeting Win32 x86...
 cl /O2 /std:c++17 /EHsc /MD /DWIN32 /D_WINDOWS ^
    canon_bridge_win32.cpp ^
    /Fe:bin\canon_bridge_win32.exe ^
-   /link user32.lib advapi32.lib
+   /link user32.lib advapi32.lib ole32.lib
 
 if %ERRORLEVEL% equ 0 (
     echo [BUILD_SUCCESS] Output: bin\canon_bridge_win32.exe

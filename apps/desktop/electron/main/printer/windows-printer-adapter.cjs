@@ -179,7 +179,17 @@ class WindowsPrinterAdapter {
               $destRect = New-Object System.Drawing.Rectangle(0, 0, [int]$pageW, [int]$pageH)
             }
 
-            $ev.Graphics.DrawImage($img, $destRect)
+            # Explicitly use GraphicsUnit.Pixel and source rectangle (0,0,Width,Height)
+            # to prevent GDI+ from auto-scaling by 96 DPI / 300 DPI mismatch!
+            $ev.Graphics.DrawImage(
+              $img,
+              $destRect,
+              0,
+              0,
+              $img.Width,
+              $img.Height,
+              [System.Drawing.GraphicsUnit]::Pixel
+            )
             $ev.HasMorePages = $false
           })
 

@@ -113,38 +113,26 @@ export async function buildPrintMaster(
     const leftW = 590;
     const rightW = targetW - leftW; // 591 px
 
-    // Left strip crop and render
-    const cropLeft = calculateSourceCropRect(srcW, srcH, leftW, targetH, {
-      horizontalAnchor: 'center',
-      verticalAnchor: 'center',
-      fit: 'cover',
-    });
-
+    // Left strip direct render (full 5x15 template without header/footer crop)
     ctx.drawImage(
       sourceImg,
-      cropLeft.cropX,
-      cropLeft.cropY,
-      cropLeft.cropW,
-      cropLeft.cropH,
+      0,
+      0,
+      srcW,
+      srcH,
       0,
       0,
       leftW,
       targetH,
     );
 
-    // Right strip crop and render (identical source)
-    const cropRight = calculateSourceCropRect(srcW, srcH, rightW, targetH, {
-      horizontalAnchor: 'center',
-      verticalAnchor: 'center',
-      fit: 'cover',
-    });
-
+    // Right strip direct render (identical full source)
     ctx.drawImage(
       sourceImg,
-      cropRight.cropX,
-      cropRight.cropY,
-      cropRight.cropW,
-      cropRight.cropH,
+      0,
+      0,
+      srcW,
+      srcH,
       leftW,
       0,
       rightW,
@@ -165,18 +153,12 @@ export async function buildPrintMaster(
     ctx.restore();
   } else {
     // Single full 10x15 master sheet (1181x1748 or 1748x1181)
-    const crop = calculateSourceCropRect(srcW, srcH, targetW, targetH, {
-      horizontalAnchor: 'center',
-      verticalAnchor: 'center',
-      fit: 'cover',
-    });
-
     ctx.drawImage(
       sourceImg,
-      crop.cropX,
-      crop.cropY,
-      crop.cropW,
-      crop.cropH,
+      0,
+      0,
+      srcW,
+      srcH,
       0,
       0,
       targetW,

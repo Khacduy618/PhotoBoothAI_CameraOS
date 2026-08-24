@@ -43,7 +43,7 @@ typedef EdsBaseRef EdsCameraListRef;
 typedef EdsBaseRef EdsCameraRef;
 typedef EdsBaseRef EdsEvfImageRef;
 typedef EdsBaseRef EdsStreamRef;
-typedef EdsDirectoryItemRef;
+typedef EdsBaseRef EdsDirectoryItemRef;
 typedef unsigned int EdsUInt32;
 typedef unsigned long long EdsUInt64;
 typedef int EdsInt32;

@@ -143,6 +143,19 @@ class WindowsPrinterAdapter {
           $pd.PrinterSettings.PrinterName = $targetName
           $pd.PrinterSettings.Copies = ${copies}
           $pd.PrintController = New-Object System.Drawing.Printing.StandardPrintController
+
+          $isLandscape = $img.Width -gt $img.Height
+          $pd.DefaultPageSettings.Landscape = $isLandscape
+
+          # Find exact Postcard paper size (100mm x 148mm)
+          $postcardSize = $pd.PrinterSettings.PaperSizes | Where-Object {
+            $_.PaperName -like "*Postcard*" -or $_.PaperName -like "*100*148*" -or $_.PaperName -like "*4*6*" -or $_.PaperName -like "*KG*"
+          } | Select-Object -First 1
+
+          if ($postcardSize) {
+            $pd.DefaultPageSettings.PaperSize = $postcardSize
+          }
+
           $pd.OriginAtMargins = $false
           $pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
 
@@ -152,7 +165,20 @@ class WindowsPrinterAdapter {
             $ev.Graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
             $ev.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
 
-            $destRect = $ev.PageBounds
+            $pageW = $ev.PageBounds.Width
+            $pageH = $ev.PageBounds.Height
+            $pageIsLandscape = $pageW -gt $pageH
+
+            # If page orientation does not match image orientation, apply 90-degree transform
+            if ($isLandscape -ne $pageIsLandscape) {
+              $ev.Graphics.TranslateTransform($pageW / 2, $pageH / 2)
+              $ev.Graphics.RotateTransform(90)
+              $ev.Graphics.TranslateTransform(-$pageH / 2, -$pageW / 2)
+              $destRect = New-Object System.Drawing.Rectangle(0, 0, [int]$pageH, [int]$pageW)
+            } else {
+              $destRect = New-Object System.Drawing.Rectangle(0, 0, [int]$pageW, [int]$pageH)
+            }
+
             $ev.Graphics.DrawImage($img, $destRect)
             $ev.HasMorePages = $false
           })

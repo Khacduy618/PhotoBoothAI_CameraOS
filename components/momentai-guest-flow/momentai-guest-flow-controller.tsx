@@ -297,9 +297,9 @@ export function MomentAIGuestFlowController() {
   const renderAndShowResult = async (session: SessionData, backend: MomentAIGuestSession, drawDataUrl: string) => {
     if (!session.selectedFrame) return;
     const isStrip = isStripTemplate(session.selectedFrame);
-    const isLandscape = session.selectedFrame.orientation === 'landscape';
+    const isLandscape = !isStrip && session.selectedFrame.orientation === 'landscape';
     const targetWidth = isStrip ? 900 : isLandscape ? 2700 : 1800;
-    const targetHeight = isLandscape ? 1800 : 2700;
+    const targetHeight = isStrip ? 2700 : isLandscape ? 1800 : 2700;
 
     const outputs = await compositionEngine.renderComposition(
       session.selectedFrame,
@@ -509,13 +509,15 @@ export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefin
     outputPaper: definition.outputPaper,
   });
 
-  const targetProduct = resolvedProduct ?? 'STRIP_4'; // safe fallback only for truly unknown
-  const isStrip = isStripProductId(resolvedProduct);
-  const layoutType = canonicalLayoutType(resolvedProduct);
+  const isStrip = isStripProductId(resolvedProduct) || definition.targetProduct === 'STRIP_2' || definition.targetProduct === 'STRIP_4' || definition.outputPaper === '5x15';
+  const targetProduct = resolvedProduct ?? (isStrip ? (count === 2 ? 'STRIP_2' : 'STRIP_4') : (count === 1 ? 'PREMIUM_POSTCARD' : count === 6 ? 'SHEET_6' : 'STRIP_4'));
+  const layoutType = canonicalLayoutType(targetProduct);
 
   // ── Slot normalization (Canonical 0..1 range) ───────────────────────────
-  const outW = definition.outputWidth || 1800;
   const outH = definition.outputHeight || 2700;
+  const outW = isStrip && (definition.outputWidth || 1800) >= outH * 0.5
+    ? Math.round(outH / 3)
+    : (definition.outputWidth || (isStrip ? 900 : 1800));
 
   const rawNormSlots = (definition.slots || []).map((slot, index) => {
     const unit = normalizeSlotToUnit(slot, outW, outH);
@@ -564,8 +566,8 @@ export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefin
     allowTyping: true,
     allowDraw: definition.allowDraw ?? true,
     orientation: isLandscape ? 'landscape' : 'portrait',
-    outputWidth: definition.outputWidth || 1800,
-    outputHeight: definition.outputHeight || 2700,
+    outputWidth: outW,
+    outputHeight: outH,
     preferredPaper: canonicalPreferredPaper(resolvedProduct),
     supportedPapers: isStrip ? ['2x6-double', '4x6'] : ['4x6'],
     renderMode: canonicalRenderMode(resolvedProduct),

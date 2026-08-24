@@ -53,9 +53,12 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
   className = '',
   mode = 'default',
 }) => {
-  const width = template.outputWidth || 1800;
+  const isStrip = isStripTemplate(template);
   const height = template.outputHeight || 2700;
-  const isLandscape = template.orientation === 'landscape' || width > height;
+  const width = isStrip && (template.outputWidth || 1800) >= height * 0.5
+    ? Math.round(height / 3)
+    : template.outputWidth || (isStrip ? 900 : 1800);
+  const isLandscape = template.orientation === 'landscape' || (!isStrip && width > height);
   const overlayUrl = template.assets?.overlay || ((template as unknown) as { assetUrl?: string }).assetUrl || '';
 
   const isThumbnailMode = mode === 'thumbnail' || className.includes('max-h-full');

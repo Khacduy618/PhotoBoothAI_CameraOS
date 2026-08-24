@@ -18,8 +18,14 @@ function sortByLatestUpdate(definitions: readonly FrameDefinition[]): FrameDefin
 }
 
 function normalizeFrameDefinition(definition: FrameDefinition): FrameDefinition {
-    const width = definition.outputWidth > 0 ? definition.outputWidth : 1800;
+    const isStrip = definition.targetProduct === "STRIP_2" || definition.targetProduct === "STRIP_4" || definition.outputPaper === "5x15" || definition.shotCount === 2 || (definition.shotCount === 4 && (!definition.outputWidth || !definition.outputHeight || definition.outputHeight >= definition.outputWidth * 2.2));
+    const targetProduct = definition.targetProduct || (isStrip ? (definition.shotCount === 2 ? "STRIP_2" : "STRIP_4") : (definition.shotCount === 1 ? "PREMIUM_POSTCARD" : definition.shotCount === 6 ? "SHEET_6" : "SHEET_4"));
+    const outputPaper = definition.outputPaper || (isStrip ? "5x15" : "10x15");
+
     const height = definition.outputHeight > 0 ? definition.outputHeight : 2700;
+    const width = definition.outputWidth > 0 && (!isStrip || definition.outputWidth <= height * 0.5)
+        ? definition.outputWidth
+        : (isStrip ? 900 : 1800);
 
     const normalizedSlots: FrameDefinitionSlot[] = (definition.slots || []).map((slot, index) => {
         const unitBounds = normalizeSlotToUnit(slot, width, height);
@@ -36,6 +42,8 @@ function normalizeFrameDefinition(definition: FrameDefinition): FrameDefinition 
 
     return {
         ...definition,
+        targetProduct,
+        outputPaper,
         outputWidth: width,
         outputHeight: height,
         slots: normalizedSlots,

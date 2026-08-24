@@ -67,6 +67,11 @@ function mapTemplateSummaryToFrameDefinition(summary: unknown): AdminFrameDefini
     const value = summary as Partial<AdminFrameDefinition> & { templateId?: string; captureFormatId?: string };
     const parsedShotCount = Number(value.shotCount ?? String(value.captureFormatId ?? "format_4shot").match(/format_(\d+)shot/)?.[1] ?? 4);
     const shotCount: ImportedFrameShotCount = parsedShotCount === 1 || parsedShotCount === 2 || parsedShotCount === 6 || parsedShotCount === 8 ? parsedShotCount : 4;
+    const isStrip = value.targetProduct === "STRIP_2" || value.targetProduct === "STRIP_4" || value.outputPaper === "5x15" || shotCount === 2 || (shotCount === 4 && (!value.outputWidth || !value.outputHeight || value.outputHeight >= value.outputWidth * 2.2));
+    const targetProduct = value.targetProduct || (isStrip ? (shotCount === 2 ? "STRIP_2" : "STRIP_4") : (shotCount === 1 ? "PREMIUM_POSTCARD" : shotCount === 6 ? "SHEET_6" : "SHEET_4"));
+    const outputPaper = value.outputPaper || (isStrip ? "5x15" : "10x15");
+    const outputWidth = value.outputWidth && (!isStrip || value.outputWidth <= (value.outputHeight || 2700) * 0.5) ? value.outputWidth : (isStrip ? 900 : 1800);
+    const outputHeight = value.outputHeight ?? 2700;
     const now = new Date().toISOString();
     return {
         id: String(value.id ?? value.templateId ?? `template_${shotCount}shot`),
@@ -76,11 +81,14 @@ function mapTemplateSummaryToFrameDefinition(summary: unknown): AdminFrameDefini
         source: value.source ?? "canva",
         assetUrl: value.assetUrl ?? "",
         shotCount,
+        targetProduct,
+        outputPaper,
+        orientation: value.orientation ?? value.photoViewportOrientation ?? "portrait",
         photoViewportOrientation: value.photoViewportOrientation ?? "portrait",
         photoAspectRatio: value.photoAspectRatio ?? "2:3",
         photoFit: value.photoFit ?? "contain",
-        outputWidth: value.outputWidth ?? 1800,
-        outputHeight: value.outputHeight ?? 2700,
+        outputWidth,
+        outputHeight,
         slots: value.slots ?? Array.from({ length: shotCount }, (_, index) => ({ id: `slot_${index + 1}`, index: index + 1, x: 0.1, y: 0.1 + index * (0.75 / shotCount), width: 0.8, height: Math.max(0.1, 0.7 / shotCount), photoViewportOrientation: "portrait" as const, shape: "rect" as const })),
         status: value.status === "private" ? "private" : "published",
         eventId: value.eventId,
@@ -428,9 +436,11 @@ export function FrameImportPanel() {
                         const photoViewportOrientation: "portrait" | "landscape" =
                             item.result.image.width > item.result.image.height ? "landscape" : "portrait";
                         const photoAspectRatio = photoViewportOrientation === "landscape" ? "3:2" : "2:3";
-
                         const supportedShotCounts = [1, 2, 4, 6, 8] as const;
                         const detectedShotCount = (supportedShotCounts.find((count) => count === item.result!.slots.length) || item.result!.slots.length || 1) as 1 | 2 | 4 | 6 | 8;
+                        const isStrip = detectedShotCount === 2 || (detectedShotCount === 4 && item.result.image.height >= item.result.image.width * 2.2);
+                        const targetProduct = (isStrip ? (detectedShotCount === 2 ? "STRIP_2" : "STRIP_4") : (detectedShotCount === 1 ? "PREMIUM_POSTCARD" : detectedShotCount === 6 ? "SHEET_6" : "SHEET_4")) as "STRIP_2" | "STRIP_4" | "PREMIUM_POSTCARD" | "SHEET_4" | "SHEET_6";
+                        const outputPaper = targetProduct === "STRIP_2" || targetProduct === "STRIP_4" ? "5x15" : "10x15";
 
                         const definitionSlots = item.result.slots.map((s) => ({
                             id: s.id,
@@ -456,6 +466,9 @@ export function FrameImportPanel() {
                                 background: "#ffffff",
                             },
                             shotCount: detectedShotCount,
+                            targetProduct,
+                            outputPaper,
+                            orientation: photoViewportOrientation,
                             photoViewportOrientation,
                             photoAspectRatio,
                             photoFit: "contain",

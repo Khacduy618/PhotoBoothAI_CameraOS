@@ -228,8 +228,28 @@ export async function renderFrameComposition(
     throw new DOMException("Composition aborted", "AbortError");
   }
 
-  const outputWidth = frame.outputWidth || 1800;
-  const outputHeight = frame.outputHeight || 2700;
+  const isLandscape = frame.orientation === "landscape" || (frame.outputWidth && frame.outputHeight ? frame.outputWidth > frame.outputHeight : false);
+  const isStrip = (frame as { targetProduct?: string }).targetProduct === "STRIP_2" || (frame as { targetProduct?: string }).targetProduct === "STRIP_4" || (frame as { preferredPaper?: string }).preferredPaper === "2x6-double";
+
+  let outputWidth = frame.outputWidth || (isStrip ? 900 : isLandscape ? 2700 : 1800);
+  let outputHeight = frame.outputHeight || (isLandscape ? 1800 : 2700);
+
+  // If imported image has low resolution (< 600px width or < 1200px height), upscale render canvas
+  // to standard 300 DPI high resolution (900x2700 or 1800x2700) so camera photos remain ultra crisp!
+  if (outputWidth < 600 || outputHeight < 1200) {
+    const ratio = outputWidth / outputHeight;
+    if (isStrip || ratio <= 0.45) {
+      outputHeight = 2700;
+      outputWidth = Math.round(outputHeight * ratio) || 900;
+    } else if (isLandscape) {
+      outputWidth = 2700;
+      outputHeight = Math.round(outputWidth / ratio) || 1800;
+    } else {
+      outputHeight = 2700;
+      outputWidth = Math.round(outputHeight * ratio) || 1800;
+    }
+  }
+
   const slots = frame.slots || [];
 
   const canvas = targetCanvas || document.createElement("canvas");

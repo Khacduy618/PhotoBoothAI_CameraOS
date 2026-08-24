@@ -745,10 +745,22 @@ class DesktopMediaManager {
 
     const clips = await this.waitForClipsReady(sessionId, slots.length, 15000);
 
-    const rawW = targetWidth || frame.outputWidth || 1800;
-    const rawH = targetHeight || frame.outputHeight || 2700;
-    const outputWidth = Math.floor(rawW / 2) * 2;
-    const outputHeight = Math.floor(rawH / 2) * 2;
+    const isStrip = (frame?.targetProduct === 'STRIP_2' || frame?.targetProduct === 'STRIP_4' || frame?.preferredPaper === '2x6-double' || (frame?.slots && frame.slots.length === 2) || (frame?.slots && frame.slots.length === 4 && (!frame.outputWidth || !frame.outputHeight || frame.outputHeight >= frame.outputWidth * 2)));
+    const isLandscape = !isStrip && (frame?.orientation === 'landscape' || (targetWidth && targetHeight && targetWidth > targetHeight));
+
+    const defaultW = isStrip ? 900 : isLandscape ? 2700 : 1800;
+    const defaultH = isStrip ? 2700 : isLandscape ? 1800 : 2700;
+
+    let finalW = targetWidth || frame?.outputWidth || defaultW;
+    let finalH = targetHeight || frame?.outputHeight || defaultH;
+
+    if (finalW < 600 || finalH < 1200 || (isStrip && finalW >= finalH * 0.5)) {
+      finalW = defaultW;
+      finalH = defaultH;
+    }
+
+    const outputWidth = Math.floor(finalW / 2) * 2;
+    const outputHeight = Math.floor(finalH / 2) * 2;
     const durationSec = durationMs / 1000;
 
     const outputsDir = this.sessionMediaPaths.outputsDir(sessionId);

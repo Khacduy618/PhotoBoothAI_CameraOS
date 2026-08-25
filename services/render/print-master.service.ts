@@ -107,20 +107,19 @@ export async function buildPrintMaster(
     sourceImg.height ||
     2700;
 
-  const insetTop = printerProfile.safeAreaInsetsPx?.top ?? 47;
-  const insetBottom = printerProfile.safeAreaInsetsPx?.bottom ?? 47;
-  const insetLeft = printerProfile.safeAreaInsetsPx?.left ?? 47;
-  const insetRight = printerProfile.safeAreaInsetsPx?.right ?? 47;
+  const insetTop = printerProfile.safeAreaInsetsPx?.top ?? 0;
+  const insetBottom = printerProfile.safeAreaInsetsPx?.bottom ?? 0;
+  const insetLeft = printerProfile.safeAreaInsetsPx?.left ?? 0;
+  const insetRight = printerProfile.safeAreaInsetsPx?.right ?? 0;
 
   const printableW = targetW - insetLeft - insetRight;
   const printableH = targetH - insetTop - insetBottom;
 
   if (isStrip) {
     // Physical 100x148mm sheet holds TWO identical 5x15 strips side-by-side.
-    // Inset by 4mm (47px) on all outer borders (top, bottom, left, right)
-    // so nothing is cut off by physical printer margins or overscan.
-    const leftStripW = Math.round(printableW / 2);
-    const rightStripW = printableW - leftStripW;
+    // Exact 1:1 scale (590px left, 591px right)
+    const leftStripW = 590;
+    const rightStripW = targetW - leftStripW; // 591 px
 
     // Left strip direct render
     ctx.drawImage(
@@ -160,7 +159,7 @@ export async function buildPrintMaster(
     ctx.stroke();
     ctx.restore();
   } else {
-    // Single full 10x15 master sheet (1181x1748 or 1748x1181) with 4mm safe margin
+    // Single full 10x15 master sheet (1181x1748 or 1748x1181)
     ctx.drawImage(
       sourceImg,
       0,

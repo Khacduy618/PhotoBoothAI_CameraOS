@@ -147,13 +147,15 @@ class WindowsPrinterAdapter {
           $isLandscape = $img.Width -gt $img.Height
           $pd.DefaultPageSettings.Landscape = $isLandscape
 
-          # Find exact Postcard paper size (100mm x 148mm)
-          $postcardSize = $pd.PrinterSettings.PaperSizes | Where-Object {
-            $_.PaperName -like "*Postcard*" -or $_.PaperName -like "*100*148*" -or $_.PaperName -like "*4*6*" -or $_.PaperName -like "*KG*"
-          } | Select-Object -First 1
-
-          if ($postcardSize) {
-            $pd.DefaultPageSettings.PaperSize = $postcardSize
+          # Respect active paper setting (Borderless or Bordered) from Windows Printing Preferences
+          $currentPaper = $pd.DefaultPageSettings.PaperSize
+          if (-not $currentPaper -or ($currentPaper.PaperName -notlike "*Postcard*" -and $currentPaper.PaperName -notlike "*100*148*" -and $currentPaper.PaperName -notlike "*4*6*" -and $currentPaper.PaperName -notlike "*KG*")) {
+            $postcardSize = $pd.PrinterSettings.PaperSizes | Where-Object {
+              $_.PaperName -like "*Postcard*" -or $_.PaperName -like "*100*148*" -or $_.PaperName -like "*4*6*" -or $_.PaperName -like "*KG*"
+            } | Select-Object -First 1
+            if ($postcardSize) {
+              $pd.DefaultPageSettings.PaperSize = $postcardSize
+            }
           }
 
           $pd.OriginAtMargins = $false

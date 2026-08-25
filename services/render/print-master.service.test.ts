@@ -108,24 +108,24 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
     // Verify 2 drawImage calls for two-up layout
     expect(drawImage).toHaveBeenCalledTimes(2);
 
-    // Call 1: Left strip drawn inside 4mm safe margins
+    // Call 1: Left strip drawn at x=0, y=0, w=590, h=1748
     const call1 = drawImage.mock.calls[0];
     expect(call1[0]).toBe(stripCanvas);
-    expect(call1[5]).toBe(47); // destX (insetLeft)
-    expect(call1[6]).toBe(47); // destY (insetTop)
-    expect(call1[7]).toBe(544); // destWidth
-    expect(call1[8]).toBe(1654); // destHeight
+    expect(call1[5]).toBe(0); // destX
+    expect(call1[6]).toBe(0); // destY
+    expect(call1[7]).toBe(590); // destWidth
+    expect(call1[8]).toBe(1748); // destHeight
 
-    // Call 2: Right strip drawn inside 4mm safe margins
+    // Call 2: Right strip drawn at x=590, y=0, w=591, h=1748
     const call2 = drawImage.mock.calls[1];
     expect(call2[0]).toBe(stripCanvas);
-    expect(call2[5]).toBe(591); // destX (insetLeft + leftStripW)
-    expect(call2[6]).toBe(47); // destY (insetTop)
-    expect(call2[7]).toBe(543); // destWidth
-    expect(call2[8]).toBe(1654); // destHeight
+    expect(call2[5]).toBe(590); // destX
+    expect(call2[6]).toBe(0); // destY
+    expect(call2[7]).toBe(591); // destWidth
+    expect(call2[8]).toBe(1748); // destHeight
 
-    // Total content width = 544 + 543 = 1087 px (1181 - 2*47)
-    expect(call1[7] + call2[7]).toBe(1087);
+    // Total width = 590 + 591 = 1181 (zero gap / zero overlap)
+    expect(call1[7] + call2[7]).toBe(1181);
   });
 
   it('F. STRIP_4 -> 1181x1748 with left (590px) and right (591px) duplication', async () => {
@@ -173,10 +173,10 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
 
     expect(drawImage).toHaveBeenCalledTimes(1);
     const call = drawImage.mock.calls[0];
-    expect(call[5]).toBe(47);
-    expect(call[6]).toBe(47);
-    expect(call[7]).toBe(1654);
-    expect(call[8]).toBe(1087);
+    expect(call[5]).toBe(0);
+    expect(call[6]).toBe(0);
+    expect(call[7]).toBe(1748);
+    expect(call[8]).toBe(1181);
   });
 
   it('K. Generates valid JPEG dataURL by default', async () => {

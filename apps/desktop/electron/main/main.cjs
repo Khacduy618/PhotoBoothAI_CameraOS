@@ -713,13 +713,70 @@ function createStorageSession(sessionId) {
   db.prepare('INSERT INTO sessions (session_id, created_at, updated_at, payload_json) VALUES (?, ?, ?, NULL) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at').run(safeSessionId, now, now);
 }
 
+/**
+ * Injects sRGB EXIF (ColorSpace=1, 600 DPI) into a JPEG Buffer.
+ * Inserts APP1 AFTER existing APP0 (JFIF) segment and patches APP0 density to 600dpi.
+ * This ensures Windows Explorer shows "Color representation: sRGB" on all output JPEGs.
+ */
+function injectSrgbExifIntoJpeg(bytes) {
+  if (!Buffer.isBuffer(bytes) || bytes.length < 4 || bytes[0] !== 0xFF || bytes[1] !== 0xD8) return bytes;
+
+  // Build TIFF LE EXIF payload
+  const tiff = Buffer.alloc(96, 0);
+  let o = 0;
+  tiff.writeUInt16LE(0x4949, o); o += 2; // 'II' LE
+  tiff.writeUInt16LE(42,     o); o += 2; // TIFF magic
+  tiff.writeUInt32LE(8,      o); o += 4; // IFD0 at offset 8
+  tiff.writeUInt16LE(4,      o); o += 2; // IFD0: 4 entries
+  // 0x011A XResolution → RATIONAL at 62
+  tiff.writeUInt16LE(0x011A, o); o += 2; tiff.writeUInt16LE(5, o); o += 2; tiff.writeUInt32LE(1, o); o += 4; tiff.writeUInt32LE(62, o); o += 4;
+  // 0x011B YResolution → RATIONAL at 70
+  tiff.writeUInt16LE(0x011B, o); o += 2; tiff.writeUInt16LE(5, o); o += 2; tiff.writeUInt32LE(1, o); o += 4; tiff.writeUInt32LE(70, o); o += 4;
+  // 0x0128 ResolutionUnit = 2 (inch)
+  tiff.writeUInt16LE(0x0128, o); o += 2; tiff.writeUInt16LE(3, o); o += 2; tiff.writeUInt32LE(1, o); o += 4; tiff.writeUInt32LE(2, o); o += 4;
+  // 0x8769 ExifIFD pointer → offset 78
+  tiff.writeUInt16LE(0x8769, o); o += 2; tiff.writeUInt16LE(4, o); o += 2; tiff.writeUInt32LE(1, o); o += 4; tiff.writeUInt32LE(78, o); o += 4;
+  tiff.writeUInt32LE(0, o); // next IFD0 = 0 (o=58)
+  // Rational values
+  tiff.writeUInt32LE(600, 62); tiff.writeUInt32LE(1, 66); // XRes = 600/1
+  tiff.writeUInt32LE(600, 70); tiff.writeUInt32LE(1, 74); // YRes = 600/1
+  // ExifIFD at offset 78: 1 entry — 0xA001 ColorSpace = 1 (sRGB)
+  tiff.writeUInt16LE(1,      78);
+  tiff.writeUInt16LE(0xA001, 80); tiff.writeUInt16LE(3, 82); tiff.writeUInt32LE(1, 84); tiff.writeUInt32LE(1, 88);
+  tiff.writeUInt32LE(0, 92); // next ExifIFD = 0
+
+  const exifPayload = Buffer.concat([Buffer.from([0x45, 0x78, 0x69, 0x66, 0x00, 0x00]), tiff]);
+  const app1Len = exifPayload.length + 2;
+  const app1 = Buffer.concat([Buffer.from([0xFF, 0xE1, (app1Len >> 8) & 0xFF, app1Len & 0xFF]), exifPayload]);
+
+  let insertPos = 2;
+  if (bytes[2] === 0xFF && bytes[3] === 0xE0 && bytes.length >= 6) {
+    const app0Len = bytes.readUInt16BE(4);
+    // Patch APP0 density to 600 dpi
+    if (bytes.length >= 14) {
+      bytes[8] = 1;                   // density unit = inch
+      bytes.writeUInt16BE(600, 9);    // Xdensity = 600
+      bytes.writeUInt16BE(600, 11);   // Ydensity = 600
+    }
+    insertPos = 2 + 2 + app0Len;
+    if (insertPos > bytes.length) insertPos = bytes.length;
+  }
+
+  return Buffer.concat([bytes.subarray(0, insertPos), app1, bytes.subarray(insertPos)]);
+}
+
 function saveStorageFile(sessionId, relativePath, id, file, outputType, allowOverwrite) {
   const db = ensureStorageDb();
   const absolutePath = path.join(storageRoot, relativePath);
   if (!allowOverwrite && (fs.existsSync(absolutePath) || db.prepare('SELECT id FROM stored_files WHERE id = ?').get(id))) throw new Error('Original already exists and will not be overwritten.');
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
-  const bytes = binaryBytes(file?.bytes || file?.dataUrl || '');
+  let bytes = binaryBytes(file?.bytes || file?.dataUrl || '');
   if (bytes.byteLength <= 0) throw new Error('Image bytes are empty.');
+  // Inject sRGB EXIF into JPEG output files for correct color reproduction on CP1000
+  const ext = path.extname(absolutePath).toLowerCase();
+  if (ext === '.jpg' || ext === '.jpeg') {
+    bytes = injectSrgbExifIntoJpeg(bytes);
+  }
   const tempPath = `${absolutePath}.tmp-${process.pid}-${Date.now()}`;
   fs.writeFileSync(tempPath, bytes);
   fs.renameSync(tempPath, absolutePath);

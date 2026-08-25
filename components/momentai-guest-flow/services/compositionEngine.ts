@@ -122,9 +122,9 @@ export class CompositionEngine {
       }
     }
 
-    // Generate Outputs
+    // Generate Outputs (100% Maximum Quality - Lossless PNG & JPEG 1.0)
     const masterDataUrl = canvas.toDataURL('image/png');
-    const shareDataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    const shareDataUrl = canvas.toDataURL('image/jpeg', 1.0);
 
     // Render Print Data URL via authoritative CP1000 print master builder
     const isStrip = isStripTemplate(frame);
@@ -136,7 +136,7 @@ export class CompositionEngine {
       targetProduct,
       isLandscape,
     });
-    const printDataUrl = printMasterResult.toDataURL('image/jpeg', 0.95);
+    const printDataUrl = printMasterResult.toDataURL('image/jpeg', 1.0);
 
     return {
       master: masterDataUrl,

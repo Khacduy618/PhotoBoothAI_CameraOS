@@ -217,4 +217,18 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
     expect(cal.width).toBe(2362);
     expect(cal.height).toBe(3496);
   });
+
+  it('M. Ultra-Res 177MP Sheet Composite preserves full 10944x16200 resolution in print master', async () => {
+    const { canvas } = createMockCanvas();
+    const { canvas: ultraCanvas } = createMockCanvas(10944, 16200);
+
+    const master = await buildPrintMaster({
+      logicalProductImage: ultraCanvas,
+      targetProduct: 'SHEET_4',
+      targetCanvas: canvas,
+    });
+
+    expect(master.width).toBe(10944);
+    expect(master.height).toBe(16200);
+  });
 });

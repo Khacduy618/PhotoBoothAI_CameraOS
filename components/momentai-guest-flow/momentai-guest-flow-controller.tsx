@@ -298,8 +298,8 @@ export function MomentAIGuestFlowController() {
     if (!session.selectedFrame) return;
     const isStrip = isStripTemplate(session.selectedFrame);
     const isLandscape = !isStrip && session.selectedFrame.orientation === 'landscape';
-    const targetWidth = isStrip ? 900 : isLandscape ? 2700 : 1800;
-    const targetHeight = isStrip ? 2700 : isLandscape ? 1800 : 2700;
+    const targetWidth = isStrip ? 5472 : isLandscape ? 16200 : 10944;
+    const targetHeight = isStrip ? 16416 : isLandscape ? 10944 : 16200;
 
     const outputs = await compositionEngine.renderComposition(
       session.selectedFrame,

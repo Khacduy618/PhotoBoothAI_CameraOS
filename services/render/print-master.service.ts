@@ -55,19 +55,42 @@ export async function buildPrintMaster(
     sessionId = 'unknown',
   } = options;
 
+  let sourceImg: HTMLCanvasElement | HTMLImageElement;
+  if (typeof logicalProductImage === 'string') {
+    sourceImg = await loadImage(logicalProductImage);
+  } else {
+    sourceImg = logicalProductImage;
+  }
+
+  const srcW =
+    (sourceImg as HTMLImageElement).naturalWidth ||
+    sourceImg.width ||
+    1800;
+  const srcH =
+    (sourceImg as HTMLImageElement).naturalHeight ||
+    sourceImg.height ||
+    2700;
+
   const isStrip = isStripProduct(targetProduct as CanonicalProduct);
 
-  const targetW = isStrip
+  // Preserve 100% full resolution of the Final Composite
+  const defaultW = isStrip
     ? printerProfile.portrait.widthPx
     : isLandscape
     ? printerProfile.landscape.widthPx
     : printerProfile.portrait.widthPx;
 
-  const targetH = isStrip
+  const defaultH = isStrip
     ? printerProfile.portrait.heightPx
     : isLandscape
     ? printerProfile.landscape.heightPx
     : printerProfile.portrait.heightPx;
+
+  const targetW = isStrip
+    ? Math.max(defaultW, srcW * 2)
+    : Math.max(defaultW, srcW);
+
+  const targetH = Math.max(defaultH, srcH);
 
   if (typeof console !== 'undefined' && console.log) {
     console.log(
@@ -91,33 +114,19 @@ export async function buildPrintMaster(
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, targetW, targetH);
 
-  let sourceImg: HTMLCanvasElement | HTMLImageElement;
-  if (typeof logicalProductImage === 'string') {
-    sourceImg = await loadImage(logicalProductImage);
-  } else {
-    sourceImg = logicalProductImage;
-  }
-
-  const srcW =
-    (sourceImg as HTMLImageElement).naturalWidth ||
-    sourceImg.width ||
-    1800;
-  const srcH =
-    (sourceImg as HTMLImageElement).naturalHeight ||
-    sourceImg.height ||
-    2700;
-
-  const insetTop = printerProfile.safeAreaInsetsPx?.top ?? 82;
-  const insetBottom = printerProfile.safeAreaInsetsPx?.bottom ?? 82;
-  const insetLeft = printerProfile.safeAreaInsetsPx?.left ?? 82;
-  const insetRight = printerProfile.safeAreaInsetsPx?.right ?? 82;
+  // Calculate safe insets scaled proportionally from printerProfile
+  const baseInsetLeft = printerProfile.safeAreaInsetsPx?.left ?? 82;
+  const baseInsetTop = printerProfile.safeAreaInsetsPx?.top ?? 82;
+  const insetLeft = Math.round(baseInsetLeft * (targetW / defaultW));
+  const insetRight = insetLeft;
+  const insetTop = Math.round(baseInsetTop * (targetH / defaultH));
+  const insetBottom = insetTop;
 
   const printableW = targetW - insetLeft - insetRight;
   const printableH = targetH - insetTop - insetBottom;
 
   if (isStrip) {
     // Physical 100x148mm sheet holds TWO identical 5x15 strips side-by-side.
-    // Inset by Top 4mm (47px), Bottom 3mm (35px), Left 3mm (35px), Right 3mm (35px)
     const leftStripW = Math.round(printableW / 2);
     const rightStripW = printableW - leftStripW;
 

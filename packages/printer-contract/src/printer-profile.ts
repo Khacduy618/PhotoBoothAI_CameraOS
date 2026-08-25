@@ -47,26 +47,26 @@ export const CANON_CP1000_PROFILE: Readonly<PrinterProfile> = Object.freeze({
   mediaId: 'POSTCARD',
   widthMm: 100,
   heightMm: 148,
-  dpi: 300,
+  dpi: 600,
   portrait: {
-    widthPx: 1181,
-    heightPx: 1748,
+    widthPx: 2362,
+    heightPx: 3496,
   },
   landscape: {
-    widthPx: 1748,
-    heightPx: 1181,
+    widthPx: 3496,
+    heightPx: 2362,
   },
   safeAreaInsetsPx: {
-    top: 47, // 4mm at 300 DPI (4 / 25.4 * 300 ≈ 47px)
-    bottom: 35, // 3mm at 300 DPI (3 / 25.4 * 300 ≈ 35px)
-    left: 35, // 3mm at 300 DPI
-    right: 35, // 3mm at 300 DPI
+    top: 118, // 5mm at 600 DPI (5 / 25.4 * 600 ≈ 118px)
+    bottom: 71, // 3mm at 600 DPI (3 / 25.4 * 600 ≈ 71px)
+    left: 71, // 3mm at 600 DPI
+    right: 71, // 3mm at 600 DPI
   },
   bleedCompensation: {
-    top: 47,
-    bottom: 35,
-    left: 35,
-    right: 35,
+    top: 118,
+    bottom: 71,
+    left: 71,
+    right: 71,
   },
   colorSpace: 'sRGB',
   outputMimeType: 'image/jpeg',

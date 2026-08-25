@@ -329,6 +329,12 @@ export async function renderFrameComposition(
       ctx.rect(slotPx.x, slotPx.y, slotPx.width, slotPx.height);
       ctx.clip();
 
+      // Studio PhotoBooth Warm & High-Contrast Color Enhancement:
+      // +18% Saturation, +8% Contrast, subtle +4% golden-amber warmth, vibrant skin tone
+      if (ctx.filter !== undefined) {
+        ctx.filter = "contrast(1.08) saturate(1.18) sepia(0.04)";
+      }
+
       ctx.drawImage(
         img,
         crop.cropX,

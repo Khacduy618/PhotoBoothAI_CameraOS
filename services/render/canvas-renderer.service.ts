@@ -155,6 +155,10 @@ export class CanvasRenderer {
                     fitMode,
                 });
 
+                if (context.filter !== undefined) {
+                    context.filter = "contrast(1.08) saturate(1.18) sepia(0.04)";
+                }
+
                 if (context.drawImage) {
                     context.drawImage(img as CanvasImageSource, geom.photoX, geom.photoY, geom.photoWidth, geom.photoHeight);
                 }

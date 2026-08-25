@@ -107,10 +107,10 @@ export async function buildPrintMaster(
     sourceImg.height ||
     2700;
 
-  const insetTop = printerProfile.safeAreaInsetsPx?.top ?? 47;
-  const insetBottom = printerProfile.safeAreaInsetsPx?.bottom ?? 35;
-  const insetLeft = printerProfile.safeAreaInsetsPx?.left ?? 35;
-  const insetRight = printerProfile.safeAreaInsetsPx?.right ?? 35;
+  const insetTop = printerProfile.safeAreaInsetsPx?.top ?? 118;
+  const insetBottom = printerProfile.safeAreaInsetsPx?.bottom ?? 71;
+  const insetLeft = printerProfile.safeAreaInsetsPx?.left ?? 71;
+  const insetRight = printerProfile.safeAreaInsetsPx?.right ?? 71;
 
   const printableW = targetW - insetLeft - insetRight;
   const printableH = targetH - insetTop - insetBottom;

@@ -108,19 +108,19 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
     // Verify 2 drawImage calls for two-up layout
     expect(drawImage).toHaveBeenCalledTimes(2);
 
-    // Call 1: Left strip drawn inside safe margins (Left: 71px, Top: 118px)
+    // Call 1: Left strip drawn inside safe margins (Left: 71px, Top: 142px)
     const call1 = drawImage.mock.calls[0];
     expect(call1[0]).toBe(stripCanvas);
     expect(call1[5]).toBe(71); // destX (insetLeft = 3mm = 71px)
-    expect(call1[6]).toBe(118); // destY (insetTop = 5mm = 118px)
+    expect(call1[6]).toBe(142); // destY (insetTop = 6mm = 142px)
     expect(call1[7]).toBe(1110); // destWidth
-    expect(call1[8]).toBe(3307); // destHeight (3496 - 118 - 71)
+    expect(call1[8]).toBe(3307); // destHeight (3496 - 142 - 47)
 
     // Call 2: Right strip drawn inside safe margins (Right: 71px)
     const call2 = drawImage.mock.calls[1];
     expect(call2[0]).toBe(stripCanvas);
     expect(call2[5]).toBe(1181); // destX (insetLeft + leftStripW = 71 + 1110)
-    expect(call2[6]).toBe(118); // destY (insetTop = 5mm = 118px)
+    expect(call2[6]).toBe(142); // destY (insetTop = 6mm = 142px)
     expect(call2[7]).toBe(1110); // destWidth
     expect(call2[8]).toBe(3307); // destHeight
 
@@ -174,7 +174,7 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
     expect(drawImage).toHaveBeenCalledTimes(1);
     const call = drawImage.mock.calls[0];
     expect(call[5]).toBe(71);
-    expect(call[6]).toBe(118);
+    expect(call[6]).toBe(142);
     expect(call[7]).toBe(3354);
     expect(call[8]).toBe(2173);
   });

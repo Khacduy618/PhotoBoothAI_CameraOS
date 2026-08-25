@@ -57,14 +57,14 @@ export const CANON_CP1000_PROFILE: Readonly<PrinterProfile> = Object.freeze({
     heightPx: 2362,
   },
   safeAreaInsetsPx: {
-    top: 118, // 5mm at 600 DPI (5 / 25.4 * 600 ≈ 118px)
-    bottom: 71, // 3mm at 600 DPI (3 / 25.4 * 600 ≈ 71px)
+    top: 142, // 6mm at 600 DPI (6 / 25.4 * 600 ≈ 142px, shifted down by +1mm)
+    bottom: 47, // 2mm at 600 DPI (2 / 25.4 * 600 ≈ 47px, shifted down by -1mm)
     left: 71, // 3mm at 600 DPI
     right: 71, // 3mm at 600 DPI
   },
   bleedCompensation: {
-    top: 118,
-    bottom: 71,
+    top: 142,
+    bottom: 47,
     left: 71,
     right: 71,
   },

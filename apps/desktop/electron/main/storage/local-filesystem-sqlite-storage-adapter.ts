@@ -207,108 +207,120 @@ export class LocalFilesystemSQLiteStorageAdapter implements StorageAdapter {
 }
 
 /**
- * Injects a minimal EXIF APP1 segment with:
- *   - ColorSpace = 1 (sRGB)           [EXIF tag 0xA001]
- *   - XResolution / YResolution = 600 DPI [TIFF tags 0x011A / 0x011B]
- *   - ResolutionUnit = 2 (inch)        [TIFF tag 0x0128]
+ * Injects sRGB EXIF (ColorSpace=1, 600 DPI) into a JPEG byte buffer.
  *
- * This ensures Windows Explorer, ICC-aware print drivers, and Canon CP1000
- * all read "Color representation: sRGB" — matching the Canon 6D raw shots
- * which already embed sRGB in their EXIF.
+ * Strategy:
+ *  1. If an APP0 (JFIF) segment exists right after SOI:
+ *     - Patch APP0 density unit to 1 (inch) and Xdensity/Ydensity to 600.
+ *     - Insert APP1 EXIF **after** the APP0 segment (required by JFIF spec).
+ *  2. If no APP0, insert APP1 right after SOI (FF D8).
  *
- * Structure:
- *   FF E1 [len16]      APP1 marker + big-endian length
- *   45 78 69 66 00 00  "Exif\0\0"
- *   [TIFF/IFD header]
+ * This ensures Windows Explorer, ICC-aware print drivers and Canon CP1000
+ * all see: "Color representation: sRGB" and "600 dpi" — matching Canon 6D shots.
  */
 function injectSrgbExifIntoJpeg(bytes: Buffer): Buffer {
-  // Only process JPEG (starts with FF D8)
   if (bytes.length < 4 || bytes[0] !== 0xFF || bytes[1] !== 0xD8) return bytes;
 
-  // Build TIFF-based EXIF payload (little-endian)
-  // TIFF header: 'II' = LE, magic 42, IFD0 offset = 8
-  // IFD0: 4 entries (XResolution, YResolution, ResolutionUnit, ExifIFD pointer)
-  // ExifIFD: 1 entry (ColorSpace = sRGB)
-  //
-  // Offsets from start of TIFF header:
-  //   8  = IFD0
-  //   8 + 2 + 4*12 + 4 = 62  = XRes rational value (600/1)
-  //   70 = YRes rational value (600/1)
-  //   78 = ExifIFD
-  //   78 + 2 + 1*12 + 4 = 106 = next IFD = 0 (end)
-
-  const tiff = Buffer.alloc(96);
-  let off = 0;
-
-  // TIFF header (LE)
-  tiff.writeUInt16LE(0x4949, off); off += 2; // 'II' little-endian
-  tiff.writeUInt16LE(42, off); off += 2;      // magic
-  tiff.writeUInt32LE(8, off); off += 4;       // IFD0 at offset 8
+  // ── Build APP1 EXIF segment ──────────────────────────────────────────────
+  // TIFF little-endian layout:
+  //  Offset  0: TIFF header (II, 42, IFD0 at 8)
+  //  Offset  8: IFD0 — 4 entries (XRes, YRes, ResUnit, ExifIFD pointer)
+  //  Offset 58: next-IFD = 0
+  //  Offset 62: XResolution rational 600/1
+  //  Offset 70: YResolution rational 600/1
+  //  Offset 78: ExifIFD — 1 entry (ColorSpace = 1)
+  //  Offset 92: next-ExifIFD = 0
+  const tiff = Buffer.alloc(96, 0);
+  let o = 0;
+  tiff.writeUInt16LE(0x4949, o); o += 2; // 'II' LE
+  tiff.writeUInt16LE(42,     o); o += 2; // TIFF magic
+  tiff.writeUInt32LE(8,      o); o += 4; // IFD0 at 8
 
   // IFD0: 4 entries
-  tiff.writeUInt16LE(4, off); off += 2;
+  tiff.writeUInt16LE(4, o); o += 2;
 
-  // Tag 0x011A XResolution = RATIONAL offset 56
-  tiff.writeUInt16LE(0x011A, off); off += 2;
-  tiff.writeUInt16LE(5, off); off += 2;       // RATIONAL
-  tiff.writeUInt32LE(1, off); off += 4;       // count
-  tiff.writeUInt32LE(56, off); off += 4;      // offset to value
+  // 0x011A XResolution → RATIONAL at offset 62
+  tiff.writeUInt16LE(0x011A, o); o += 2;
+  tiff.writeUInt16LE(5,      o); o += 2;
+  tiff.writeUInt32LE(1,      o); o += 4;
+  tiff.writeUInt32LE(62,     o); o += 4;
 
-  // Tag 0x011B YResolution = RATIONAL offset 64
-  tiff.writeUInt16LE(0x011B, off); off += 2;
-  tiff.writeUInt16LE(5, off); off += 2;
-  tiff.writeUInt32LE(1, off); off += 4;
-  tiff.writeUInt32LE(64, off); off += 4;
+  // 0x011B YResolution → RATIONAL at offset 70
+  tiff.writeUInt16LE(0x011B, o); o += 2;
+  tiff.writeUInt16LE(5,      o); o += 2;
+  tiff.writeUInt32LE(1,      o); o += 4;
+  tiff.writeUInt32LE(70,     o); o += 4;
 
-  // Tag 0x0128 ResolutionUnit = 2 (inch)
-  tiff.writeUInt16LE(0x0128, off); off += 2;
-  tiff.writeUInt16LE(3, off); off += 2;       // SHORT
-  tiff.writeUInt32LE(1, off); off += 4;
-  tiff.writeUInt32LE(2, off); off += 4;       // value: 2 = inch
+  // 0x0128 ResolutionUnit = 2 (inch)
+  tiff.writeUInt16LE(0x0128, o); o += 2;
+  tiff.writeUInt16LE(3,      o); o += 2;
+  tiff.writeUInt32LE(1,      o); o += 4;
+  tiff.writeUInt32LE(2,      o); o += 4;
 
-  // Tag 0x8769 ExifIFD pointer
-  tiff.writeUInt16LE(0x8769, off); off += 2;
-  tiff.writeUInt16LE(4, off); off += 2;       // LONG
-  tiff.writeUInt32LE(1, off); off += 4;
-  tiff.writeUInt32LE(72, off); off += 4;      // ExifIFD at offset 72
+  // 0x8769 ExifIFD pointer → offset 78
+  tiff.writeUInt16LE(0x8769, o); o += 2;
+  tiff.writeUInt16LE(4,      o); o += 2;
+  tiff.writeUInt32LE(1,      o); o += 4;
+  tiff.writeUInt32LE(78,     o); o += 4;
 
-  // Next IFD = 0 (end of IFD0)
-  tiff.writeUInt32LE(0, off); off += 4;       // off = 56
+  tiff.writeUInt32LE(0, o); o += 4; // next IFD0 = 0  (o=58)
 
-  // XResolution value: 600/1
-  tiff.writeUInt32LE(600, off); off += 4;
-  tiff.writeUInt32LE(1, off); off += 4;       // off = 64
+  // Values at 62, 70
+  tiff.writeUInt32LE(600, 62); tiff.writeUInt32LE(1, 66); // XRes = 600/1
+  tiff.writeUInt32LE(600, 70); tiff.writeUInt32LE(1, 74); // YRes = 600/1
 
-  // YResolution value: 600/1
-  tiff.writeUInt32LE(600, off); off += 4;
-  tiff.writeUInt32LE(1, off); off += 4;       // off = 72
+  // ExifIFD at offset 78: 1 entry
+  tiff.writeUInt16LE(1, 78);
 
-  // ExifIFD: 1 entry
-  tiff.writeUInt16LE(1, off); off += 2;       // off = 74
+  // 0xA001 ColorSpace = 1 (sRGB)
+  tiff.writeUInt16LE(0xA001, 80);
+  tiff.writeUInt16LE(3,      82); // SHORT
+  tiff.writeUInt32LE(1,      84); // count
+  tiff.writeUInt32LE(1,      88); // value: 1 = sRGB
 
-  // Tag 0xA001 ColorSpace = 1 (sRGB)
-  tiff.writeUInt16LE(0xA001, off); off += 2;
-  tiff.writeUInt16LE(3, off); off += 2;       // SHORT
-  tiff.writeUInt32LE(1, off); off += 4;
-  tiff.writeUInt32LE(1, off); off += 4;       // value: 1 = sRGB
+  tiff.writeUInt32LE(0, 92); // next ExifIFD = 0
 
-  // Next ExifIFD = 0
-  tiff.writeUInt32LE(0, off); // off = 92
-
-  // Prepend "Exif\0\0"
-  const exifMagic = Buffer.from([0x45, 0x78, 0x69, 0x66, 0x00, 0x00]);
+  const exifMagic = Buffer.from([0x45, 0x78, 0x69, 0x66, 0x00, 0x00]); // 'Exif\0\0'
   const exifPayload = Buffer.concat([exifMagic, tiff]);
+  const app1Len = exifPayload.length + 2;
+  const app1 = Buffer.concat([
+    Buffer.from([0xFF, 0xE1, (app1Len >> 8) & 0xFF, app1Len & 0xFF]),
+    exifPayload,
+  ]);
 
-  // Build APP1 segment: FF E1 [big-endian length = payload + 2] [payload]
-  const app1Length = exifPayload.length + 2; // +2 for length field itself
-  const app1Header = Buffer.from([0xFF, 0xE1, (app1Length >> 8) & 0xFF, app1Length & 0xFF]);
-  const app1Segment = Buffer.concat([app1Header, exifPayload]);
+  // ── Locate APP0 segment ──────────────────────────────────────────────────
+  let insertPos = 2; // default: right after SOI
 
-  // Insert after SOI (FF D8), replacing or inserting before existing APP0/APP1
-  // Always insert right after SOI bytes
-  const insertPos = 2;
-  return Buffer.concat([bytes.subarray(0, insertPos), app1Segment, bytes.subarray(insertPos)]);
+  if (
+    bytes[2] === 0xFF &&
+    bytes[3] === 0xE0 &&
+    bytes.length >= 6
+  ) {
+    // APP0/JFIF present — read its length (big-endian, includes the 2 length bytes)
+    const app0Len = bytes.readUInt16BE(4);
+
+    // Patch APP0 density in-place:
+    //  byte  8 = density_unit  → 1 (dots per inch)
+    //  bytes 9-10 = Xdensity   → 600  (big-endian UINT16)
+    //  bytes 11-12 = Ydensity  → 600
+    if (bytes.length >= 14) {
+      bytes[8]  = 1;                         // density unit = inch
+      bytes.writeUInt16BE(600, 9);           // Xdensity = 600
+      bytes.writeUInt16BE(600, 11);          // Ydensity = 600
+    }
+
+    // Insert APP1 after APP0
+    insertPos = 2 + 2 + app0Len; // SOI(2) + marker(2) + app0Length
+    if (insertPos > bytes.length) insertPos = bytes.length;
+  }
+
+  return Buffer.concat([
+    bytes.subarray(0, insertPos),
+    app1,
+    bytes.subarray(insertPos),
+  ]);
 }
+
 
 function atomicWriteFile(filePath: string, bytes: Buffer): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });

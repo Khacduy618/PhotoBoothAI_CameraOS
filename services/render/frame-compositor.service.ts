@@ -231,22 +231,22 @@ export async function renderFrameComposition(
   const isLandscape = frame.orientation === "landscape" || (frame.outputWidth && frame.outputHeight ? frame.outputWidth > frame.outputHeight : false);
   const isStrip = (frame as { targetProduct?: string }).targetProduct === "STRIP_2" || (frame as { targetProduct?: string }).targetProduct === "STRIP_4" || (frame as { preferredPaper?: string }).preferredPaper === "2x6-double";
 
-  let outputWidth = frame.outputWidth || (isStrip ? 900 : isLandscape ? 2700 : 1800);
-  let outputHeight = frame.outputHeight || (isLandscape ? 1800 : 2700);
+  let outputWidth = frame.outputWidth || (isStrip ? 3648 : isLandscape ? 10944 : 7392);
+  let outputHeight = frame.outputHeight || (isStrip ? 10944 : isLandscape ? 7392 : 10944);
 
-  // If imported image has low resolution (< 600px width or < 1200px height), upscale render canvas
-  // to standard 300 DPI high resolution (900x2700 or 1800x2700) so camera photos remain ultra crisp!
-  if (outputWidth < 600 || outputHeight < 1200) {
+  // If imported image has low resolution (< 1200px width or < 2400px height), upscale render canvas
+  // to 1:1 Canon 6D sensor mapping resolution (3648x10944 for Strip, 7392x10944 for Sheet)
+  if (outputWidth < 1200 || outputHeight < 2400) {
     const ratio = outputWidth / outputHeight;
     if (isStrip || ratio <= 0.45) {
-      outputHeight = 2700;
-      outputWidth = Math.round(outputHeight * ratio) || 900;
+      outputHeight = 10944;
+      outputWidth = Math.round(outputHeight * ratio) || 3648;
     } else if (isLandscape) {
-      outputWidth = 2700;
-      outputHeight = Math.round(outputWidth / ratio) || 1800;
+      outputWidth = 10944;
+      outputHeight = Math.round(outputWidth / ratio) || 7392;
     } else {
-      outputHeight = 2700;
-      outputWidth = Math.round(outputHeight * ratio) || 1800;
+      outputHeight = 10944;
+      outputWidth = Math.round(outputHeight * ratio) || 7392;
     }
   }
 

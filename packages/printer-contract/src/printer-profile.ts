@@ -57,16 +57,16 @@ export const CANON_CP1000_PROFILE: Readonly<PrinterProfile> = Object.freeze({
     heightPx: 1181,
   },
   safeAreaInsetsPx: {
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
+    top: 47, // 4mm at 300 DPI (4 / 25.4 * 300 ≈ 47px)
+    bottom: 35, // 3mm at 300 DPI (3 / 25.4 * 300 ≈ 35px)
+    left: 35, // 3mm at 300 DPI
+    right: 35, // 3mm at 300 DPI
   },
   bleedCompensation: {
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
+    top: 47,
+    bottom: 35,
+    left: 35,
+    right: 35,
   },
   colorSpace: 'sRGB',
   outputMimeType: 'image/jpeg',

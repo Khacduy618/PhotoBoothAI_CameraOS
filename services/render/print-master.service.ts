@@ -107,19 +107,19 @@ export async function buildPrintMaster(
     sourceImg.height ||
     2700;
 
-  const insetTop = printerProfile.safeAreaInsetsPx?.top ?? 0;
-  const insetBottom = printerProfile.safeAreaInsetsPx?.bottom ?? 0;
-  const insetLeft = printerProfile.safeAreaInsetsPx?.left ?? 0;
-  const insetRight = printerProfile.safeAreaInsetsPx?.right ?? 0;
+  const insetTop = printerProfile.safeAreaInsetsPx?.top ?? 47;
+  const insetBottom = printerProfile.safeAreaInsetsPx?.bottom ?? 35;
+  const insetLeft = printerProfile.safeAreaInsetsPx?.left ?? 35;
+  const insetRight = printerProfile.safeAreaInsetsPx?.right ?? 35;
 
   const printableW = targetW - insetLeft - insetRight;
   const printableH = targetH - insetTop - insetBottom;
 
   if (isStrip) {
     // Physical 100x148mm sheet holds TWO identical 5x15 strips side-by-side.
-    // Exact 1:1 scale (590px left, 591px right)
-    const leftStripW = 590;
-    const rightStripW = targetW - leftStripW; // 591 px
+    // Inset by Top 4mm (47px), Bottom 3mm (35px), Left 3mm (35px), Right 3mm (35px)
+    const leftStripW = Math.round(printableW / 2);
+    const rightStripW = printableW - leftStripW;
 
     // Left strip direct render
     ctx.drawImage(

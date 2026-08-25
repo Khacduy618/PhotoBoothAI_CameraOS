@@ -167,29 +167,27 @@ class WindowsPrinterAdapter {
             $ev.Graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
             $ev.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
 
-            $pageW = $ev.PageBounds.Width
-            $pageH = $ev.PageBounds.Height
+            $clip = $ev.Graphics.VisibleClipBounds
+            $pageW = $clip.Width
+            $pageH = $clip.Height
             $pageIsLandscape = $pageW -gt $pageH
 
             # If page orientation does not match image orientation, apply 90-degree transform
             if ($isLandscape -ne $pageIsLandscape) {
-              $ev.Graphics.TranslateTransform($pageW / 2, $pageH / 2)
+              $ev.Graphics.TranslateTransform($clip.X + $pageW / 2, $clip.Y + $pageH / 2)
               $ev.Graphics.RotateTransform(90)
-              $ev.Graphics.TranslateTransform(-$pageH / 2, -$pageW / 2)
-              $destRect = New-Object System.Drawing.Rectangle(0, 0, [int]$pageH, [int]$pageW)
+              $ev.Graphics.TranslateTransform(-($clip.Y + $pageH / 2), -($clip.X + $pageW / 2))
+              $destRect = New-Object System.Drawing.RectangleF($clip.Y, $clip.X, $pageH, $pageW)
             } else {
-              $destRect = New-Object System.Drawing.Rectangle(0, 0, [int]$pageW, [int]$pageH)
+              $destRect = New-Object System.Drawing.RectangleF($clip.X, $clip.Y, $pageW, $pageH)
             }
 
-            # Explicitly use GraphicsUnit.Pixel and source rectangle (0,0,Width,Height)
-            # to prevent GDI+ from auto-scaling by 96 DPI / 300 DPI mismatch!
+            # Draw image directly into the physical visible clip rectangle
+            $srcRect = New-Object System.Drawing.RectangleF(0, 0, $img.Width, $img.Height)
             $ev.Graphics.DrawImage(
               $img,
               $destRect,
-              0,
-              0,
-              $img.Width,
-              $img.Height,
+              $srcRect,
               [System.Drawing.GraphicsUnit]::Pixel
             )
             $ev.HasMorePages = $false

@@ -1293,7 +1293,27 @@ function registerSkeletonIpc() {
     return touch({ ...session, outputs: { master: masterImgPath, share: finalImgPath, print: printImgPath }, qr: { url: '', status: 'failed' } }, 'RESULT_READY');
   }));
   ipcMain.handle('cameraos:guest:print:request', (_event, sessionId, copies) => safeGuest(() => {
-    const session = requireGuestSession(String(sessionId || ''));
+    let session = sessions.get(String(sessionId || ''));
+    if (!session) {
+      const sid = String(sessionId || '');
+      const diskPrintImg = sessionMediaPaths ? sessionMediaPaths.printMaster(sid) : path.join(storageRoot, 'sessions', sid, 'outputs', 'print-cp1000.jpg');
+      if (fs.existsSync(diskPrintImg)) {
+        session = {
+          sessionId: sid,
+          eventId: 'CALIBRATION',
+          status: 'COMPOSING',
+          product: { id: 'PREMIUM_POSTCARD', printSheets: 1 },
+          captureFormat: { id: 'SHEET_4' },
+          photos: [],
+          outputs: { print: diskPrintImg },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        sessions.set(sid, session);
+      } else {
+        throw new Error(`Session not found: ${sid}`);
+      }
+    }
     const printImg =
       session.outputs?.print ||
       (sessionMediaPaths ? sessionMediaPaths.printMaster(session.sessionId) : null) ||

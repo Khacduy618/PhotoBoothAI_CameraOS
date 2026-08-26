@@ -91,17 +91,25 @@ export function CP1000ColorTestModal({
 
       // If in Electron desktop environment, use direct storage/print channel
       const momentaiApi = typeof window !== 'undefined'
-        ? (window as unknown as { momentai?: { guest?: { storage?: { saveOutput: (sid: string, type: string, file: unknown) => Promise<unknown> }; session?: { requestPrint: (sid: string, copies: number) => Promise<unknown> } } } }).momentai?.guest
+        ? (window as unknown as { momentai?: { guest?: { storage?: { createSession?: (sid: string) => Promise<unknown>; saveOutput?: (sid: string, type: string, file: unknown) => Promise<unknown> }; session?: { requestPrint?: (sid: string, copies: number) => Promise<{ ok?: boolean; error?: { message?: string; guestMessage?: string } }> } } } }).momentai?.guest
         : undefined;
 
       if (momentaiApi?.storage?.saveOutput && momentaiApi?.session?.requestPrint) {
         const testSessionId = `calibration_test_${Date.now()}`;
+        if (momentaiApi.storage.createSession) {
+          try {
+            await momentaiApi.storage.createSession(testSessionId);
+          } catch {}
+        }
         await momentaiApi.storage.saveOutput(testSessionId, 'print', {
           dataUrl: testDataUrl,
           mimeType: 'image/jpeg',
         });
-        await momentaiApi.session.requestPrint(testSessionId, 1);
-        setPrintFeedback('✅ Đã gửi lệnh in 1 tờ test 10x15 (1800x2700) tới Canon CP1000 thành công!');
+        const res = await momentaiApi.session.requestPrint(testSessionId, 1);
+        if (res && typeof res === 'object' && 'ok' in res && !res.ok) {
+          throw new Error(res.error?.guestMessage || res.error?.message || 'Lỗi khi gửi lệnh in');
+        }
+        setPrintFeedback('✅ Đã nạp thành công vào Spooler Windows: Máy in Canon CP1000 đang tiến hành in 1 tờ test 10x15!');
       } else {
         // Fallback for browser testing: Download file directly
         testResult.download('CP1000-color-calibration-test.jpg');

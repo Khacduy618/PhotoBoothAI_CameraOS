@@ -577,29 +577,19 @@ static void processCommand(NSDictionary *cmd) {
 
         sendJsonEvent(@{ @"event": @"captureStarted", @"shotIndex": cmd[@"shotIndex"] ?: @1 });
         g_wasLiveViewBeforeCapture = g_liveViewActive;
-        if (g_wasLiveViewBeforeCapture) {
-            EdsUInt32 evfOff = 0;
-            pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOff), &evfOff);
-            g_liveViewActive = 0;
-            // Pump runloop for 300ms to allow camera to drop mirror and return from LiveView
-            for (int i = 0; i < 6; i++) {
-                CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false);
-            }
-        }
-
-        // Try TakePicture first, then fallback to PressShutterButton
+        // Direct Single-Exposure Shutter Trigger from LiveView (eliminates double mirror slap)
         EdsError err = pEdsSendCommand(g_camera, kEdsCameraCommand_TakePicture, 0);
         NSString *usedCmd = @"TakePicture";
         if (err != EDS_ERR_OK) {
             usedCmd = @"PressShutterButton_Completely_NonAF";
             err = pEdsSendCommand(g_camera, kEdsCameraCommand_PressShutterButton, kEdsCameraCommand_ShutterButton_Completely_NonAF);
-            usleep(200000);
+            usleep(50000);
             pEdsSendCommand(g_camera, kEdsCameraCommand_PressShutterButton, kEdsCameraCommand_ShutterButton_OFF);
         }
         if (err != EDS_ERR_OK) {
             usedCmd = @"PressShutterButton_Completely";
             err = pEdsSendCommand(g_camera, kEdsCameraCommand_PressShutterButton, kEdsCameraCommand_ShutterButton_Completely);
-            usleep(200000);
+            usleep(50000);
             pEdsSendCommand(g_camera, kEdsCameraCommand_PressShutterButton, kEdsCameraCommand_ShutterButton_OFF);
         }
 

@@ -271,6 +271,7 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
           await getDesktopMediaBridge()?.stopShotClip(session.sessionId, currentShotIndex, persistedIso, clipOptions).catch(() => null);
 
           if (originalDataUrl) {
+            completedPhotos[currentShotIndex].dataUrl = originalDataUrl;
             newPhoto.dataUrl = originalDataUrl;
           }
         })();
@@ -311,13 +312,6 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
       gestureLockedRef.current = false;
     }
   }, [gesture.result.heldDurationMs, gesture.result.name, captureStep]);
-
-  useEffect(() => {
-    if (capturedPool.length >= totalShots && captureStep === 'complete' && !completionNotifiedRef.current) {
-      completionNotifiedRef.current = true;
-      onCaptureCompleted(capturedPool.slice(0, totalShots));
-    }
-  }, [capturedPool, captureStep, onCaptureCompleted, totalShots]);
 
   const gestureCopy = !previewReady
     ? 'Đang chờ camera sẵn sàng'

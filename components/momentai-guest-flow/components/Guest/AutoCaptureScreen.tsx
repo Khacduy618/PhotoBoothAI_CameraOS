@@ -277,8 +277,9 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
         pendingSavePromises.push(savePromise);
 
         if (shot + 1 < totalShots) {
-          setCaptureStep('between');
-          await wait((captureConfig.intervalSeconds || 2) * 1000); // 2-second comfortable pose preparation
+          // 1.0s freeze-frame review for the shot, then immediately launch next countdown with liveview
+          setCaptureStep('saving');
+          await wait(1000);
         }
       }
 

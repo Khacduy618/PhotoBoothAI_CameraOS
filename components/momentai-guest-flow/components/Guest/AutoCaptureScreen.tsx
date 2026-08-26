@@ -69,6 +69,8 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
   const isCapturingRef = useRef(false);
   const gestureLockedRef = useRef(false);
   const completionNotifiedRef = useRef(false);
+  const lastEvfFrameTimeRef = useRef<number>(Date.now());
+  const lastShutterTimeRef = useRef<number>(0);
   const totalShots = session.captureCount || 4;
   const gestureEnabled = previewReady && captureStep === 'ready';
   const gestureSourceRef = cameraSettings.mode === 'canon' ? canvasRef : videoRef;
@@ -81,6 +83,7 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
 
     img.onload = () => {
       if (cancelled) return;
+      lastEvfFrameTimeRef.current = Date.now();
       const canvas = canvasRef.current;
       if (canvas && img.naturalWidth > 0 && img.naturalHeight > 0) {
         if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
@@ -104,6 +107,7 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
       const cam = (window as unknown as { momentai: { guest: { camera: { onEvfFrame: (cb: (frame: { dataUrl: string }) => void) => () => void } } } }).momentai.guest.camera;
       unsubscribeEvf = cam.onEvfFrame((frame) => {
         if (!cancelled && frame?.dataUrl) {
+          lastEvfFrameTimeRef.current = Date.now();
           img.src = frame.dataUrl;
         }
       });
@@ -142,6 +146,21 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
 
     try {
       for (let shot = currentShot; shot < totalShots; shot += 1) {
+        // If not the very first shot, wait for LiveView to truly resume before starting countdown!
+        if (shot > 0) {
+          setCaptureStep('saving');
+          const waitStart = Date.now();
+          // Give guest ~1s to view previous shot, and wait until Canon EVF stream delivers fresh live frame
+          while (Date.now() - waitStart < 4000) {
+            const elapsed = Date.now() - waitStart;
+            if (elapsed >= 800 && lastEvfFrameTimeRef.current > lastShutterTimeRef.current) {
+              break;
+            }
+            await wait(40);
+          }
+          await wait(150);
+        }
+
         setCurrentShot(shot);
         setCaptureStep('countdown');
 
@@ -201,6 +220,7 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
 
         // 2. SHUTTER_TRIGGERED(shot) -> Mark shutter timestamp
         setCaptureStep('capturing');
+        lastShutterTimeRef.current = Date.now();
         const shutterIso = new Date().toISOString();
         await getDesktopMediaBridge()?.markShutter(session.sessionId, shot, shutterIso).catch(() => null);
 
@@ -276,12 +296,6 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
           }
         })();
         pendingSavePromises.push(savePromise);
-
-        if (shot + 1 < totalShots) {
-          // 1.0s freeze-frame review for the shot, then immediately launch next countdown with liveview
-          setCaptureStep('saving');
-          await wait(1000);
-        }
       }
 
       setCaptureStep('saving');

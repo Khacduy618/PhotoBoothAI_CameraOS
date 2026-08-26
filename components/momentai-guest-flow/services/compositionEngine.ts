@@ -122,11 +122,13 @@ export class CompositionEngine {
       }
     }
 
-    // Generate Outputs (100% Maximum Quality - Lossless PNG & JPEG 1.0)
+    // Generate Outputs according to 10/10 Photobooth Architecture:
+    // 1. Master: Lossless PNG in RAM
     const masterDataUrl = canvas.toDataURL('image/png');
-    const shareDataUrl = canvas.toDataURL('image/jpeg', 1.0);
+    // 2. Share / Online Web QR: JPEG 0.94 (Lightweight & optimized for mobile view)
+    const shareDataUrl = canvas.toDataURL('image/jpeg', 0.94);
 
-    // Render Print Data URL via authoritative CP1000 print master builder
+    // 3. Print Master: Direct in-memory Canvas transfer -> CP1000 Physical Raster (JPEG 1.0 / PNG)
     const isStrip = isStripTemplate(frame);
     const targetProduct = frame.targetProduct || (isStrip ? 'STRIP_4' : 'SHEET_4');
     const isLandscape = canvas.width > canvas.height;

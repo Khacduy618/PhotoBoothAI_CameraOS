@@ -18,6 +18,7 @@ import type { CameraSettings, CaptureConfig, EventConfig, FrameTemplate, LayoutT
 import type { MomentAICaptureFormat, MomentAICaptureFormatId, MomentAIGuestSession, MomentAITemplate } from '@/types/momentai-guest-session';
 import type { GuestProductConfig } from '@/types/guest-product';
 import { resolveTargetProduct, isStripProduct as isStripProductId, canonicalLayoutType, canonicalPreferredPaper, canonicalRenderMode, getCanonicalSlots, normalizeSlotToUnit } from '@/services/frame/resolveTargetProduct';
+import { resolvePhysicalPrintPlan } from '@/services/printer/physical-print-plan';
 
 const EVENT_CONFIG: EventConfig = {
   eventName: 'PHỐ CỔ HỘI AN',
@@ -32,7 +33,7 @@ const EVENT_CONFIG: EventConfig = {
 const CAPTURE_CONFIG: CaptureConfig = {
   availableCounts: [2, 3, 4, 6],
   defaultCount: 4,
-  countdownSeconds: 3,
+  countdownSeconds: 8,
   intervalSeconds: 2,
   allowRetake: false,
 };
@@ -234,6 +235,21 @@ export function MomentAIGuestFlowController() {
     const uniqueTemplates = Array.from(new Map(allAvailableTemplates.map((t) => [t.id, t])).values());
     setFrameTemplates(uniqueTemplates);
     setBackendSession(updatedBackend);
+
+    // Trigger Phase A background upload (non-blocking) upon entering frame selection
+    if (typeof window !== 'undefined') {
+      const cloudBridge = (window as unknown as { momentai?: { guest?: { cloud?: { initSession?: (sid: string, meta?: unknown) => Promise<unknown>; triggerPhaseAUpload?: (sid: string) => Promise<unknown> } } } }).momentai?.guest?.cloud;
+      if (cloudBridge?.initSession) {
+        void cloudBridge.initSession(updatedBackend.sessionId, {
+          productType: currentSession.product?.id,
+          requiredShots: currentSession.captureCount,
+        });
+      }
+      if (cloudBridge?.triggerPhaseAUpload) {
+        void cloudBridge.triggerPhaseAUpload(updatedBackend.sessionId);
+      }
+    }
+
     setScreenState('G04_SELECT_FRAME');
   };
 
@@ -281,9 +297,9 @@ export function MomentAIGuestFlowController() {
   const renderAndShowResult = async (session: SessionData, backend: MomentAIGuestSession, drawDataUrl: string) => {
     if (!session.selectedFrame) return;
     const isStrip = isStripTemplate(session.selectedFrame);
-    const isLandscape = session.selectedFrame.orientation === 'landscape';
-    const targetWidth = isStrip ? 900 : isLandscape ? 2700 : 1800;
-    const targetHeight = isLandscape ? 1800 : 2700;
+    const isLandscape = !isStrip && session.selectedFrame.orientation === 'landscape';
+    const targetWidth = isStrip ? 5472 : isLandscape ? 16200 : 10944;
+    const targetHeight = isStrip ? 16416 : isLandscape ? 10944 : 16200;
 
     const outputs = await compositionEngine.renderComposition(
       session.selectedFrame,
@@ -304,19 +320,89 @@ export function MomentAIGuestFlowController() {
           dataUrl: outputs.master,
           mimeType: 'image/png',
         });
+        if (outputs.print) {
+          await (window as unknown as { momentai: { guest: { storage: { saveOutput: (sid: string, type: string, file: unknown) => Promise<unknown> } } } }).momentai.guest.storage.saveOutput(backend.sessionId, 'print', {
+            dataUrl: outputs.print,
+            mimeType: 'image/jpeg',
+          });
+        }
       } catch (e) {
         console.warn('Storage saveOutput error:', e);
       }
     }
+
+    // Trigger background video composition for the FINAL selected frame
+    if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { media?: { composeVideo: (sid: string, frame: unknown, opts: unknown) => Promise<unknown> } } } }).momentai?.guest?.media?.composeVideo) {
+      try {
+        void (window as unknown as { momentai: { guest: { media: { composeVideo: (sid: string, frame: unknown, opts: unknown) => Promise<unknown> } } } }).momentai.guest.media.composeVideo(
+          backend.sessionId,
+          session.selectedFrame,
+          {
+            drawDataUrl,
+            targetWidth,
+            targetHeight,
+          }
+        );
+      } catch (e) {
+        console.warn('Video compose trigger error:', e);
+      }
+    }
+
+    // Early QR reservation: get tokenized session share URL
+    let qrUrl = '';
+    if (typeof window !== 'undefined') {
+      const cloudBridge = (window as unknown as { momentai?: { guest?: { cloud?: { getPublicToken?: (sid: string) => Promise<{ ok?: boolean; value?: { publicToken?: string; landingUrl?: string }; publicToken?: string; landingUrl?: string }> } } } }).momentai?.guest?.cloud;
+      const mediaBridge = (window as unknown as { momentai?: { guest?: { media?: { getPublicToken?: (sid: string) => Promise<{ ok?: boolean; value?: { publicToken?: string } }> } } } }).momentai?.guest?.media;
+      
+      if (cloudBridge?.getPublicToken) {
+        try {
+          const res = await cloudBridge.getPublicToken(backend.sessionId);
+          const directUrl = res?.value?.landingUrl || res?.landingUrl;
+          const token = res?.value?.publicToken || res?.publicToken;
+          if (directUrl) {
+            qrUrl = directUrl;
+          } else if (token) {
+            const baseUrl = (process.env.MOMENTAI_LANDING_BASE_URL || process.env.NEXT_PUBLIC_LANDING_BASE_URL || process.env.MOMENTAI_LANDING_DOMAIN || 'http://localhost:5174').replace(/\/+$/, '');
+            qrUrl = `${baseUrl}/s/${token}`;
+          }
+        } catch {}
+      }
+      if (!qrUrl && mediaBridge?.getPublicToken) {
+        try {
+          const tokenRes = await mediaBridge.getPublicToken(backend.sessionId);
+          const token = tokenRes?.value?.publicToken;
+          if (token) {
+            const baseUrl = (process.env.MOMENTAI_LANDING_BASE_URL || process.env.NEXT_PUBLIC_LANDING_BASE_URL || process.env.MOMENTAI_LANDING_DOMAIN || 'http://localhost:5174').replace(/\/+$/, '');
+            qrUrl = `${baseUrl}/s/${token}`;
+          }
+        } catch {}
+      }
+    }
+
     const composedBackend = await api('compose', { sessionId: backend.sessionId });
-    setCurrentSession({ ...session, drawDataUrl, outputs, qr: mapBackendQr(composedBackend), printStatus: 'idle' });
+    const qrData = qrUrl ? { status: 'ready' as const, url: qrUrl } : mapBackendQr(composedBackend);
+
+    setCurrentSession({ ...session, drawDataUrl, outputs, qr: qrData, printStatus: 'idle' });
     setBackendSession(composedBackend);
     setScreenState('G06_RESULT');
   };
 
   const handleConfirmPrint = async () => {
     if (!backendSession || !currentSession) return;
-    const printCopies = currentSession.product?.printSheets || 1;
+    const productType =
+      currentSession.product?.id ||
+      (currentSession.selectedFrame ? resolveTargetProduct(currentSession.selectedFrame) : null) ||
+      'STRIP_2';
+    const isStrip = isStripProductId(productType as any);
+    const requestedUnits = isStrip ? 2 : (currentSession.product?.printSheets || 1);
+    const plan = resolvePhysicalPrintPlan({
+      product: productType,
+      requestedQuantity: requestedUnits,
+      isLandscape: currentSession.selectedFrame?.orientation === 'landscape',
+      sessionId: backendSession.sessionId,
+    });
+    const printCopies = plan.sheets;
+
     setCurrentSession({ ...currentSession, printStatus: 'sending' });
     try {
       await api('request-print', { sessionId: backendSession.sessionId, copies: printCopies });
@@ -423,13 +509,15 @@ export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefin
     outputPaper: definition.outputPaper,
   });
 
-  const targetProduct = resolvedProduct ?? 'STRIP_4'; // safe fallback only for truly unknown
-  const isStrip = isStripProductId(resolvedProduct);
-  const layoutType = canonicalLayoutType(resolvedProduct);
+  const isStrip = isStripProductId(resolvedProduct) || definition.targetProduct === 'STRIP_2' || definition.targetProduct === 'STRIP_4' || definition.outputPaper === '5x15';
+  const targetProduct = resolvedProduct ?? (isStrip ? (count === 2 ? 'STRIP_2' : 'STRIP_4') : (count === 1 ? 'PREMIUM_POSTCARD' : count === 6 ? 'SHEET_6' : 'STRIP_4'));
+  const layoutType = canonicalLayoutType(targetProduct);
 
   // ── Slot normalization (Canonical 0..1 range) ───────────────────────────
-  const outW = definition.outputWidth || 1800;
   const outH = definition.outputHeight || 2700;
+  const outW = isStrip && (definition.outputWidth || 1800) >= outH * 0.5
+    ? Math.round(outH / 3)
+    : (definition.outputWidth || (isStrip ? 900 : 1800));
 
   const rawNormSlots = (definition.slots || []).map((slot, index) => {
     const unit = normalizeSlotToUnit(slot, outW, outH);
@@ -478,8 +566,8 @@ export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefin
     allowTyping: true,
     allowDraw: definition.allowDraw ?? true,
     orientation: isLandscape ? 'landscape' : 'portrait',
-    outputWidth: definition.outputWidth || 1800,
-    outputHeight: definition.outputHeight || 2700,
+    outputWidth: outW,
+    outputHeight: outH,
     preferredPaper: canonicalPreferredPaper(resolvedProduct),
     supportedPapers: isStrip ? ['2x6-double', '4x6'] : ['4x6'],
     renderMode: canonicalRenderMode(resolvedProduct),
@@ -714,7 +802,13 @@ function isLocalGuestFallbackAllowed() {
 
 function normalizeSession(partial: Partial<MomentAIGuestSession>, previous: MomentAIGuestSession | null, action: string, body: Record<string, unknown>): MomentAIGuestSession {
   const fallback = previous ?? createLocalSession(body.eventId as string | undefined);
-  return applyLocalGuestAction(action, body, { ...fallback, ...partial });
+  const localResult = applyLocalGuestAction(action, body, { ...fallback, ...partial });
+  return {
+    ...localResult,
+    ...partial,
+    sessionId: partial.sessionId || localResult.sessionId,
+    eventId: partial.eventId || localResult.eventId,
+  };
 }
 
 function applyLocalGuestAction(action: string, body: Record<string, unknown>, previous: MomentAIGuestSession | null): MomentAIGuestSession {
@@ -723,7 +817,7 @@ function applyLocalGuestAction(action: string, body: Record<string, unknown>, pr
 
   switch (action) {
     case 'start-session':
-      return createLocalSession(body.eventId as string | undefined);
+      return previous ? { ...previous, status: 'SELECTING_FORMAT', updatedAt: now } : createLocalSession(body.eventId as string | undefined);
     case 'select-format': {
       const format = LOCAL_CAPTURE_FORMATS.find((item) => item.id === body.formatId) ?? LOCAL_CAPTURE_FORMATS[2];
       return { ...session, captureFormat: format, status: 'READY_TO_CAPTURE', updatedAt: now };
@@ -780,8 +874,9 @@ function applyLocalGuestAction(action: string, body: Record<string, unknown>, pr
 function createLocalSession(eventId = 'event_hoi_an_heritage'): MomentAIGuestSession {
   localSessionSequence += 1;
   const now = new Date().toISOString();
+  const uniqueId = `desktop_session_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   return {
-    sessionId: `desktop_dev_session_${localSessionSequence}`,
+    sessionId: uniqueId,
     eventId,
     captureFormat: null,
     photos: [],

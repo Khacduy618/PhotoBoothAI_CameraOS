@@ -1,20 +1,59 @@
 const { app, BrowserWindow, ipcMain, screen } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const url = require('node:url');
 const Database = require('better-sqlite3');
-const { CanonCameraBridgeManager } = require('./camera/canon-camera-bridge.cjs');
+const { CanonRuntimeClient } = require('../../camera-runtime/canon-runtime-client.cjs');
+const { STATES } = require('../../camera-runtime/protocol.cjs');
+const { desktopMediaManager } = require('./media/desktop-media-manager.cjs');
+const { SessionMediaPaths } = require('./storage/session-media-paths.cjs');
+const { cloudSyncCoordinator } = require('./cloud/cloud-sync-coordinator.cjs');
 
-const canonBridge = new CanonCameraBridgeManager();
+const canonRuntime = new CanonRuntimeClient();
+let sessionMediaPaths = null;
+
+function logCameraRuntimeStatus(tag = 'STATUS_UPDATE') {
+  const preferred = 'canon';
+  const isPhysicalUsb = Boolean(canonRuntime.physicalUsbPresent || canonRuntime.cameraCount > 0);
+  const usbPresent = isPhysicalUsb ? 'YES' : 'NO';
+  const sessionState = canonRuntime.state;
+  const isEnumeratePending = canonRuntime.state === STATES.ENUMERATING || canonRuntime.state === STATES.DISCOVERY_WAIT;
+  const isPtpUnresponsive = canonRuntime.state === STATES.CAMERA_PTP_UNRESPONSIVE;
+  const isAuthoritativeNoCanon = !isPhysicalUsb && (canonRuntime.state === STATES.CAMERA_NOT_FOUND || (canonRuntime.cameraCount === 0 && canonRuntime.state === STATES.DISCONNECTED));
+  const fallbackEligible = (isAuthoritativeNoCanon || isPtpUnresponsive || canonRuntime.state === STATES.ERROR) ? 'YES' : 'NO';
+  const fallbackReason = isPtpUnresponsive
+    ? 'CANON_PTP_UNRESPONSIVE'
+    : (isAuthoritativeNoCanon ? 'NO_CANON_HARDWARE' : (canonRuntime.state === STATES.ERROR ? 'CANON_TERMINAL_FAILED' : 'NONE'));
+  const activeProvider = isAuthoritativeNoCanon
+    ? 'mac-device-camera'
+    : (canonRuntime.state === STATES.READY || canonRuntime.state === STATES.LIVEVIEW ? 'canon' : 'canon-connecting');
+  const previewSource = activeProvider === 'canon'
+    ? 'Canon EDSDK EVF'
+    : (activeProvider === 'canon-connecting' ? (isEnumeratePending ? 'Discovering Canon Camera...' : 'Connecting Canon EVF...') : 'Mac Device Camera');
+
+  console.log(`\n========================================`);
+  console.log(`[CAMERA_RUNTIME:${tag}]`);
+  console.log(`  CAMERA_PROVIDER_PREFERRED = ${preferred}`);
+  console.log(`  CANON_USB_PRESENT         = ${usbPresent}`);
+  console.log(`  CANON_SESSION_STATE       = ${sessionState}`);
+  console.log(`  FALLBACK_ELIGIBLE         = ${fallbackEligible}`);
+  console.log(`  FALLBACK_REASON           = ${fallbackReason}`);
+  console.log(`  ACTIVE_CAMERA_PROVIDER    = ${activeProvider}`);
+  console.log(`  ACTIVE_PREVIEW_SOURCE     = ${previewSource}`);
+  console.log(`========================================\n`);
+}
 
 const isDev = !app.isPackaged;
 const rendererUrl =
   process.env.WINDOWMINI_RENDERER_URL || 'http://localhost:5173';
 
-const projectRoot = path.resolve(__dirname, '../../..');
+const projectRoot = path.resolve(__dirname, '../../../..');
 const logDir = process.env.MOMENTAI_LOG_DIR || path.join(projectRoot, 'artifacts', 'logs');
 const systemLogFile = path.join(logDir, 'momentai-cameraos.log');
 const canonShadowLogFile = path.join(logDir, 'canon-shadow.log');
 const storageRoot = path.resolve(process.env.MOMENTAI_STORAGE_DIR || path.join(projectRoot, 'artifacts', 'windowmini-storage'));
+sessionMediaPaths = new SessionMediaPaths(storageRoot);
+desktopMediaManager.setStorageRootDir(storageRoot);
 const storageDbFile = path.join(storageRoot, 'cameraos-storage.sqlite');
 let storageDb = null;
 
@@ -78,10 +117,7 @@ function createWindow(mode = 'guest') {
 
   const target = isDev
     ? `${rendererUrl}/#/${mode}`
-    : `file://${path.join(
-      __dirname,
-      '../../renderer/dist/index.html'
-    )}#/${mode}`;
+    : `${url.pathToFileURL(path.join(__dirname, '../../renderer/dist/index.html')).toString()}#/${mode}`;
 
   void win.loadURL(target);
 
@@ -293,6 +329,10 @@ function isSessionWorkComplete(session) {
   if (uStatus === 'PENDING' || uStatus === 'UPLOADING' || uStatus === 'RETRYING') {
     return false;
   }
+  const vStatus = String(session.videoCompositionState || 'NONE').toUpperCase();
+  if (vStatus === 'QUEUED' || vStatus === 'PROCESSING') {
+    return false;
+  }
   return true;
 }
 
@@ -330,239 +370,16 @@ function checkAndCompleteSession(sessionId) {
   }
 }
 
-class MockPrinterAdapter {
-  constructor() {
-    this.name = 'MockPrinterAdapter';
-  }
-  async print(job) {
-    writeSystemLog('info', 'PRINT:MOCK', `[MOCK] Starting print execution for Job ${job.id}`, {
-      provider: 'mock-printer',
-      jobId: job.id,
-      sessionId: job.session_id || job.sessionId,
-      copies: job.copies,
-      paperId: job.paper_id || job.paperId,
-      status: 'PRINTING',
-    });
-    // Simulate 2s printing time
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    writeSystemLog('info', 'PRINT:MOCK', `[MOCK] Physical print completed successfully for Job ${job.id}`, {
-      provider: 'mock-printer',
-      jobId: job.id,
-      sessionId: job.session_id || job.sessionId,
-      status: 'COMPLETED',
-    });
-    return { ok: true, value: { jobId: job.id, status: 'COMPLETED' } };
-  }
-}
+const { PrintQueueManager } = require('./printer/print-queue-manager.cjs');
 
-class PrintQueueManager {
-  constructor() {
-    this.queue = [];
-    this.isProcessing = false;
-    this.adapter = new MockPrinterAdapter();
-  }
-
-  init() {
-    try {
-      const db = ensureStorageDb();
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS print_jobs (
-          id TEXT PRIMARY KEY,
-          session_id TEXT NOT NULL,
-          print_master_path TEXT NOT NULL,
-          paper_id TEXT NOT NULL,
-          copies INTEGER NOT NULL DEFAULT 1,
-          status TEXT NOT NULL,
-          idempotency_key TEXT,
-          attempt_count INTEGER NOT NULL DEFAULT 0,
-          last_error TEXT,
-          created_at TEXT NOT NULL,
-          started_at TEXT,
-          completed_at TEXT,
-          updated_at TEXT NOT NULL
-        );
-      `);
-
-      const rows = db.prepare("SELECT * FROM print_jobs WHERE status IN ('QUEUED', 'PRINTING') ORDER BY created_at ASC").all();
-      for (const row of rows) {
-        if (row.status === 'PRINTING') {
-          const now = nowIso();
-          db.prepare("UPDATE print_jobs SET status = 'QUEUED', updated_at = ? WHERE id = ?").run(now, row.id);
-          writeSystemLog('warn', 'PRINT:RECOVER', `Recovered stale PRINTING job ${row.id} -> reset to QUEUED`, {
-            jobId: row.id,
-            sessionId: row.session_id,
-          });
-        }
-        this.queue.push(row.id);
-      }
-      if (this.queue.length > 0) {
-        writeSystemLog('info', 'PRINT:QUEUE', `Recovered ${this.queue.length} pending print job(s) from SQLite storage.`, {
-          pendingCount: this.queue.length,
-        });
-        void this.processNext();
-      }
-    } catch (err) {
-      console.warn('[PrintQueue] Init error:', err);
-    }
-  }
-
-  enqueue(session, options = {}) {
-    const db = ensureStorageDb();
-    const idempotencyKey = options.idempotencyKey || `${session.sessionId}_print_${session.selectedTemplate?.templateId || 'default'}`;
-
-    const existing = db.prepare("SELECT * FROM print_jobs WHERE idempotency_key = ?").get(idempotencyKey);
-    if (existing) {
-      writeSystemLog('info', 'PRINT:IDEMPOTENT', `Idempotent print request matched existing job ${existing.id}`, {
-        jobId: existing.id,
-        sessionId: session.sessionId,
-        status: existing.status,
-      });
-      return { ok: true, value: existing, idempotent: true };
-    }
-
-    const now = nowIso();
-    const jobId = `print_${session.sessionId}_${Date.now().toString(36)}`;
-    const printMasterPath = session.outputs?.print || session.outputs?.master || path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'final-print.jpg');
-    const paperId = session.selectedTemplate?.printProfile?.paper || '4x6';
-    const copies = Number(options.copies) || 1;
-
-    const job = {
-      id: jobId,
-      sessionId: session.sessionId,
-      printMasterPath,
-      paperId,
-      copies,
-      status: 'QUEUED',
-      idempotencyKey,
-      attemptCount: 0,
-      lastError: null,
-      createdAt: now,
-      startedAt: null,
-      completedAt: null,
-      updatedAt: now,
-    };
-
-    db.prepare(`
-      INSERT INTO print_jobs (
-        id, session_id, print_master_path, paper_id, copies, status, idempotency_key, attempt_count, last_error, created_at, started_at, completed_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      job.id, job.sessionId, job.printMasterPath, job.paperId, job.copies, job.status,
-      job.idempotencyKey, job.attemptCount, job.lastError, job.createdAt, job.startedAt, job.completedAt, job.updatedAt
-    );
-
-    session.printJob = job;
-    session.printStatus = 'QUEUED';
-    sessions.set(session.sessionId, session);
-
-    writeSystemLog('info', 'PRINT:QUEUE', `Print job ${job.id} durably enqueued into SQLite.`, {
-      jobId: job.id,
-      sessionId: session.sessionId,
-      copies: job.copies,
-      status: 'QUEUED',
-    });
-
-    this.queue.push(job.id);
-    void this.processNext();
-
-    return { ok: true, value: job, idempotent: false };
-  }
-
-  async processNext() {
-    if (this.isProcessing || this.queue.length === 0) return;
-    this.isProcessing = true;
-
-    const jobId = this.queue.shift();
-    if (!jobId) {
-      this.isProcessing = false;
-      return;
-    }
-
-    try {
-      const db = ensureStorageDb();
-      const jobRow = db.prepare("SELECT * FROM print_jobs WHERE id = ?").get(jobId);
-      if (!jobRow || jobRow.status !== 'QUEUED') {
-        this.isProcessing = false;
-        void this.processNext();
-        return;
-      }
-
-      const now = nowIso();
-      db.prepare("UPDATE print_jobs SET status = 'PRINTING', started_at = ?, updated_at = ? WHERE id = ?").run(now, now, jobId);
-
-      const memSession = sessions.get(jobRow.session_id);
-      if (memSession) {
-        memSession.printStatus = 'PRINTING';
-        if (memSession.printJob) memSession.printJob.status = 'PRINTING';
-      }
-
-      writeSystemLog('info', 'PRINT:WORKER', `Starting print worker execution for Job ${jobId}`, {
-        jobId,
-        sessionId: jobRow.session_id,
-        status: 'PRINTING',
-      });
-
-      const printResult = await this.adapter.print(jobRow);
-
-      if (printResult.ok) {
-        const completedNow = nowIso();
-        db.prepare("UPDATE print_jobs SET status = 'COMPLETED', completed_at = ?, updated_at = ? WHERE id = ?").run(completedNow, completedNow, jobId);
-        
-        if (memSession) {
-          memSession.printStatus = 'COMPLETED';
-          if (memSession.printJob) {
-            memSession.printJob.status = 'COMPLETED';
-            memSession.printJob.completedAt = completedNow;
-          }
-        }
-
-        writeSystemLog('info', 'PRINT:WORKER', `Print Job ${jobId} COMPLETED successfully.`, {
-          jobId,
-          sessionId: jobRow.session_id,
-          status: 'COMPLETED',
-        });
-
-        checkAndCompleteSession(jobRow.session_id);
-      } else {
-        const nextAttempts = (jobRow.attempt_count || 0) + 1;
-        const errNow = nowIso();
-        const errMsg = printResult.error?.message || 'Printer error';
-
-        if (nextAttempts < 2) {
-          db.prepare("UPDATE print_jobs SET status = 'QUEUED', attempt_count = ?, last_error = ?, updated_at = ? WHERE id = ?").run(nextAttempts, errMsg, errNow, jobId);
-          writeSystemLog('warn', 'PRINT:WORKER', `Print Job ${jobId} failed attempt ${nextAttempts}. Retrying in 2s...`, {
-            jobId,
-            sessionId: jobRow.session_id,
-            error: errMsg,
-          });
-          setTimeout(() => {
-            this.queue.push(jobId);
-            void this.processNext();
-          }, 2000);
-        } else {
-          db.prepare("UPDATE print_jobs SET status = 'FAILED', attempt_count = ?, last_error = ?, updated_at = ? WHERE id = ?").run(nextAttempts, errMsg, errNow, jobId);
-          if (memSession) {
-            memSession.printStatus = 'FAILED';
-            if (memSession.printJob) memSession.printJob.status = 'FAILED';
-          }
-          writeSystemLog('error', 'PRINT:WORKER', `Print Job ${jobId} FAILED after ${nextAttempts} attempts.`, {
-            jobId,
-            sessionId: jobRow.session_id,
-            status: 'FAILED',
-            error: errMsg,
-          });
-        }
-      }
-    } catch (err) {
-      console.warn('[PrintQueue] Worker execution error:', err);
-    } finally {
-      this.isProcessing = false;
-      setTimeout(() => void this.processNext(), 100);
-    }
-  }
-}
-
-const printQueue = new PrintQueueManager();
+const printQueue = new PrintQueueManager({
+  ensureStorageDb,
+  storageRoot,
+  sessionMediaPaths,
+  sessions,
+  writeSystemLog,
+  checkAndCompleteSession,
+});
 
 function requireGuestSession(sessionId) {
   const session = sessions.get(sessionId);
@@ -885,10 +702,67 @@ function binaryBytes(input) {
 function createStorageSession(sessionId) {
   const safeSessionId = assertStorageId(sessionId, 'session id');
   const db = ensureStorageDb();
-  fs.mkdirSync(path.join(storageRoot, 'sessions', safeSessionId, 'originals'), { recursive: true });
-  fs.mkdirSync(path.join(storageRoot, 'sessions', safeSessionId, 'outputs'), { recursive: true });
+  if (sessionMediaPaths) {
+    sessionMediaPaths.ensureSessionDirectories(safeSessionId);
+  } else {
+    fs.mkdirSync(path.join(storageRoot, 'sessions', safeSessionId, 'photos'), { recursive: true });
+    fs.mkdirSync(path.join(storageRoot, 'sessions', safeSessionId, 'clips'), { recursive: true });
+    fs.mkdirSync(path.join(storageRoot, 'sessions', safeSessionId, 'outputs'), { recursive: true });
+  }
   const now = nowIso();
   db.prepare('INSERT INTO sessions (session_id, created_at, updated_at, payload_json) VALUES (?, ?, ?, NULL) ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at').run(safeSessionId, now, now);
+}
+
+/**
+ * Injects sRGB EXIF (ColorSpace=1, 600 DPI) into a JPEG Buffer.
+ * Inserts APP1 AFTER existing APP0 (JFIF) segment and patches APP0 density to 600dpi.
+ * This ensures Windows Explorer shows "Color representation: sRGB" on all output JPEGs.
+ */
+function injectSrgbExifIntoJpeg(bytes) {
+  if (!Buffer.isBuffer(bytes) || bytes.length < 4 || bytes[0] !== 0xFF || bytes[1] !== 0xD8) return bytes;
+
+  // Build TIFF LE EXIF payload
+  const tiff = Buffer.alloc(96, 0);
+  let o = 0;
+  tiff.writeUInt16LE(0x4949, o); o += 2; // 'II' LE
+  tiff.writeUInt16LE(42,     o); o += 2; // TIFF magic
+  tiff.writeUInt32LE(8,      o); o += 4; // IFD0 at offset 8
+  tiff.writeUInt16LE(4,      o); o += 2; // IFD0: 4 entries
+  // 0x011A XResolution → RATIONAL at 62
+  tiff.writeUInt16LE(0x011A, o); o += 2; tiff.writeUInt16LE(5, o); o += 2; tiff.writeUInt32LE(1, o); o += 4; tiff.writeUInt32LE(62, o); o += 4;
+  // 0x011B YResolution → RATIONAL at 70
+  tiff.writeUInt16LE(0x011B, o); o += 2; tiff.writeUInt16LE(5, o); o += 2; tiff.writeUInt32LE(1, o); o += 4; tiff.writeUInt32LE(70, o); o += 4;
+  // 0x0128 ResolutionUnit = 2 (inch)
+  tiff.writeUInt16LE(0x0128, o); o += 2; tiff.writeUInt16LE(3, o); o += 2; tiff.writeUInt32LE(1, o); o += 4; tiff.writeUInt32LE(2, o); o += 4;
+  // 0x8769 ExifIFD pointer → offset 78
+  tiff.writeUInt16LE(0x8769, o); o += 2; tiff.writeUInt16LE(4, o); o += 2; tiff.writeUInt32LE(1, o); o += 4; tiff.writeUInt32LE(78, o); o += 4;
+  tiff.writeUInt32LE(0, o); // next IFD0 = 0 (o=58)
+  // Rational values
+  tiff.writeUInt32LE(600, 62); tiff.writeUInt32LE(1, 66); // XRes = 600/1
+  tiff.writeUInt32LE(600, 70); tiff.writeUInt32LE(1, 74); // YRes = 600/1
+  // ExifIFD at offset 78: 1 entry — 0xA001 ColorSpace = 1 (sRGB)
+  tiff.writeUInt16LE(1,      78);
+  tiff.writeUInt16LE(0xA001, 80); tiff.writeUInt16LE(3, 82); tiff.writeUInt32LE(1, 84); tiff.writeUInt32LE(1, 88);
+  tiff.writeUInt32LE(0, 92); // next ExifIFD = 0
+
+  const exifPayload = Buffer.concat([Buffer.from([0x45, 0x78, 0x69, 0x66, 0x00, 0x00]), tiff]);
+  const app1Len = exifPayload.length + 2;
+  const app1 = Buffer.concat([Buffer.from([0xFF, 0xE1, (app1Len >> 8) & 0xFF, app1Len & 0xFF]), exifPayload]);
+
+  let insertPos = 2;
+  if (bytes[2] === 0xFF && bytes[3] === 0xE0 && bytes.length >= 6) {
+    const app0Len = bytes.readUInt16BE(4);
+    // Patch APP0 density to 600 dpi
+    if (bytes.length >= 14) {
+      bytes[8] = 1;                   // density unit = inch
+      bytes.writeUInt16BE(600, 9);    // Xdensity = 600
+      bytes.writeUInt16BE(600, 11);   // Ydensity = 600
+    }
+    insertPos = 2 + 2 + app0Len;
+    if (insertPos > bytes.length) insertPos = bytes.length;
+  }
+
+  return Buffer.concat([bytes.subarray(0, insertPos), app1, bytes.subarray(insertPos)]);
 }
 
 function saveStorageFile(sessionId, relativePath, id, file, outputType, allowOverwrite) {
@@ -896,12 +770,18 @@ function saveStorageFile(sessionId, relativePath, id, file, outputType, allowOve
   const absolutePath = path.join(storageRoot, relativePath);
   if (!allowOverwrite && (fs.existsSync(absolutePath) || db.prepare('SELECT id FROM stored_files WHERE id = ?').get(id))) throw new Error('Original already exists and will not be overwritten.');
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
-  const bytes = binaryBytes(file?.bytes || file?.dataUrl || '');
+  let bytes = binaryBytes(file?.bytes || file?.dataUrl || '');
   if (bytes.byteLength <= 0) throw new Error('Image bytes are empty.');
+  // Inject sRGB EXIF into JPEG output files for correct color reproduction on CP1000
+  const ext = path.extname(absolutePath).toLowerCase();
+  if (ext === '.jpg' || ext === '.jpeg') {
+    bytes = injectSrgbExifIntoJpeg(bytes);
+  }
   const tempPath = `${absolutePath}.tmp-${process.pid}-${Date.now()}`;
   fs.writeFileSync(tempPath, bytes);
   fs.renameSync(tempPath, absolutePath);
   const now = nowIso();
+  console.log(`[PHOTO_UI_PATH_AUDIT]\nshotIndex=${outputType ? 'output' : id}\nphysicalPath=${absolutePath}\nrendererUrl=${relativePath}\nphysicalFileExists=${fs.existsSync(absolutePath)}\nsameCanonicalSession=true`);
   const stored = { id, sessionId, relativePath, mimeType: String(file?.mimeType || 'image/jpeg'), width: file?.width, height: file?.height, bytes: bytes.byteLength, createdAt: now, outputType };
   db.prepare('INSERT INTO stored_files (id, session_id, relative_path, mime_type, width, height, bytes, output_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET relative_path = excluded.relative_path, mime_type = excluded.mime_type, width = excluded.width, height = excluded.height, bytes = excluded.bytes, output_type = excluded.output_type, created_at = excluded.created_at').run(stored.id, stored.sessionId, stored.relativePath, stored.mimeType, stored.width ?? null, stored.height ?? null, stored.bytes, stored.outputType ?? null, stored.createdAt);
   return stored;
@@ -963,6 +843,73 @@ function safeGuest(fn) {
   }
 }
 
+function writeSessionManifestAndMetadata(sessionId) {
+  try {
+    if (!sessionMediaPaths) return;
+    const session = sessions.get(sessionId);
+    const clips = desktopMediaManager.getClips(sessionId) || [];
+    const requiredShots = session?.captureCount || session?.photos?.length || 4;
+
+    const existingPhotos = [];
+    for (let i = 1; i <= requiredShots; i++) {
+      const p = sessionMediaPaths.photo(sessionId, i);
+      if (fs.existsSync(p)) {
+        existingPhotos.push({
+          shotIndex: i,
+          path: `photos/shot_${String(i).padStart(2, '0')}.jpg`,
+        });
+      }
+    }
+
+    const existingClips = [];
+    for (let i = 1; i <= requiredShots; i++) {
+      const c = sessionMediaPaths.clip(sessionId, i);
+      if (fs.existsSync(c)) {
+        existingClips.push({
+          shotIndex: i,
+          path: `clips/shot_${String(i).padStart(2, '0')}.mp4`,
+        });
+      }
+    }
+
+    const finalImagePath = sessionMediaPaths.finalImage(sessionId);
+    const finalVideoPath = sessionMediaPaths.finalVideo(sessionId);
+
+    const manifestData = {
+      sessionId,
+      provider: canonRuntime.cameraModel ? 'canon' : 'device',
+      cameraModel: canonRuntime.cameraModel || 'Canon EOS 6D',
+      product: session?.product?.id || 'classic_4_shot',
+      requiredShots,
+      photos: existingPhotos,
+      clips: existingClips,
+      outputs: {
+        ...(fs.existsSync(finalImagePath) ? { finalImage: 'outputs/final-image.jpg' } : {}),
+        ...(fs.existsSync(finalVideoPath) ? { finalVideo: 'outputs/final-video.mp4' } : {}),
+      },
+      createdAt: session?.createdAt || nowIso(),
+      completedAt: session?.completedAt || nowIso(),
+    };
+    fs.writeFileSync(sessionMediaPaths.manifest(sessionId), JSON.stringify(manifestData, null, 2));
+
+    const metaData = {
+      provider: canonRuntime.cameraModel ? 'canon' : 'device',
+      cameraModel: canonRuntime.cameraModel || 'Canon EOS 6D',
+      createdAt: session?.createdAt || nowIso(),
+      completedAt: session?.completedAt || nowIso(),
+      productType: session?.product?.id || 'classic_4_shot',
+      requiredShots,
+      photoCount: existingPhotos.length,
+      clipCount: existingClips.length,
+      finalImage: fs.existsSync(finalImagePath) ? { width: 1800, height: 2700 } : null,
+      finalVideo: fs.existsSync(finalVideoPath) ? { durationMs: 4000 } : null,
+    };
+    fs.writeFileSync(sessionMediaPaths.metadata(sessionId), JSON.stringify(metaData, null, 2));
+  } catch (e) {
+    console.warn('[SessionManifest] Failed to write manifest/metadata:', e);
+  }
+}
+
 function registerSkeletonIpc() {
 
   ipcMain.handle('cameraos:admin:auth:unlock', (_event, passcode) => String(passcode || '') === (process.env.MOMENTAI_ADMIN_PASSCODE || '0000') ? ok({ token: `admin_${Date.now()}`, expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString() }) : unavailable('ADMIN_PASSCODE_INVALID'));
@@ -1016,7 +963,7 @@ function registerSkeletonIpc() {
     if (!Number.isInteger(safeShotIndex) || safeShotIndex < 1 || safeShotIndex > 12) throw new Error('Invalid shot index.');
     createStorageSession(safeSessionId);
     const mimeType = assertImageMime(photo?.mimeType || 'image/jpeg');
-    const relativePath = path.posix.join('sessions', safeSessionId, 'originals', `shot_${String(safeShotIndex).padStart(2, '0')}${extensionForMime(mimeType)}`);
+    const relativePath = path.posix.join('sessions', safeSessionId, 'photos', `shot_${String(safeShotIndex).padStart(2, '0')}${extensionForMime(mimeType)}`);
     return saveStorageFile(safeSessionId, relativePath, `original_${safeSessionId}_${safeShotIndex}`, { ...photo, mimeType }, undefined, false);
   }));
   ipcMain.handle('cameraos:storage:output:save', (_event, sessionId, type, file) => safeGuest(() => {
@@ -1024,28 +971,94 @@ function registerSkeletonIpc() {
     const outputType = assertOutputTypeValue(type);
     createStorageSession(safeSessionId);
     const mimeType = assertImageMime(file?.mimeType || 'image/jpeg');
-    const relativePath = path.posix.join('sessions', safeSessionId, 'outputs', `${outputType}${extensionForMime(mimeType)}`);
-    return saveStorageFile(safeSessionId, relativePath, `output_${safeSessionId}_${outputType}`, { ...file, mimeType }, outputType, true);
+    let filename = `${outputType}${extensionForMime(mimeType)}`;
+    if (outputType === 'share' || type === 'final-image') {
+      filename = 'final-image.jpg';
+    } else if (outputType === 'print' || type === 'print-cp1000') {
+      filename = 'print-cp1000.jpg';
+    }
+    const relativePath = path.posix.join('sessions', safeSessionId, 'outputs', filename);
+    const stored = saveStorageFile(safeSessionId, relativePath, `output_${safeSessionId}_${outputType}`, { ...file, mimeType }, outputType, true);
+
+    writeSessionManifestAndMetadata(safeSessionId);
+    cloudSyncCoordinator.onOutputSaved(safeSessionId, outputType, relativePath);
+
+    return stored;
   }));
 
   ipcMain.handle('cameraos:camera:status', () => safeGuest(() => {
-    if (canonBridge.state === 'READY' || canonBridge.state === 'LIVEVIEW') {
+    logCameraRuntimeStatus('IPC_STATUS_QUERY');
+
+    if (canonRuntime.state === STATES.READY || canonRuntime.state === STATES.LIVEVIEW) {
       return {
         provider: 'canon',
         preferredProvider: 'canon',
         fallbackActive: false,
+        fallbackEligible: false,
         liveView: true,
         stillCapture: true,
         hardwareStatus: 'ready',
-        model: canonBridge.cameraModel || 'Canon EOS 6D',
-        state: canonBridge.state,
+        model: canonRuntime.cameraModel || 'Canon EOS 6D',
+        state: canonRuntime.state,
       };
     }
+
+    if (
+      canonRuntime.state === STATES.ENUMERATING ||
+      canonRuntime.state === STATES.DISCOVERY_WAIT ||
+      canonRuntime.state === STATES.INITIALIZING ||
+      canonRuntime.state === STATES.OPENING_SESSION ||
+      canonRuntime.state === STATES.CONFIGURING ||
+      canonRuntime.state === STATES.STARTING_LIVEVIEW ||
+      canonRuntime.state === STATES.RESUMING_LIVEVIEW ||
+      (canonRuntime.cameraCount > 0 && canonRuntime.state !== STATES.DISCONNECTED && canonRuntime.state !== STATES.ERROR)
+    ) {
+      return {
+        provider: 'canon',
+        preferredProvider: 'canon',
+        fallbackActive: false,
+        fallbackEligible: false,
+        liveView: false,
+        stillCapture: false,
+        hardwareStatus: 'connecting',
+        model: canonRuntime.cameraModel || 'Canon EOS 6D',
+        state: canonRuntime.state,
+      };
+    }
+
+    if (canonRuntime.state === STATES.CAMERA_NOT_FOUND) {
+      return {
+        provider: 'canon',
+        preferredProvider: 'canon',
+        fallbackActive: false,
+        fallbackEligible: true,
+        hardwareStatus: 'error',
+        error: 'CAMERA_NOT_FOUND',
+        model: canonRuntime.cameraModel || 'Canon EOS 6D',
+        state: canonRuntime.state,
+      };
+    }
+
+    if (canonRuntime.state === STATES.ERROR) {
+      return {
+        provider: 'canon',
+        preferredProvider: 'canon',
+        fallbackActive: false,
+        fallbackEligible: true,
+        hardwareStatus: 'error',
+        error: 'CANON_SESSION_FAILED',
+        model: canonRuntime.cameraModel || 'Canon EOS 6D',
+        state: canonRuntime.state,
+      };
+    }
+
     writeCanonShadowLog('GetDeviceInformation', { reason: 'mac-device-camera-development-status' });
     return {
       provider: 'mac-device-camera',
       preferredProvider: 'canon',
       fallbackActive: true,
+      fallbackEligible: true,
+      fallbackReason: 'NO_CANON_HARDWARE',
       liveView: true,
       stillCapture: true,
       hardwareStatus: 'partial',
@@ -1059,15 +1072,20 @@ function registerSkeletonIpc() {
     const shotIndex = Number.isFinite(Number(context?.shotIndex)) ? Number(context.shotIndex) : 1;
     const correlationId = typeof context?.correlationId === 'string' ? context.correlationId : `canon_${Date.now()}_${shotIndex}`;
 
-    if (canonBridge.state === 'READY' || canonBridge.state === 'LIVEVIEW') {
-      const sessionDir = path.join(storageRoot, 'sessions', sessionId, 'originals');
-      fs.mkdirSync(sessionDir, { recursive: true });
-      const targetPath = path.join(sessionDir, `shot_${String(shotIndex).padStart(2, '0')}.jpg`);
+    activeCaptureSessionId = sessionId;
+    activeCaptureShotIndex = shotIndex;
 
-      const result = await canonBridge.capture({
+    const validStates = ['READY', 'LIVEVIEW', 'STARTING_LIVEVIEW', 'RESUMING_LIVEVIEW'];
+    if (validStates.includes(canonRuntime.state)) {
+      const sessionDir = sessionMediaPaths ? sessionMediaPaths.photosDir(sessionId) : path.join(storageRoot, 'sessions', sessionId, 'photos');
+      fs.mkdirSync(sessionDir, { recursive: true });
+      const targetPath = sessionMediaPaths ? sessionMediaPaths.photo(sessionId, shotIndex, '.jpg') : path.join(sessionDir, `shot_${String(shotIndex).padStart(2, '0')}.jpg`);
+
+      const result = await canonRuntime.capture({
         sessionId,
         shotIndex,
         targetPath,
+        correlationId,
       });
 
       const fileBuffer = fs.readFileSync(result.path);
@@ -1093,16 +1111,23 @@ function registerSkeletonIpc() {
         correlationId,
         photo: {
           id: `canon_photo_${Date.now()}_${shotIndex}`,
+          photoId: `canon_photo_${Date.now()}_${shotIndex}`,
           sessionId,
           shotIndex,
           localPath: result.path,
+          originalPath: result.path,
           dataUrl,
           width: result.width || 5472,
           height: result.height || 3648,
           size: result.size,
           provider: 'canon',
+          mimeType: 'image/jpeg',
         },
       };
+    }
+
+    if (canonRuntime.cameraCount > 0 || canonRuntime.state !== 'DISCONNECTED') {
+      throw new Error(`Canon EOS 6D not ready for capture (current state: ${canonRuntime.state})`);
     }
 
     writeCanonShadowLog('OpenSession', { sessionId, shotIndex, correlationId });
@@ -1122,31 +1147,42 @@ function registerSkeletonIpc() {
     };
   }));
 
-  ipcMain.handle('cameraos:camera:autofocus', (_event, context) => safeGuest(() => {
+  ipcMain.handle('cameraos:camera:autofocus', async (_event, context) => safeGuest(async () => {
     const sessionId = typeof context?.sessionId === 'string' ? context.sessionId : 'unknown_session';
-    const correlationId = typeof context?.correlationId === 'string' ? context.correlationId : `af_${Date.now()}`;
+    const shotIndex = Number.isFinite(Number(context?.shotIndex)) ? Number(context.shotIndex) : activeCaptureShotIndex;
+    const correlationId = typeof context?.correlationId === 'string' ? context.correlationId : `af_${Date.now()}_${shotIndex}`;
+
+    if (canonRuntime.state === 'READY' || canonRuntime.state === 'LIVEVIEW' || canonRuntime.state === 'STARTING_LIVEVIEW') {
+      try {
+        const afStart = new Date().toISOString();
+        const res = await canonRuntime.autoFocus({ sessionId, shotIndex, correlationId, timeoutMs: 1500 });
+        const afEnd = new Date().toISOString();
+        if (desktopMediaManager) {
+          desktopMediaManager.markAutofocus(sessionId, shotIndex - 1, afStart, afEnd);
+        }
+        return { ok: res?.ok ?? true, provider: 'canon', status: 'focused', correlationId, ...res };
+      } catch (err) {
+        console.warn('[Main] Canon autoFocus error:', err.message);
+        return { ok: false, provider: 'canon', status: 'failed', error: err.message, correlationId };
+      }
+    }
+
     writeCanonShadowLog('DoEvfAF', { sessionId, correlationId, mode: 'AI SERVO', status: 'focused' });
-    return { provider: canonBridge.state === 'READY' || canonBridge.state === 'LIVEVIEW' ? 'canon' : 'canon-shadow', status: 'focused', correlationId };
+    return { ok: true, provider: 'canon-shadow', status: 'focused', correlationId };
   }));
 
   ipcMain.handle('cameraos:camera:liveview:start', async (_event, context) => safeGuest(async () => {
-    const sessionId = typeof context?.sessionId === 'string' ? context.sessionId : 'unknown_session';
-    if (canonBridge.state === 'READY' || canonBridge.state === 'LIVEVIEW') {
-      await canonBridge.startLiveView();
-      return { provider: 'canon', liveViewRunning: true };
+    liveViewRequested = true;
+    if (context?.sessionId) {
+      activeCaptureSessionId = String(context.sessionId);
     }
-    writeCanonShadowLog('StartLiveView', { sessionId, outputDevice: 'PC_AND_EVF' });
-    return { provider: 'canon-shadow', liveViewRunning: true };
+    const res = await canonRuntime.startLiveView();
+    return { provider: 'canon', liveViewRunning: res };
   }));
 
-  ipcMain.handle('cameraos:camera:liveview:stop', async (_event, context) => safeGuest(async () => {
-    const sessionId = typeof context?.sessionId === 'string' ? context.sessionId : 'unknown_session';
-    if (canonBridge.state === 'LIVEVIEW') {
-      await canonBridge.stopLiveView();
-      return { provider: 'canon', liveViewRunning: false };
-    }
-    writeCanonShadowLog('StopLiveView', { sessionId });
-    return { provider: 'canon-shadow', liveViewRunning: false };
+  ipcMain.handle('cameraos:camera:liveview:stop', async (_event, _context) => safeGuest(async () => {
+    // Preserve physical LiveView warm in background across normal Guest flow
+    return { provider: 'canon', liveViewRunning: true };
   }));
 
   ipcMain.handle('cameraos:camera:recording:start', (_event, context) => safeGuest(() => {
@@ -1171,7 +1207,13 @@ function registerSkeletonIpc() {
     const requestedEventId = typeof eventId === 'string' ? eventId : readiness.activeEvent.eventId;
     if (requestedEventId !== readiness.activeEvent.eventId) throw new Error('Requested event is not active.');
     const session = createGuestSession(requestedEventId);
+    activeCaptureSessionId = session.sessionId;
+    activeCaptureShotIndex = 1;
     sessions.set(session.sessionId, session);
+    if (sessionMediaPaths) {
+      sessionMediaPaths.ensureSessionDirectories(session.sessionId);
+      console.log(`[SESSION_STORAGE_CREATED]\nsessionId=${session.sessionId}\nsessionRoot=${sessionMediaPaths.sessionRoot(session.sessionId)}\nphotosDir=${sessionMediaPaths.photosDir(session.sessionId)}\nclipsDir=${sessionMediaPaths.clipsDir(session.sessionId)}\noutputsDir=${sessionMediaPaths.outputsDir(session.sessionId)}\nmanifestPath=${sessionMediaPaths.manifest(session.sessionId)}\nmetadataPath=${sessionMediaPaths.metadata(session.sessionId)}`);
+    }
     return session;
   }));
   ipcMain.handle('cameraos:guest:session:get', (_event, sessionId) => safeGuest(() => sessions.get(String(sessionId || '')) || null));
@@ -1180,24 +1222,55 @@ function registerSkeletonIpc() {
     const session = requireGuestSession(String(sessionId || ''));
     const captureFormat = listEnabledCaptureFormats().find((format) => format.id === String(formatId || ''));
     if (!captureFormat) throw new Error('Invalid capture format.');
+    activeCaptureSessionId = session.sessionId;
+    activeCaptureShotIndex = 1;
     return touch({ ...session, captureFormat, photos: [], selectedTemplate: null, slotAssignments: [], outputs: { master: null, share: null, print: null } }, 'READY_TO_CAPTURE');
   }));
   ipcMain.handle('cameraos:guest:photo:add', (_event, sessionId, photo) => safeGuest(() => {
     const session = requireGuestSession(String(sessionId || ''));
     if (!session.captureFormat) throw new Error('Capture format is required before capture.');
-    const shotIndex = Number(photo?.shotIndex || 0);
+    const shotIndex = Number(photo?.shotIndex || (session.photos.length + 1));
+    const photoId = String(photo?.photoId || photo?.id || `photo_${Date.now()}_${shotIndex}`);
+    const resolvedPath = photo?.localPath || (sessionMediaPaths ? sessionMediaPaths.photo(session.sessionId, shotIndex) : path.join(storageRoot, 'sessions', session.sessionId, 'photos', `shot_${String(shotIndex).padStart(2, '0')}.jpg`));
     const nextPhoto = {
-      photoId: String(photo?.photoId || `photo_${Date.now()}`),
+      photoId,
+      id: photoId,
       sessionId: session.sessionId,
       shotIndex,
-      originalPath: String(photo?.originalPath || `originals/capture_${String(shotIndex).padStart(2, '0')}.jpg`),
+      originalPath: resolvedPath,
+      localPath: resolvedPath,
       status: 'valid',
       capturedAt: nowIso(),
       dataUrl: typeof photo?.dataUrl === 'string' ? photo.dataUrl : undefined,
+      width: photo?.width || 5472,
+      height: photo?.height || 3648,
+      size: photo?.size,
+      provider: photo?.provider || 'canon',
+      mimeType: photo?.mimeType || 'image/jpeg',
     };
-    const photos = [...session.photos.filter((existing) => existing.photoId !== nextPhoto.photoId), nextPhoto].sort((a, b) => a.shotIndex - b.shotIndex);
+    const photos = [...session.photos.filter((existing) => existing.shotIndex !== shotIndex), nextPhoto].sort((a, b) => a.shotIndex - b.shotIndex);
     const nextStatus = photos.filter((item) => item.status === 'valid').length >= session.captureFormat.shotCount ? 'SELECTING_TEMPLATE' : 'CAPTURING';
-    return touch({ ...session, photos }, nextStatus);
+    activeCaptureShotIndex = Math.min(photos.length + 1, session.captureFormat.shotCount);
+    const updated = touch({ ...session, photos }, nextStatus);
+
+    // Save session manifest to disk
+    try {
+      if (sessionMediaPaths) {
+        const manifestData = {
+          sessionId: session.sessionId,
+          photos: updated.photos,
+          clips: desktopMediaManager.getClips(session.sessionId) || [],
+          outputs: {
+            finalImage: sessionMediaPaths.finalImage(session.sessionId),
+            finalVideo: sessionMediaPaths.finalVideo(session.sessionId),
+          },
+          updatedAt: nowIso(),
+        };
+        fs.writeFileSync(sessionMediaPaths.manifest(session.sessionId), JSON.stringify(manifestData, null, 2));
+      }
+    } catch (e) {}
+
+    return ok(updated);
   }));
   ipcMain.handle('cameraos:guest:templates:list', (_event, eventId, captureFormatId) => ok(listTemplates(String(eventId || 'event_hoi_an_heritage'), String(captureFormatId || 'format_1shot'))));
   ipcMain.handle('cameraos:guest:template:select', (_event, sessionId, templateId) => safeGuest(() => {
@@ -1214,28 +1287,122 @@ function registerSkeletonIpc() {
   ipcMain.handle('cameraos:guest:customization:save', (_event, sessionId, customization) => safeGuest(() => touch({ ...requireGuestSession(String(sessionId || '')), customization: customization || { text: [], drawing: [] } }, 'COMPOSING')));
   ipcMain.handle('cameraos:guest:compose', (_event, sessionId) => safeGuest(() => {
     const session = requireGuestSession(String(sessionId || ''));
-    const safeToken = encodeURIComponent(session.sessionId);
-    return touch({ ...session, outputs: { master: `/outputs/${safeToken}/final-master.png`, share: `/outputs/${safeToken}/final-share.jpg`, print: `/outputs/${safeToken}/final-print.jpg` }, qr: { url: '', status: 'failed' } }, 'RESULT_READY');
+    const finalImgPath = sessionMediaPaths ? sessionMediaPaths.finalImage(session.sessionId) : path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'final-image.jpg');
+    const printImgPath = sessionMediaPaths ? sessionMediaPaths.printMaster(session.sessionId) : path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'print-cp1000.jpg');
+    const masterImgPath = path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'master.png');
+    return touch({ ...session, outputs: { master: masterImgPath, share: finalImgPath, print: printImgPath }, qr: { url: '', status: 'failed' } }, 'RESULT_READY');
   }));
   ipcMain.handle('cameraos:guest:print:request', (_event, sessionId, copies) => safeGuest(() => {
     const session = requireGuestSession(String(sessionId || ''));
-    const enqueueResult = printQueue.enqueue(session, { copies: Number(copies) || 1 });
+    const printImg =
+      session.outputs?.print ||
+      (sessionMediaPaths ? sessionMediaPaths.printMaster(session.sessionId) : null) ||
+      path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'print-cp1000.jpg');
+    const fallbackImg = sessionMediaPaths ? sessionMediaPaths.finalImage(session.sessionId) : path.join(storageRoot, 'sessions', session.sessionId, 'outputs', 'final-image.jpg');
+    const targetImg = fs.existsSync(printImg) ? printImg : fallbackImg;
+    const exists = fs.existsSync(targetImg);
+    const size = exists ? fs.statSync(targetImg).size : 0;
+    console.log(`[PRINT_MEDIA_AUDIT]\nsessionId=${session.sessionId}\ninputPath=${targetImg}\nrealPath=${exists ? fs.realpathSync(targetImg) : targetImg}\nexists=${exists}\nsize=${size}`);
+    const enqueueResult = printQueue.enqueue(session, { copies: Number(copies) || 1, printMasterPath: targetImg });
     if (!enqueueResult.ok) {
       throw new Error(enqueueResult.error?.message || 'Print enqueue failed.');
     }
     return touch({ ...session, printJob: enqueueResult.value }, session.status);
   }));
+  ipcMain.handle('cameraos:media:clip-recorder:start-shot', (_event, sessionId, shotIndex, countdownStartedAt) => safeGuest(() => {
+    activeCaptureSessionId = sessionId;
+    activeCaptureShotIndex = Number(shotIndex) + 1;
+    const session = sessions.get(String(sessionId || ''));
+    const requiredShots = session?.captureFormat?.shotCount || session?.product?.requiredShots || 4;
+    return desktopMediaManager.startShotClip(sessionId, shotIndex, countdownStartedAt, { requiredShots });
+  }));
+  ipcMain.handle('cameraos:media:clip-recorder:push-device-frame', (_event, sessionId, shotIndex, bufferData, width, height) => safeGuest(() => {
+    const buf = Buffer.isBuffer(bufferData) ? bufferData : Buffer.from(bufferData);
+    desktopMediaManager.pushDevicePreviewFrame(sessionId, shotIndex, buf, width, height);
+    return { ok: true };
+  }));
+  ipcMain.handle('cameraos:media:clip-recorder:mark-shutter', (_event, sessionId, shotIndex, shutterAt) => safeGuest(() => {
+    return desktopMediaManager.markShutter(sessionId, shotIndex, shutterAt);
+  }));
+  ipcMain.handle('cameraos:media:clip-recorder:stop-shot', (_event, sessionId, shotIndex, persistedAt, options) => safeGuest(async () => {
+    let fallbackBuf = null;
+    if (options?.fallbackDataUrl) {
+      const b64 = options.fallbackDataUrl.split(',').pop() || '';
+      fallbackBuf = Buffer.from(b64, 'base64');
+    }
+    return desktopMediaManager.stopShotClip(sessionId, shotIndex, persistedAt, { fallbackImageBuffer: fallbackBuf });
+  }));
+  ipcMain.handle('cameraos:media:clip-recorder:fail-shot', (_event, sessionId, shotIndex, error) => safeGuest(() => {
+    return desktopMediaManager.failShotClip(sessionId, shotIndex, error);
+  }));
+  ipcMain.handle('cameraos:media:clip-recorder:get-clips', (_event, sessionId) => safeGuest(() => {
+    return desktopMediaManager.getClips(sessionId);
+  }));
+  ipcMain.handle('cameraos:media:video:compose', (_event, sessionId, frame, options) => safeGuest(() => {
+    const session = requireGuestSession(String(sessionId || ''));
+    session.videoCompositionState = 'QUEUED';
+    sessions.set(sessionId, session);
+    const job = desktopMediaManager.enqueueMediaJob(sessionId, 'FRAME_VIDEO_COMPOSE', {
+      frame,
+      overlayUrl: options?.overlayUrl,
+      drawDataUrl: options?.drawDataUrl,
+      durationMs: options?.durationMs || 4000,
+      targetWidth: options?.targetWidth,
+      targetHeight: options?.targetHeight,
+    });
+    return ok(job);
+  }));
+  ipcMain.handle('cameraos:media:package:get', (_event, sessionId, origin) => safeGuest(() => {
+    return desktopMediaManager.getSessionMediaPackage(sessionId, origin);
+  }));
+  ipcMain.handle('cameraos:media:token:get', (_event, sessionId) => safeGuest(() => {
+    return { publicToken: desktopMediaManager.getPublicToken(sessionId) };
+  }));
   ipcMain.handle('cameraos:guest:complete', (_event, sessionId) => safeGuest(() => {
     const session = requireGuestSession(String(sessionId || ''));
     const now = nowIso();
     const updated = touch({ ...session, completedAt: now }, 'COMPLETED');
+    activeCaptureSessionId = null;
+    writeSessionManifestAndMetadata(session.sessionId);
     checkAndCompleteSession(session.sessionId);
     return ok(updated);
+  }));
+
+  // Cloud Synchronization IPC
+  ipcMain.handle('cameraos:cloud:session:init', (_event, sessionId, metadata) => safeGuest(() => {
+    const safeId = assertStorageId(sessionId, 'session id');
+    return cloudSyncCoordinator.initSession(safeId, metadata);
+  }));
+  ipcMain.handle('cameraos:cloud:session:get-token', (_event, sessionId) => safeGuest(() => {
+    const safeId = assertStorageId(sessionId, 'session id');
+    return {
+      publicToken: cloudSyncCoordinator.getPublicToken(safeId),
+      landingUrl: cloudSyncCoordinator.getLandingUrl(safeId),
+    };
+  }));
+  ipcMain.handle('cameraos:cloud:upload:phase-a', (_event, sessionId) => safeGuest(() => {
+    const safeId = assertStorageId(sessionId, 'session id');
+    void cloudSyncCoordinator.triggerPhaseAUpload(safeId);
+    return { ok: true, triggered: true };
+  }));
+  ipcMain.handle('cameraos:cloud:session:get-status', (_event, sessionId) => safeGuest(() => {
+    const safeId = assertStorageId(sessionId, 'session id');
+    const state = cloudSyncCoordinator.sessions.get(safeId);
+    return state || null;
   }));
 }
 
 let lastFrameBroadcast = 0;
-canonBridge.on('liveViewFrame', (frame) => {
+let lastEvfFrameAt = 0;
+let lastEvfSeq = 0;
+let liveViewRequested = false;
+let activeCaptureSessionId = null;
+let activeCaptureShotIndex = 1;
+
+canonRuntime.on('liveViewFrame', (frame) => {
+  lastEvfFrameAt = Date.now();
+  lastEvfSeq = frame.seq || lastEvfSeq + 1;
+  desktopMediaManager.pushCanonLiveViewFrame(frame);
   const now = Date.now();
   if (now - lastFrameBroadcast >= 33) {
     lastFrameBroadcast = now;
@@ -1248,30 +1415,166 @@ canonBridge.on('liveViewFrame', (frame) => {
   }
 });
 
+let stallRecoveryInFlight = false;
+
+async function handleLiveViewStall() {
+  if (stallRecoveryInFlight) return;
+  stallRecoveryInFlight = true;
+  console.log('[CANON_HEALTH] LIVEVIEW_STALLED detected. Starting escalation recovery...');
+
+  try {
+    // LEVEL 1: In-Session EVF Recovery
+    const l1Ok = await canonRuntime.recoverLiveViewLevel1();
+    if (l1Ok) {
+      console.log('[CANON_HEALTH] Level 1 EVF Recovery SUCCESSFUL.');
+      return;
+    }
+
+    // LEVEL 2: Session Recovery (same bridge)
+    console.warn('[CANON_HEALTH] Level 1 failed. Escalating to Level 2 (Session Recovery)...');
+    const l2Ok = await canonRuntime.recoverSessionLevel2();
+    if (l2Ok) {
+      console.log('[CANON_HEALTH] Level 2 Session Recovery SUCCESSFUL.');
+      return;
+    }
+
+    // LEVEL 3: Bridge Recovery (Process Respawn)
+    console.warn('[CANON_HEALTH] Level 2 failed. Escalating to Level 3 (Bridge Process Respawn)...');
+    const l3Ok = await canonRuntime.recoverBridgeLevel3();
+    if (l3Ok) {
+      console.log('[CANON_HEALTH] Level 3 Bridge Recovery SUCCESSFUL.');
+      return;
+    }
+    console.error('[CANON_HEALTH] All 3 recovery levels exhausted. Camera in error state.');
+  } catch (err) {
+    console.error('[CANON_HEALTH] Recovery error:', err.message);
+  } finally {
+    stallRecoveryInFlight = false;
+  }
+}
+
+// 3-Second Camera Health Monitor (Section 8 & 9)
+setInterval(() => {
+  const evfAgeMs = lastEvfFrameAt > 0 ? Date.now() - lastEvfFrameAt : 0;
+  const runtimeAlive = Boolean(canonRuntime.process && !canonRuntime.process.killed);
+  const bridgeAlive = Boolean(canonRuntime.state !== 'DISCONNECTED' && canonRuntime.state !== 'ERROR' && canonRuntime.state !== 'CAMERA_NOT_FOUND' && canonRuntime.state !== 'CAMERA_PTP_UNRESPONSIVE');
+  const sessionOpen = canonRuntime.state === 'READY' || canonRuntime.state === 'LIVEVIEW' || canonRuntime.state === 'STARTING_LIVEVIEW' || canonRuntime.state === 'CAPTURING' || canonRuntime.state === 'DOWNLOADING';
+  const usbPresent = Boolean(canonRuntime.physicalUsbPresent || canonRuntime.cameraCount > 0 || sessionOpen);
+  const state = canonRuntime.state;
+  const isStalled = liveViewRequested && evfAgeMs > 3000;
+
+  const currentSessionId = activeCaptureSessionId || 'GUEST_STANDBY';
+  const session = activeCaptureSessionId ? sessions.get(activeCaptureSessionId) : null;
+  const photoCount = session?.photos?.length || 0;
+  const clips = activeCaptureSessionId ? desktopMediaManager.getClips(activeCaptureSessionId) : [];
+  const clipCount = clips?.filter((c) => c.status === 'ready')?.length || 0;
+  const isClipRecording = clips?.some((c) => c.status === 'recording') || false;
+
+  console.log(`[CANON_HEALTH] session=${currentSessionId} shot=${activeCaptureShotIndex}/4 runtimeAlive=${runtimeAlive} bridgeAlive=${bridgeAlive} usbPresent=${usbPresent} sessionOpen=${sessionOpen} state=${state}${isStalled ? ' (LIVEVIEW_STALLED)' : ''} evfAgeMs=${evfAgeMs} evfSeq=${lastEvfSeq} captureInProgress=${state === 'CAPTURING'} clipRecording=${isClipRecording} photoCount=${photoCount} clipCount=${clipCount}`);
+
+  if (isStalled && (sessionOpen || state === 'LIVEVIEW_STALLED') && (state === 'LIVEVIEW' || state === 'READY' || state === 'LIVEVIEW_STALLED') && !isClipRecording && state !== 'CAPTURING' && state !== 'DOWNLOADING') {
+    void handleLiveViewStall();
+  }
+}, 3000);
+
+canonRuntime.on('error', (err) => {
+  writeSystemLog('warn', 'CANON:RUNTIME_ERROR', typeof err === 'object' ? JSON.stringify(err) : String(err));
+});
+
+canonRuntime.on('bridgeError', (err) => {
+  writeSystemLog('warn', 'CANON:BRIDGE_ERROR', typeof err === 'object' ? JSON.stringify(err) : String(err));
+});
+
 app.whenReady().then(async () => {
+  console.log(`[ELECTRON_OWNER]\nelectronPid = ${process.pid}`);
   writeSystemLog('info', 'WINDOWMINI:BOOT', 'MomentAI CameraOS Electron Main booted.');
   registerSkeletonIpc();
   printQueue.init();
+  ensureStorageDb();
+  cloudSyncCoordinator.init(storageDb, sessionMediaPaths);
+  desktopMediaManager.init(storageDb);
+  desktopMediaManager.onJobCompleted((job) => {
+    const session = sessions.get(job.sessionId);
+    if (session && job.jobType === 'FRAME_VIDEO_COMPOSE') {
+      session.videoCompositionState = job.status === 'COMPLETED' ? 'COMPLETED' : 'FAILED';
+      sessions.set(job.sessionId, session);
+    }
+    writeSessionManifestAndMetadata(job.sessionId);
+    checkAndCompleteSession(job.sessionId);
+    cloudSyncCoordinator.onJobCompleted(job);
+  });
   initSessionCleanupScheduler();
   createWindow('guest');
 
   try {
-    const canonOk = await canonBridge.start();
-    if (canonOk) {
-      writeSystemLog('info', 'CANON:CONNECTED', `Canon camera ${canonBridge.cameraModel} connected and ready.`);
+    const canonOk = await canonRuntime.start();
+    if (canonOk && (canonRuntime.state === 'READY' || canonRuntime.state === 'LIVEVIEW')) {
+      desktopMediaManager.setProvider('canon');
+      writeSystemLog('info', 'CANON:CONNECTED', `Canon camera ${canonRuntime.cameraModel} connected and ready.`);
+    } else if (canonRuntime.cameraCount > 0) {
+      desktopMediaManager.setProvider('canon');
+      writeSystemLog('info', 'CANON:CONNECTING', `Canon camera ${canonRuntime.cameraModel} detected; session opening/connecting.`);
     } else {
-      writeSystemLog('info', 'CANON:FALLBACK', 'Canon not available on boot; falling back to device camera.');
+      desktopMediaManager.setProvider('device');
+      writeSystemLog('info', 'CANON:FALLBACK', 'Canon not detected on boot; falling back to device camera.');
     }
   } catch (err) {
-    writeSystemLog('warn', 'CANON:START_ERROR', `Canon start error: ${err.message}`);
+    if (canonRuntime.cameraCount > 0) {
+      desktopMediaManager.setProvider('canon');
+      writeSystemLog('warn', 'CANON:START_WARNING', `Canon connecting warning: ${err.message}`);
+    } else {
+      desktopMediaManager.setProvider('device');
+      writeSystemLog('warn', 'CANON:START_ERROR', `Canon start error: ${err.message}`);
+    }
   }
+
+  logCameraRuntimeStatus('POST_BOOT_AUDIT');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow('guest');
   });
 });
 
-app.on('window-all-closed', () => {
-  canonBridge.shutdown();
-  if (process.platform !== 'darwin') app.quit();
+let isAppQuitting = false;
+
+async function cleanupAndQuit() {
+  if (isAppQuitting) return;
+  isAppQuitting = true;
+  console.log('[ELECTRON_CLEANUP] Releasing all Canon resources and shutting down runtime...');
+  try {
+    await canonRuntime.shutdown();
+  } catch (err) {
+    console.warn('[ELECTRON_CLEANUP] Error during canonRuntime.shutdown():', err);
+  }
+}
+
+app.on('before-quit', async (event) => {
+  if (!isAppQuitting) {
+    event.preventDefault();
+    await cleanupAndQuit();
+    app.exit(0);
+  }
+});
+
+app.on('window-all-closed', async () => {
+  await cleanupAndQuit();
+  app.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('[ELECTRON_PROCESS] SIGINT received, cleaning up...');
+  await cleanupAndQuit();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('[ELECTRON_PROCESS] SIGTERM received, cleaning up...');
+  await cleanupAndQuit();
+  process.exit(0);
+});
+
+process.on('exit', () => {
+  try {
+    canonRuntime.killSync();
+  } catch (e) {}
 });

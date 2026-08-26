@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { LocalFilesystemSQLiteStorageAdapter } from './local-filesystem-sqlite-storage-adapter';
 
 const tempRoots: string[] = [];
+const adapters: LocalFilesystemSQLiteStorageAdapter[] = [];
 
 function createTempRoot(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'momentai-storage-'));
@@ -14,14 +15,29 @@ function createTempRoot(): string {
   return root;
 }
 
+function createAdapter(options: ConstructorParameters<typeof LocalFilesystemSQLiteStorageAdapter>[0] = {}) {
+  const adapter = new LocalFilesystemSQLiteStorageAdapter(options);
+  adapters.push(adapter);
+  return adapter;
+}
+
 afterEach(() => {
-  for (const root of tempRoots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+  for (const adapter of adapters.splice(0)) {
+    adapter.close();
+  }
+  for (const root of tempRoots.splice(0)) {
+    try {
+      fs.rmSync(root, { recursive: true, force: true });
+    } catch {
+      // Windows safe cleanup
+    }
+  }
 });
 
 describe('LocalFilesystemSQLiteStorageAdapter', () => {
   it('creates session directories and persists original files atomically', async () => {
     const rootDir = createTempRoot();
-    const adapter = new LocalFilesystemSQLiteStorageAdapter({ rootDir, now: () => '2026-08-16T00:00:00.000Z' });
+    const adapter = createAdapter({ rootDir, now: () => '2026-08-16T00:00:00.000Z' });
 
     await expect(adapter.initialize()).resolves.toEqual({ ok: true, value: undefined });
     await expect(adapter.createSession('session_1')).resolves.toEqual({ ok: true, value: undefined });
@@ -30,7 +46,7 @@ describe('LocalFilesystemSQLiteStorageAdapter', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.relativePath).toBe('sessions/session_1/originals/shot_01.jpg');
+    expect(result.value.relativePath).toBe('sessions/session_1/photos/shot_01.jpg');
     expect(fs.existsSync(path.join(rootDir, result.value.relativePath))).toBe(true);
     expect(fs.readFileSync(path.join(rootDir, result.value.relativePath))).toEqual(Buffer.from([1, 2, 3]));
     expect(fs.existsSync(path.join(rootDir, 'cameraos-storage.sqlite'))).toBe(true);
@@ -38,7 +54,7 @@ describe('LocalFilesystemSQLiteStorageAdapter', () => {
 
   it('persists separate master/share/print outputs without overwriting originals', async () => {
     const rootDir = createTempRoot();
-    const adapter = new LocalFilesystemSQLiteStorageAdapter({ rootDir, now: () => '2026-08-16T00:00:00.000Z' });
+    const adapter = createAdapter({ rootDir, now: () => '2026-08-16T00:00:00.000Z' });
     await adapter.initialize();
     await adapter.saveOriginal('session_2', 1, { bytes: new Uint8Array([9]), mimeType: 'image/jpeg' });
 
@@ -49,12 +65,12 @@ describe('LocalFilesystemSQLiteStorageAdapter', () => {
     expect(master.ok && master.value.relativePath).toBe('sessions/session_2/outputs/master.png');
     expect(share.ok && share.value.relativePath).toBe('sessions/session_2/outputs/share.jpg');
     expect(print.ok && print.value.relativePath).toBe('sessions/session_2/outputs/print.jpg');
-    expect(fs.readFileSync(path.join(rootDir, 'sessions/session_2/originals/shot_01.jpg'))).toEqual(Buffer.from([9]));
+    expect(fs.readFileSync(path.join(rootDir, 'sessions/session_2/photos/shot_01.jpg'))).toEqual(Buffer.from([9]));
   });
 
   it('rejects duplicate originals instead of overwriting the first capture', async () => {
     const rootDir = createTempRoot();
-    const adapter = new LocalFilesystemSQLiteStorageAdapter({ rootDir });
+    const adapter = createAdapter({ rootDir });
     await adapter.initialize();
 
     const first = await adapter.saveOriginal('session_4', 1, { bytes: new Uint8Array([7]), mimeType: 'image/jpeg' });
@@ -62,11 +78,11 @@ describe('LocalFilesystemSQLiteStorageAdapter', () => {
 
     expect(first.ok).toBe(true);
     expect(duplicate.ok).toBe(false);
-    expect(fs.readFileSync(path.join(rootDir, 'sessions/session_4/originals/shot_01.jpg'))).toEqual(Buffer.from([7]));
+    expect(fs.readFileSync(path.join(rootDir, 'sessions/session_4/photos/shot_01.jpg'))).toEqual(Buffer.from([7]));
   });
 
   it('rejects empty bytes and unsupported MIME types', async () => {
-    const adapter = new LocalFilesystemSQLiteStorageAdapter({ rootDir: createTempRoot() });
+    const adapter = createAdapter({ rootDir: createTempRoot() });
     await adapter.initialize();
 
     const empty = await adapter.saveOriginal('session_5', 1, { bytes: new Uint8Array(), mimeType: 'image/jpeg' });
@@ -77,13 +93,13 @@ describe('LocalFilesystemSQLiteStorageAdapter', () => {
   });
 
   it('rejects unsafe session ids and invalid shot indexes', async () => {
-    const adapter = new LocalFilesystemSQLiteStorageAdapter({ rootDir: createTempRoot() });
+    const adapter = createAdapter({ rootDir: createTempRoot() });
     await adapter.initialize();
 
-    const unsafeSession = await adapter.createSession('../secret');
-    const unsafeShot = await adapter.saveOriginal('session_3', 0, { bytes: new Uint8Array([1]), mimeType: 'image/jpeg' });
+    const unsafeSession = await adapter.createSession('../escaped');
+    const invalidShot = await adapter.saveOriginal('session_6', 99, { bytes: new Uint8Array([1]), mimeType: 'image/jpeg' });
 
     expect(unsafeSession.ok).toBe(false);
-    expect(unsafeShot.ok).toBe(false);
+    expect(invalidShot.ok).toBe(false);
   });
 });

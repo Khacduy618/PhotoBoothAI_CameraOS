@@ -228,8 +228,28 @@ export async function renderFrameComposition(
     throw new DOMException("Composition aborted", "AbortError");
   }
 
-  const outputWidth = frame.outputWidth || 1800;
-  const outputHeight = frame.outputHeight || 2700;
+  const isLandscape = frame.orientation === "landscape" || (frame.outputWidth && frame.outputHeight ? frame.outputWidth > frame.outputHeight : false);
+  const isStrip = (frame as { targetProduct?: string }).targetProduct === "STRIP_2" || (frame as { targetProduct?: string }).targetProduct === "STRIP_4" || (frame as { preferredPaper?: string }).preferredPaper === "2x6-double";
+
+  let outputWidth = frame.outputWidth || (isStrip ? 5472 : isLandscape ? 16200 : 10944);
+  let outputHeight = frame.outputHeight || (isStrip ? 16416 : isLandscape ? 10944 : 16200);
+
+  // If imported image has low resolution (< 2000px width or < 4000px height), upscale render canvas
+  // so each slot retains 100% of the 5472x3648 native sensor resolution of the Canon 6D!
+  if (outputWidth < 2000 || outputHeight < 4000) {
+    const ratio = outputWidth / outputHeight;
+    if (isStrip || ratio <= 0.45) {
+      outputHeight = 16416;
+      outputWidth = Math.round(outputHeight * ratio) || 5472;
+    } else if (isLandscape) {
+      outputWidth = 16200;
+      outputHeight = Math.round(outputWidth / ratio) || 10944;
+    } else {
+      outputHeight = 16200;
+      outputWidth = Math.round(outputHeight * ratio) || 10944;
+    }
+  }
+
   const slots = frame.slots || [];
 
   const canvas = targetCanvas || document.createElement("canvas");
@@ -308,6 +328,12 @@ export async function renderFrameComposition(
       ctx.beginPath();
       ctx.rect(slotPx.x, slotPx.y, slotPx.width, slotPx.height);
       ctx.clip();
+
+      // Studio PhotoBooth Warm & High-Contrast Color Enhancement:
+      // +18% Saturation, +8% Contrast, subtle +4% golden-amber warmth, vibrant skin tone
+      if (ctx.filter !== undefined) {
+        ctx.filter = "contrast(1.08) saturate(1.18) sepia(0.04)";
+      }
 
       ctx.drawImage(
         img,

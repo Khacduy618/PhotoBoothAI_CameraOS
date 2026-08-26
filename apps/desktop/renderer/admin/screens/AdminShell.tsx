@@ -55,13 +55,24 @@ export function WindowMiniAdminShell() {
             autoFocus
           />
           {error && <p className="mt-3 rounded-lg bg-red-500/15 px-4 py-3 text-sm font-bold text-red-200">{error}</p>}
-          <button
-            type="button"
-            onClick={() => void unlock()}
-            className="mt-5 rounded-xl bg-[#F6C453] px-6 py-4 text-xs font-black uppercase tracking-[0.25em] text-[#111111] transition active:scale-95"
-          >
-            Mở Admin
-          </button>
+          <div className="mt-5 flex gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                window.location.hash = '#/guest';
+              }}
+              className="flex-1 rounded-xl border border-white/20 px-4 py-4 text-xs font-bold uppercase tracking-[0.15em] text-white/80 transition hover:bg-white/10 active:scale-95"
+            >
+              Quay lại Booth
+            </button>
+            <button
+              type="button"
+              onClick={() => void unlock()}
+              className="flex-1 rounded-xl bg-[#F6C453] px-4 py-4 text-xs font-black uppercase tracking-[0.2em] text-[#111111] transition active:scale-95"
+            >
+              Mở Admin
+            </button>
+          </div>
         </section>
       </main>
     );
@@ -69,8 +80,19 @@ export function WindowMiniAdminShell() {
 
   return (
     <main className="min-h-screen bg-neutral-50 text-neutral-950">
-      <div className="sticky top-0 z-50 border-b border-neutral-200 bg-white/95 px-4 py-2 text-right text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500 backdrop-blur">
-        Admin unlocked • {adminViewModel.source}
+      <div className="sticky top-0 z-50 flex items-center justify-between border-b border-neutral-200 bg-white/95 px-6 py-2.5 backdrop-blur">
+        <button
+          type="button"
+          onClick={() => {
+            window.location.hash = '#/guest';
+          }}
+          className="flex items-center gap-2 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-bold text-neutral-700 shadow-sm transition hover:bg-neutral-100 active:scale-95"
+        >
+          ← Quay lại Booth
+        </button>
+        <div className="text-right text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500">
+          Admin unlocked • {adminViewModel.source} • Phím tắt: Ctrl + Shift + A
+        </div>
       </div>
       <FrameImportPanel />
     </main>

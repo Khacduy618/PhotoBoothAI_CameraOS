@@ -1,6 +1,7 @@
 import { FrameTemplate, PhotoItem, EventConfig, PaperSize } from '../types';
 import { isStripTemplate } from '../components/UI/frame-previews/FramePreviewCard';
 import { renderFrameComposition, loadImage } from '@/services/render/frame-compositor.service';
+import { buildPrintMaster } from '@/services/render/print-master.service';
 
 export class CompositionEngine {
   public async renderComposition(
@@ -38,20 +39,21 @@ export class CompositionEngine {
 
       const isLandscape = canvas.width > canvas.height;
       const isStrip = isStripTemplate(frame);
+      const scale = canvas.height / 2700;
 
       ctx.save();
       ctx.textAlign = 'center';
       ctx.fillStyle = frame.assets.textColor || '#1A1A1A';
 
       if (isLandscape) {
-        // Landscape (2700x1800, height 1800px): branding area at bottom 12%
-        ctx.font = 'italic 38px "Playfair Display", serif';
-        ctx.fillText(branding.text, canvas.width / 2, 1660);
+        // Landscape (height e.g. 7392px): branding area at bottom
+        ctx.font = `italic ${Math.round(38 * scale)}px "Playfair Display", serif`;
+        ctx.fillText(branding.text, canvas.width / 2, Math.round(1660 * (canvas.height / 1800)));
 
         if (branding.subtext) {
-          ctx.font = '22px "Plus Jakarta Sans", sans-serif';
+          ctx.font = `${Math.round(22 * scale)}px "Plus Jakarta Sans", sans-serif`;
           ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}cc` : '#4b5563';
-          ctx.fillText(branding.subtext, canvas.width / 2, 1705);
+          ctx.fillText(branding.subtext, canvas.width / 2, Math.round(1705 * (canvas.height / 1800)));
         }
 
         if (branding.showDate) {
@@ -60,19 +62,19 @@ export class CompositionEngine {
             month: '2-digit',
             day: '2-digit',
           });
-          ctx.font = '18px monospace';
+          ctx.font = `${Math.round(18 * scale)}px monospace`;
           ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}88` : '#9ca3af';
-          ctx.fillText(dateStr, canvas.width / 2, 1745);
+          ctx.fillText(dateStr, canvas.width / 2, Math.round(1745 * (canvas.height / 1800)));
         }
       } else if (isStrip) {
-        // Strip (900x2700, height 2700px)
-        ctx.font = 'italic 36px "Playfair Display", serif';
-        ctx.fillText(branding.text, canvas.width / 2, 2520);
+        // Strip (height e.g. 10944px)
+        ctx.font = `italic ${Math.round(36 * scale)}px "Playfair Display", serif`;
+        ctx.fillText(branding.text, canvas.width / 2, Math.round(2520 * scale));
 
         if (branding.subtext) {
-          ctx.font = '22px "Plus Jakarta Sans", sans-serif';
+          ctx.font = `${Math.round(22 * scale)}px "Plus Jakarta Sans", sans-serif`;
           ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}cc` : '#4b5563';
-          ctx.fillText(branding.subtext, canvas.width / 2, 2570);
+          ctx.fillText(branding.subtext, canvas.width / 2, Math.round(2570 * scale));
         }
 
         if (branding.showDate) {
@@ -81,19 +83,19 @@ export class CompositionEngine {
             month: '2-digit',
             day: '2-digit',
           });
-          ctx.font = '18px monospace';
+          ctx.font = `${Math.round(18 * scale)}px monospace`;
           ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}88` : '#9ca3af';
-          ctx.fillText(dateStr, canvas.width / 2, 2620);
+          ctx.fillText(dateStr, canvas.width / 2, Math.round(2620 * scale));
         }
       } else {
-        // Portrait Sheet (1800x2700, height 2700px)
-        ctx.font = 'italic 52px "Playfair Display", serif';
-        ctx.fillText(branding.text, canvas.width / 2, 2500);
+        // Portrait Sheet (height e.g. 10944px)
+        ctx.font = `italic ${Math.round(52 * scale)}px "Playfair Display", serif`;
+        ctx.fillText(branding.text, canvas.width / 2, Math.round(2500 * scale));
 
         if (branding.subtext) {
-          ctx.font = '30px "Plus Jakarta Sans", sans-serif';
+          ctx.font = `${Math.round(30 * scale)}px "Plus Jakarta Sans", sans-serif`;
           ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}cc` : '#4b5563';
-          ctx.fillText(branding.subtext, canvas.width / 2, 2570);
+          ctx.fillText(branding.subtext, canvas.width / 2, Math.round(2570 * scale));
         }
 
         if (branding.showDate) {
@@ -102,9 +104,9 @@ export class CompositionEngine {
             month: '2-digit',
             day: '2-digit',
           });
-          ctx.font = '24px monospace';
+          ctx.font = `${Math.round(24 * scale)}px monospace`;
           ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}88` : '#9ca3af';
-          ctx.fillText(dateStr, canvas.width / 2, 2630);
+          ctx.fillText(dateStr, canvas.width / 2, Math.round(2630 * scale));
         }
       }
       ctx.restore();
@@ -120,16 +122,21 @@ export class CompositionEngine {
       }
     }
 
-    // Generate Outputs
+    // Generate Outputs (100% Maximum Quality - Lossless PNG & JPEG 1.0)
     const masterDataUrl = canvas.toDataURL('image/png');
-    const shareDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    const shareDataUrl = canvas.toDataURL('image/jpeg', 1.0);
 
-    // Render Print Data URL (Handles 2x6 / 5x15 double-strip cut mode on 4x6 / 10x15 paper)
-    let printDataUrl = masterDataUrl;
+    // Render Print Data URL via authoritative CP1000 print master builder
     const isStrip = isStripTemplate(frame);
-    if (frame.renderMode === 'double-strip' || frame.preferredPaper === '2x6-double' || isStrip) {
-      printDataUrl = await this.renderDoubleStrip(canvas, 1800, 2700);
-    }
+    const targetProduct = frame.targetProduct || (isStrip ? 'STRIP_4' : 'SHEET_4');
+    const isLandscape = canvas.width > canvas.height;
+
+    const printMasterResult = await buildPrintMaster({
+      logicalProductImage: canvas,
+      targetProduct,
+      isLandscape,
+    });
+    const printDataUrl = printMasterResult.toDataURL('image/jpeg', 1.0);
 
     return {
       master: masterDataUrl,

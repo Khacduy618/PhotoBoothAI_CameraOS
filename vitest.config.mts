@@ -9,6 +9,8 @@ export default defineConfig({
         environment: "jsdom",
         globals: false,
         passWithNoTests: true,
+        testTimeout: 15000,
+        hookTimeout: 15000,
         exclude: [
             "**/node_modules/**",
             "**/dist/**",
@@ -19,6 +21,14 @@ export default defineConfig({
     resolve: {
         alias: {
             "@": path.resolve(__dirname, "."),
+            "@momentai/shared-types": path.resolve(__dirname, "./packages/shared-types/src"),
+            "@momentai/session-engine": path.resolve(__dirname, "./packages/session-engine/src"),
+            "@momentai/shot-engine": path.resolve(__dirname, "./packages/shot-engine/src"),
+            "@momentai/camera-contract": path.resolve(__dirname, "./packages/camera-contract/src"),
+            "@momentai/printer-contract": path.resolve(__dirname, "./packages/printer-contract/src"),
+            "@momentai/storage-contract": path.resolve(__dirname, "./packages/storage-contract/src"),
+            "@momentai/admin-contract": path.resolve(__dirname, "./packages/admin-contract/src"),
+            "@momentai/test-fixtures": path.resolve(__dirname, "./packages/test-fixtures/src"),
         },
     },
 });

@@ -14,7 +14,7 @@ const DEFAULT_ROOT_DIR = path.join(process.cwd(), 'artifacts', 'windowmini-stora
 const SQLITE_FILE = 'cameraos-storage.sqlite';
 
 export class LocalFilesystemSQLiteStorageAdapter implements StorageAdapter {
-  private db: InstanceType<typeof Database> | null = null;
+  private db: Database | null = null;
   private readonly rootDir: string;
   private readonly now: () => string;
 
@@ -68,7 +68,8 @@ export class LocalFilesystemSQLiteStorageAdapter implements StorageAdapter {
     try {
       const safeSessionId = assertSafeId(sessionId, 'session id');
       this.ensureInitialized();
-      fs.mkdirSync(path.join(this.rootDir, 'sessions', safeSessionId, 'originals'), { recursive: true });
+      fs.mkdirSync(path.join(this.rootDir, 'sessions', safeSessionId, 'photos'), { recursive: true });
+      fs.mkdirSync(path.join(this.rootDir, 'sessions', safeSessionId, 'clips'), { recursive: true });
       fs.mkdirSync(path.join(this.rootDir, 'sessions', safeSessionId, 'outputs'), { recursive: true });
       const now = this.now();
       this.db!.prepare(`
@@ -89,7 +90,7 @@ export class LocalFilesystemSQLiteStorageAdapter implements StorageAdapter {
       this.ensureInitialized();
       await this.createSession(safeSessionId);
       const extension = extensionForMime(photo.mimeType);
-      const relativePath = path.posix.join('sessions', safeSessionId, 'originals', `shot_${String(safeShotIndex).padStart(2, '0')}${extension}`);
+      const relativePath = path.posix.join('sessions', safeSessionId, 'photos', `shot_${String(safeShotIndex).padStart(2, '0')}${extension}`);
       return { ok: true, value: this.writeImageRecord(safeSessionId, `original_${safeSessionId}_${safeShotIndex}`, relativePath, photo, undefined, false) };
     } catch (cause) {
       return storageError(cause, 'STORAGE_ORIGINAL_SAVE_FAILED', 'Unable to save original image.');
@@ -189,15 +190,144 @@ export class LocalFilesystemSQLiteStorageAdapter implements StorageAdapter {
     return stored;
   }
 
+  close(): void {
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {
+        // ignore
+      }
+      this.db = null;
+    }
+  }
+
   private ensureInitialized(): void {
     if (!this.db) throw new Error('Storage adapter is not initialized.');
   }
 }
 
+/**
+ * Injects sRGB EXIF (ColorSpace=1, 600 DPI) into a JPEG byte buffer.
+ *
+ * Strategy:
+ *  1. If an APP0 (JFIF) segment exists right after SOI:
+ *     - Patch APP0 density unit to 1 (inch) and Xdensity/Ydensity to 600.
+ *     - Insert APP1 EXIF **after** the APP0 segment (required by JFIF spec).
+ *  2. If no APP0, insert APP1 right after SOI (FF D8).
+ *
+ * This ensures Windows Explorer, ICC-aware print drivers and Canon CP1000
+ * all see: "Color representation: sRGB" and "600 dpi" — matching Canon 6D shots.
+ */
+function injectSrgbExifIntoJpeg(bytes: Buffer): Buffer {
+  if (bytes.length < 4 || bytes[0] !== 0xFF || bytes[1] !== 0xD8) return bytes;
+
+  // ── Build APP1 EXIF segment ──────────────────────────────────────────────
+  // TIFF little-endian layout:
+  //  Offset  0: TIFF header (II, 42, IFD0 at 8)
+  //  Offset  8: IFD0 — 4 entries (XRes, YRes, ResUnit, ExifIFD pointer)
+  //  Offset 58: next-IFD = 0
+  //  Offset 62: XResolution rational 600/1
+  //  Offset 70: YResolution rational 600/1
+  //  Offset 78: ExifIFD — 1 entry (ColorSpace = 1)
+  //  Offset 92: next-ExifIFD = 0
+  const tiff = Buffer.alloc(96, 0);
+  let o = 0;
+  tiff.writeUInt16LE(0x4949, o); o += 2; // 'II' LE
+  tiff.writeUInt16LE(42,     o); o += 2; // TIFF magic
+  tiff.writeUInt32LE(8,      o); o += 4; // IFD0 at 8
+
+  // IFD0: 4 entries
+  tiff.writeUInt16LE(4, o); o += 2;
+
+  // 0x011A XResolution → RATIONAL at offset 62
+  tiff.writeUInt16LE(0x011A, o); o += 2;
+  tiff.writeUInt16LE(5,      o); o += 2;
+  tiff.writeUInt32LE(1,      o); o += 4;
+  tiff.writeUInt32LE(62,     o); o += 4;
+
+  // 0x011B YResolution → RATIONAL at offset 70
+  tiff.writeUInt16LE(0x011B, o); o += 2;
+  tiff.writeUInt16LE(5,      o); o += 2;
+  tiff.writeUInt32LE(1,      o); o += 4;
+  tiff.writeUInt32LE(70,     o); o += 4;
+
+  // 0x0128 ResolutionUnit = 2 (inch)
+  tiff.writeUInt16LE(0x0128, o); o += 2;
+  tiff.writeUInt16LE(3,      o); o += 2;
+  tiff.writeUInt32LE(1,      o); o += 4;
+  tiff.writeUInt32LE(2,      o); o += 4;
+
+  // 0x8769 ExifIFD pointer → offset 78
+  tiff.writeUInt16LE(0x8769, o); o += 2;
+  tiff.writeUInt16LE(4,      o); o += 2;
+  tiff.writeUInt32LE(1,      o); o += 4;
+  tiff.writeUInt32LE(78,     o); o += 4;
+
+  tiff.writeUInt32LE(0, o); o += 4; // next IFD0 = 0  (o=58)
+
+  // Values at 62, 70
+  tiff.writeUInt32LE(600, 62); tiff.writeUInt32LE(1, 66); // XRes = 600/1
+  tiff.writeUInt32LE(600, 70); tiff.writeUInt32LE(1, 74); // YRes = 600/1
+
+  // ExifIFD at offset 78: 1 entry
+  tiff.writeUInt16LE(1, 78);
+
+  // 0xA001 ColorSpace = 1 (sRGB)
+  tiff.writeUInt16LE(0xA001, 80);
+  tiff.writeUInt16LE(3,      82); // SHORT
+  tiff.writeUInt32LE(1,      84); // count
+  tiff.writeUInt32LE(1,      88); // value: 1 = sRGB
+
+  tiff.writeUInt32LE(0, 92); // next ExifIFD = 0
+
+  const exifMagic = Buffer.from([0x45, 0x78, 0x69, 0x66, 0x00, 0x00]); // 'Exif\0\0'
+  const exifPayload = Buffer.concat([exifMagic, tiff]);
+  const app1Len = exifPayload.length + 2;
+  const app1 = Buffer.concat([
+    Buffer.from([0xFF, 0xE1, (app1Len >> 8) & 0xFF, app1Len & 0xFF]),
+    exifPayload,
+  ]);
+
+  // ── Locate APP0 segment ──────────────────────────────────────────────────
+  let insertPos = 2; // default: right after SOI
+
+  if (
+    bytes[2] === 0xFF &&
+    bytes[3] === 0xE0 &&
+    bytes.length >= 6
+  ) {
+    // APP0/JFIF present — read its length (big-endian, includes the 2 length bytes)
+    const app0Len = bytes.readUInt16BE(4);
+
+    // Patch APP0 density in-place:
+    //  byte  8 = density_unit  → 1 (dots per inch)
+    //  bytes 9-10 = Xdensity   → 600  (big-endian UINT16)
+    //  bytes 11-12 = Ydensity  → 600
+    if (bytes.length >= 14) {
+      bytes[8]  = 1;                         // density unit = inch
+      bytes.writeUInt16BE(600, 9);           // Xdensity = 600
+      bytes.writeUInt16BE(600, 11);          // Ydensity = 600
+    }
+
+    // Insert APP1 after APP0
+    insertPos = 2 + 2 + app0Len; // SOI(2) + marker(2) + app0Length
+    if (insertPos > bytes.length) insertPos = bytes.length;
+  }
+
+  return Buffer.concat([
+    bytes.subarray(0, insertPos),
+    app1,
+    bytes.subarray(insertPos),
+  ]);
+}
+
+
 function atomicWriteFile(filePath: string, bytes: Buffer): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tempPath, bytes);
+  const ext = path.extname(filePath).toLowerCase();
+  const finalBytes = ext === '.jpg' || ext === '.jpeg' ? injectSrgbExifIntoJpeg(bytes) : bytes;
+  fs.writeFileSync(tempPath, finalBytes);
   fs.renameSync(tempPath, filePath);
 }
 

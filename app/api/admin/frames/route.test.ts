@@ -35,8 +35,12 @@ describe("admin frame API route", () => {
 
     afterEach(() => {
         resetAdminRegistryStoreForTests();
-        rmSync(tempDir, { recursive: true, force: true });
         delete process.env.CAMERAOS_DATA_DIR;
+        try {
+            rmSync(tempDir, { recursive: true, force: true });
+        } catch {
+            // Windows delayed lock cleanup safety
+        }
     });
 
     it("allows frame mutation without admin token", async () => {

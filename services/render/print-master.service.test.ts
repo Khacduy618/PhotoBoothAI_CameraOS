@@ -108,24 +108,24 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
     // Verify 2 drawImage calls for two-up layout
     expect(drawImage).toHaveBeenCalledTimes(2);
 
-    // Call 1: Left strip drawn inside safe margins (Left: 82px, Top: 82px)
+    // Call 1: Left strip drawn inside safe margins (Left: 71px = 3mm, Top: 106px = 4.5mm)
     const call1 = drawImage.mock.calls[0];
     expect(call1[0]).toBe(stripCanvas);
-    expect(call1[5]).toBe(82); // destX (insetLeft = 3.5mm = 82px)
-    expect(call1[6]).toBe(82); // destY (insetTop = 3.5mm = 82px)
-    expect(call1[7]).toBe(1099); // destWidth
-    expect(call1[8]).toBe(3332); // destHeight (3496 - 82 - 82)
+    expect(call1[5]).toBe(71); // destX (insetLeft = 3.0mm = 71px)
+    expect(call1[6]).toBe(106); // destY (insetTop = 4.5mm = 106px)
+    expect(call1[7]).toBe(1110); // destWidth
+    expect(call1[8]).toBe(3331); // destHeight (3496 - 106 - 59)
 
-    // Call 2: Right strip drawn inside safe margins (Right: 82px)
+    // Call 2: Right strip drawn inside safe margins (Right: 71px)
     const call2 = drawImage.mock.calls[1];
     expect(call2[0]).toBe(stripCanvas);
-    expect(call2[5]).toBe(1181); // destX (insetLeft + leftStripW = 82 + 1099)
-    expect(call2[6]).toBe(82); // destY (insetTop = 3.5mm = 82px)
-    expect(call2[7]).toBe(1099); // destWidth
-    expect(call2[8]).toBe(3332); // destHeight
+    expect(call2[5]).toBe(1181); // destX (insetLeft + leftStripW = 71 + 1110)
+    expect(call2[6]).toBe(106); // destY (insetTop = 4.5mm = 106px)
+    expect(call2[7]).toBe(1110); // destWidth
+    expect(call2[8]).toBe(3331); // destHeight
 
-    // Total content width = 1099 + 1099 = 2198 px (2362 - 2*82)
-    expect(call1[7] + call2[7]).toBe(2198);
+    // Total content width = 1110 + 1110 = 2220 px (2362 - 2*71)
+    expect(call1[7] + call2[7]).toBe(2220);
   });
 
   it('F. STRIP_4 -> 2362x3496 with left (1110px) and right (1110px) duplication', async () => {
@@ -173,10 +173,10 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
 
     expect(drawImage).toHaveBeenCalledTimes(1);
     const call = drawImage.mock.calls[0];
-    expect(call[5]).toBe(82);
-    expect(call[6]).toBe(82);
-    expect(call[7]).toBe(3332);
-    expect(call[8]).toBe(2198);
+    expect(call[5]).toBe(71);
+    expect(call[6]).toBe(106);
+    expect(call[7]).toBe(3354);
+    expect(call[8]).toBe(2197);
   });
 
   it('K. Generates valid JPEG dataURL by default', async () => {

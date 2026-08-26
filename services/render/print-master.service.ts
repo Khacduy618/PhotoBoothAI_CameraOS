@@ -115,12 +115,15 @@ export async function buildPrintMaster(
   ctx.fillRect(0, 0, targetW, targetH);
 
   // Calculate safe insets scaled proportionally from printerProfile
-  const baseInsetLeft = printerProfile.safeAreaInsetsPx?.left ?? 82;
-  const baseInsetTop = printerProfile.safeAreaInsetsPx?.top ?? 82;
+  const baseInsetLeft = printerProfile.safeAreaInsetsPx?.left ?? 71;
+  const baseInsetRight = printerProfile.safeAreaInsetsPx?.right ?? 71;
+  const baseInsetTop = printerProfile.safeAreaInsetsPx?.top ?? 106;
+  const baseInsetBottom = printerProfile.safeAreaInsetsPx?.bottom ?? 59;
+
   const insetLeft = Math.round(baseInsetLeft * (targetW / defaultW));
-  const insetRight = insetLeft;
+  const insetRight = Math.round(baseInsetRight * (targetW / defaultW));
   const insetTop = Math.round(baseInsetTop * (targetH / defaultH));
-  const insetBottom = insetTop;
+  const insetBottom = Math.round(baseInsetBottom * (targetH / defaultH));
 
   const printableW = targetW - insetLeft - insetRight;
   const printableH = targetH - insetTop - insetBottom;

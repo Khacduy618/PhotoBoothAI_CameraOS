@@ -138,6 +138,7 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
     setCaptureErrorMessage(null);
 
     const completedPhotos: PhotoItem[] = [...capturedPool];
+    const pendingSavePromises: Promise<void>[] = [];
 
     try {
       for (let shot = currentShot; shot < totalShots; shot += 1) {
@@ -198,70 +199,91 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
 
         setCountdown(0);
 
-        // 2. SHUTTER_TRIGGERED(shot) -> Mark shutter timestamp (recording continues)
+        // 2. SHUTTER_TRIGGERED(shot) -> Mark shutter timestamp
         setCaptureStep('capturing');
         const shutterIso = new Date().toISOString();
         await getDesktopMediaBridge()?.markShutter(session.sessionId, shot, shutterIso).catch(() => null);
 
         setIsFlashing(true);
+
+        // Instant Snapshot from current EVF canvas / video stream (0ms latency visual feedback)
+        let instantDataUrl = '';
+        if (canvasRef.current && canvasRef.current.width > 0 && canvasRef.current.height > 0) {
+          try {
+            instantDataUrl = canvasRef.current.toDataURL('image/jpeg', 0.85);
+          } catch {}
+        } else if (videoRef.current && videoRef.current.videoWidth > 0) {
+          try {
+            const snapCanvas = document.createElement('canvas');
+            snapCanvas.width = videoRef.current.videoWidth;
+            snapCanvas.height = videoRef.current.videoHeight;
+            const ctx = snapCanvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(videoRef.current, 0, 0);
+              instantDataUrl = snapCanvas.toDataURL('image/jpeg', 0.85);
+            }
+          } catch {}
+        }
+
         await wait(180);
         setIsFlashing(false);
 
-        // 3. Still photo capture continues
-        setCaptureStep('saving');
         const shotIndex = shot + 1;
-
-        let dataUrl: string;
-        try {
-          dataUrl = await cameraService.capturePhoto(shot, session.sessionId);
-        } catch (err) {
-          if (fallbackPumpInterval) clearInterval(fallbackPumpInterval);
-          await getDesktopMediaBridge()?.failShotClip(session.sessionId, shot, err instanceof Error ? err.message : 'CAPTURE_FAILED').catch(() => null);
-          throw err;
-        }
-
-        if (fallbackPumpInterval) {
-          clearInterval(fallbackPumpInterval);
-          fallbackPumpInterval = null;
-        }
-
-        // Persist original photo to storage
-        if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { storage?: { saveOriginal: (sid: string, idx: number, photo: unknown) => Promise<unknown> } } } }).momentai?.guest?.storage?.saveOriginal) {
-          await (window as unknown as { momentai: { guest: { storage: { saveOriginal: (sid: string, idx: number, photo: unknown) => Promise<unknown> } } } }).momentai.guest.storage.saveOriginal(session.sessionId, shotIndex, {
-            dataUrl,
-            mimeType: 'image/jpeg',
-          }).catch(() => null);
-        }
-
-        // 4. CAPTURED_PHOTO_PERSISTED(shot) -> Stop and finalize clip[shot]
-        const persistedIso = new Date().toISOString();
-        const clipOptions = cameraSettings.mode === 'canon' ? undefined : { fallbackDataUrl: dataUrl };
-        await getDesktopMediaBridge()?.stopShotClip(session.sessionId, shot, persistedIso, clipOptions).catch(() => null);
-
-        const imgDimensions = await new Promise<{ width: number; height: number }>((resolve) => {
-          const img = new Image();
-          img.onload = () => resolve({ width: img.naturalWidth || 1920, height: img.naturalHeight || 1080 });
-          img.onerror = () => resolve({ width: 1920, height: 1080 });
-          img.src = dataUrl;
-        });
-
         const newPhoto: PhotoItem = {
           id: `photo_${Date.now()}_${shot}`,
-          index: shot + 1,
-          dataUrl,
-          width: imgDimensions.width,
-          height: imgDimensions.height,
+          index: shotIndex,
+          dataUrl: instantDataUrl || 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+          width: canvasRef.current?.width || 1920,
+          height: canvasRef.current?.height || 1080,
           timestamp: new Date().toLocaleTimeString('vi-VN'),
         };
         completedPhotos.push(newPhoto);
         setCapturedPool((prev) => [...prev, newPhoto]);
         onPhotoCaptured(newPhoto);
 
+        // Trigger full-res Canon capture & disk persistence in background (non-blocking)
+        const currentShotIndex = shot;
+        const savePromise = (async () => {
+          let originalDataUrl: string;
+          try {
+            originalDataUrl = await cameraService.capturePhoto(currentShotIndex, session.sessionId);
+          } catch (err) {
+            if (fallbackPumpInterval) clearInterval(fallbackPumpInterval);
+            await getDesktopMediaBridge()?.failShotClip(session.sessionId, currentShotIndex, err instanceof Error ? err.message : 'CAPTURE_FAILED').catch(() => null);
+            return;
+          }
+
+          if (fallbackPumpInterval) {
+            clearInterval(fallbackPumpInterval);
+            fallbackPumpInterval = null;
+          }
+
+          // Persist full-resolution original photo to session storage
+          if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { storage?: { saveOriginal: (sid: string, idx: number, photo: unknown) => Promise<unknown> } } } }).momentai?.guest?.storage?.saveOriginal) {
+            await (window as unknown as { momentai: { guest: { storage: { saveOriginal: (sid: string, idx: number, photo: unknown) => Promise<unknown> } } } }).momentai.guest.storage.saveOriginal(session.sessionId, currentShotIndex + 1, {
+              dataUrl: originalDataUrl,
+              mimeType: 'image/jpeg',
+            }).catch(() => null);
+          }
+
+          const persistedIso = new Date().toISOString();
+          const clipOptions = cameraSettings.mode === 'canon' ? undefined : { fallbackDataUrl: originalDataUrl };
+          await getDesktopMediaBridge()?.stopShotClip(session.sessionId, currentShotIndex, persistedIso, clipOptions).catch(() => null);
+
+          if (originalDataUrl) {
+            newPhoto.dataUrl = originalDataUrl;
+          }
+        })();
+        pendingSavePromises.push(savePromise);
+
         if (shot + 1 < totalShots) {
           setCaptureStep('between');
-          await wait((captureConfig.intervalSeconds || 2) * 1000);
+          await wait(400); // Fast 400ms smooth transition to next pose countdown
         }
       }
+
+      setCaptureStep('saving');
+      await Promise.all(pendingSavePromises);
 
       setCapturedPool(completedPhotos);
       setCaptureStep('complete');
@@ -328,8 +350,8 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
       <div className="w-full max-w-[98%] mx-auto flex-1 grid grid-cols-1 lg:grid-cols-20 gap-5 items-stretch overflow-hidden my-auto py-2">
         {/* Left Viewport Camera Live (85% width) */}
         <div className="lg:col-span-17 relative w-full h-[76vh] xl:h-[80vh] bg-[#1A1A1A] shadow-2xl overflow-hidden flex items-center justify-center rounded-xl border border-[#1A1A1A]/20">
-          <canvas ref={canvasRef} className={`w-full h-full object-cover ${isCanonEvfActive ? 'block' : 'hidden'}`} />
-          {!isCanonEvfActive && ((cameraSettings.mode === 'canon' || cameraService.getSettings().mode === 'canon') ? (
+          <canvas ref={canvasRef} className={`w-full h-full object-cover ${canonEvfReady ? 'block' : 'hidden'}`} />
+          {!canonEvfReady && ((cameraSettings.mode === 'canon' || cameraService.getSettings().mode === 'canon') ? (
             <div className="w-full h-full relative bg-[#1A1A1A] text-[#FDFCFB] flex flex-col items-center justify-center gap-3 select-none">
               <Camera className="w-16 h-16 text-[#E6C687] animate-pulse" />
               <span className="font-mono text-sm font-bold tracking-wider text-[#E6C687]/90">

@@ -891,8 +891,10 @@ static void processCommandJson(const std::string& line) {
         fprintf(stderr, "[CAPTURE_AUDIT] COMMAND=%s RESULT=0x%08X\n", usedCmd.c_str(), err);
 
         if (err == EDS_ERR_OK) {
+            g_capturePending = 0;
             sendJsonLine("{\"event\":\"shutterDone\",\"status\":\"ok\",\"command\":\"" + usedCmd + "\"}");
         } else {
+            g_capturePending = 0;
             sendJsonLine("{\"event\":\"error\",\"code\":\"TAKE_PICTURE_FAILED\",\"edsdkError\":" + std::to_string(err) + ",\"command\":\"" + usedCmd + "\"}");
             if (g_wasLiveViewBeforeCapture) {
                 g_wasLiveViewBeforeCapture = 0;

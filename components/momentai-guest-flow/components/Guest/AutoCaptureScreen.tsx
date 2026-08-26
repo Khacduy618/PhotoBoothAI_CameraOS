@@ -278,7 +278,7 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
 
         if (shot + 1 < totalShots) {
           setCaptureStep('between');
-          await wait(400); // Fast 400ms smooth transition to next pose countdown
+          await wait((captureConfig.intervalSeconds || 2) * 1000); // 2-second comfortable pose preparation
         }
       }
 

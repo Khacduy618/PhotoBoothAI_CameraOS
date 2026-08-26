@@ -669,11 +669,14 @@ class CloudSyncCoordinator {
             if (res.statusCode >= 200 && res.statusCode < 300) {
               try {
                 const parsed = JSON.parse(body);
+                console.log(`[CLOUD_PRESIGN] Presign OK for ${fileName}: key=${parsed.key}`);
                 resolve(parsed);
               } catch (e) {
+                console.error(`[CLOUD_PRESIGN] Parse error: ${body}`);
                 reject(new Error(`Failed to parse presign response: ${body}`));
               }
             } else {
+              console.warn(`[CLOUD_PRESIGN] Presign failed HTTP ${res.statusCode}: ${body.slice(0, 200)}`);
               // If offline/mock server is not running, fallback to mock upload url
               resolve({
                 ok: true,
@@ -685,7 +688,8 @@ class CloudSyncCoordinator {
           });
         });
 
-        req.on('error', () => {
+        req.on('error', (err) => {
+          console.warn(`[CLOUD_PRESIGN] Presign network error: ${err.message}`);
           // Fallback to mock for offline / unit tests
           resolve({
             ok: true,
@@ -708,6 +712,7 @@ class CloudSyncCoordinator {
         req.write(payload);
         req.end();
       } catch (err) {
+        console.warn(`[CLOUD_PRESIGN] Fatal presign error: ${err.message}`);
         resolve({
           ok: true,
           key: `sessions/${publicToken}/final/${fileName}`,
@@ -764,6 +769,7 @@ class CloudSyncCoordinator {
         res.on('data', (c) => { body += c; });
         res.on('end', () => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
+            console.log(`[CLOUD_R2] Upload SUCCESS HTTP ${res.statusCode} -> ${key} (${stat.size} bytes)`);
             void this.syncDatabaseSession(
               { publicToken, sessionId: `session_${publicToken}` },
               { assetType, storageKey: key, fileName, contentType: mimeType, sizeBytes: stat.size }
@@ -775,6 +781,7 @@ class CloudSyncCoordinator {
               size: stat.size,
             });
           } else {
+            console.error(`[CLOUD_R2] Upload failed HTTP ${res.statusCode}: ${body.slice(0, 200)}`);
             reject(new Error(`R2 Upload error HTTP ${res.statusCode}: ${body.slice(0, 200)}`));
           }
         });
@@ -833,8 +840,20 @@ class CloudSyncCoordinator {
         },
       };
 
-      const req = client.request(options, () => {});
-      req.on('error', () => {});
+      const req = client.request(options, (res) => {
+        let body = '';
+        res.on('data', (c) => { body += c; });
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            console.log(`[CLOUD_NEON] Database session sync OK HTTP ${res.statusCode} for ${publicToken}`);
+          } else {
+            console.warn(`[CLOUD_NEON] Database sync failed HTTP ${res.statusCode}: ${body.slice(0, 200)}`);
+          }
+        });
+      });
+      req.on('error', (err) => {
+        console.warn(`[CLOUD_NEON] Database sync network error: ${err.message}`);
+      });
       req.write(payload);
       req.end();
     } catch {}

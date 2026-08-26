@@ -42,8 +42,9 @@ class CloudSyncCoordinator {
           const trimmed = line.trim();
           if (trimmed && !trimmed.startsWith('#')) {
             const [k, ...v] = trimmed.split('=');
-            if (k && !process.env[k.trim()]) {
-              process.env[k.trim()] = v.join('=').trim();
+            if (k) {
+              const val = v.join('=').trim().replace(/^["']|["']$/g, '').trim();
+              process.env[k.trim()] = val;
             }
           }
         }
@@ -64,9 +65,13 @@ class CloudSyncCoordinator {
     this.storageBucket = process.env.FIREBASE_STORAGE_BUCKET || process.env.VITE_FIREBASE_STORAGE_BUCKET || process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || (this.projectId ? `${this.projectId}.firebasestorage.app` : '');
     this.apiKey = process.env.FIREBASE_API_KEY || process.env.VITE_FIREBASE_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY || '';
     
-    // Authoritative Landing Page Base URL (Full origin/base URL with slash normalization)
-    const rawBaseUrl = process.env.MOMENTAI_LANDING_BASE_URL || process.env.MOMENTAI_LANDING_DOMAIN || process.env.LANDING_PAGE_URL || process.env.NEXT_PUBLIC_LANDING_BASE_URL || 'http://localhost:5174';
-    this.landingBaseUrl = String(rawBaseUrl).trim().replace(/\/+$/, '');
+    // Authoritative Landing Page Base URL (Full origin/base URL with quote stripping and https normalization)
+    let rawBaseUrl = process.env.MOMENTAI_LANDING_BASE_URL || process.env.MOMENTAI_LANDING_DOMAIN || process.env.LANDING_PAGE_URL || process.env.NEXT_PUBLIC_LANDING_BASE_URL || 'http://localhost:5174';
+    rawBaseUrl = String(rawBaseUrl).trim().replace(/^["']|["']$/g, '').trim();
+    if (rawBaseUrl && !rawBaseUrl.startsWith('http://') && !rawBaseUrl.startsWith('https://')) {
+      rawBaseUrl = `https://${rawBaseUrl}`;
+    }
+    this.landingBaseUrl = rawBaseUrl.replace(/\/+$/, '');
   }
 
   init(db, sessionMediaPaths) {
@@ -279,7 +284,7 @@ class CloudSyncCoordinator {
         if (localPhotoPath && fs.existsSync(localPhotoPath)) {
           const remotePath = `sessions/${publicToken}/photos/${photoFilename}`;
           try {
-            const uploadRes = await this.uploadFileWithRetry(localPhotoPath, remotePath, 'image/jpeg');
+            const uploadRes = await this.uploadFileWithRetry(localPhotoPath, remotePath, 'image/jpeg', 3, publicToken, 'ORIGINAL_PHOTO');
             photosUploaded++;
             photosList.push({
               shotIndex: i,
@@ -302,7 +307,7 @@ class CloudSyncCoordinator {
         if (localClipPath && fs.existsSync(localClipPath)) {
           const remotePath = `sessions/${publicToken}/clips/${clipFilename}`;
           try {
-            const uploadRes = await this.uploadFileWithRetry(localClipPath, remotePath, 'video/mp4');
+            const uploadRes = await this.uploadFileWithRetry(localClipPath, remotePath, 'video/mp4', 3, publicToken, 'ORIGINAL_CLIP');
             clipsUploaded++;
             clipsList.push({
               shotIndex: i,
@@ -438,7 +443,7 @@ class CloudSyncCoordinator {
 
     const startTime = Date.now();
     try {
-      const imgRes = await this.uploadFileWithRetry(resolvedPath, remoteImagePath, 'image/jpeg');
+      const imgRes = await this.uploadFileWithRetry(resolvedPath, remoteImagePath, 'image/jpeg', 3, publicToken, 'FINAL_IMAGE');
       const elapsedMs = Date.now() - startTime;
 
       this.logStructured('info', 'CLOUD_FINAL_IMAGE_UPLOAD_COMPLETE', `Final image uploaded to Storage for session ${sessionId}`, {
@@ -478,8 +483,8 @@ class CloudSyncCoordinator {
         status: 'FAILED',
         error: err.message,
       };
-      state.phaseBStatus = 'FAILED';
-      state.status = 'UPLOAD_FAILED';
+      state.phaseBStatus = state.finalVideo?.status === 'READY' ? 'PARTIAL' : 'FAILED';
+      state.status = state.finalVideo?.status === 'READY' ? 'PARTIAL' : 'UPLOAD_FAILED';
       state.lastError = err.message;
       state.updatedAt = new Date().toISOString();
       this.persistLocalState(state);
@@ -495,8 +500,8 @@ class CloudSyncCoordinator {
   }
 
   /**
-   * Independent Final Video Upload (Video Delivery)
-   * Uploads final-video.mp4 to Storage and updates Firestore.
+   * Independent Final Video Upload (Video-Second Delivery)
+   * Uploads final-video.mp4 to Storage and updates Firestore immediately when encoding finishes.
    */
   async triggerFinalVideoUpload(sessionId, filePath = null) {
     if (!sessionId) return null;
@@ -530,7 +535,7 @@ class CloudSyncCoordinator {
 
     const startTime = Date.now();
     try {
-      const vidRes = await this.uploadFileWithRetry(resolvedPath, remoteVideoPath, 'video/mp4');
+      const vidRes = await this.uploadFileWithRetry(resolvedPath, remoteVideoPath, 'video/mp4', 3, publicToken, 'FINAL_VIDEO');
       const elapsedMs = Date.now() - startTime;
 
       this.logStructured('info', 'CLOUD_FINAL_VIDEO_UPLOAD_COMPLETE', `Final video uploaded to Storage for session ${sessionId}`, {
@@ -759,6 +764,10 @@ class CloudSyncCoordinator {
         res.on('data', (c) => { body += c; });
         res.on('end', () => {
           if (res.statusCode >= 200 && res.statusCode < 300) {
+            void this.syncDatabaseSession(
+              { publicToken, sessionId: `session_${publicToken}` },
+              { assetType, storageKey: key, fileName, contentType: mimeType, sizeBytes: stat.size }
+            );
             resolve({
               remotePath: key,
               storageKey: key,

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 
 import { FrameImportPanel } from '@/components/frame-import/FrameImportPanel';
+import { CP1000ColorTestModal } from '@/components/dev/CP1000ColorTestModal';
 
 import { getWindowMiniAdminViewModel } from '../state/windowmini-admin-view-model';
 
@@ -11,6 +12,7 @@ export function WindowMiniAdminShell() {
   const [passcode, setPasscode] = useState('');
   const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isColorTestOpen, setIsColorTestOpen] = useState(false);
 
   const unlock = async () => {
     setError(null);
@@ -81,20 +83,34 @@ export function WindowMiniAdminShell() {
   return (
     <main className="min-h-screen bg-neutral-50 text-neutral-950">
       <div className="sticky top-0 z-50 flex items-center justify-between border-b border-neutral-200 bg-white/95 px-6 py-2.5 backdrop-blur">
-        <button
-          type="button"
-          onClick={() => {
-            window.location.hash = '#/guest';
-          }}
-          className="flex items-center gap-2 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-bold text-neutral-700 shadow-sm transition hover:bg-neutral-100 active:scale-95"
-        >
-          ← Quay lại Booth
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              window.location.hash = '#/guest';
+            }}
+            className="flex items-center gap-2 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-bold text-neutral-700 shadow-sm transition hover:bg-neutral-100 active:scale-95"
+          >
+            ← Quay lại Booth
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsColorTestOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-amber-400/80 bg-amber-50 px-3 py-1.5 text-xs font-black uppercase tracking-wider text-amber-900 shadow-sm transition hover:bg-amber-100 active:scale-95"
+          >
+            🎨 CP1000 Color Test
+          </button>
+        </div>
         <div className="text-right text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500">
-          Admin unlocked • {adminViewModel.source} • Phím tắt: Ctrl + Shift + A
+          Admin unlocked • {adminViewModel.source} • Phím tắt: Ctrl + Shift + A / Ctrl + Shift + C
         </div>
       </div>
       <FrameImportPanel />
+      <CP1000ColorTestModal
+        isOpen={isColorTestOpen}
+        onClose={() => setIsColorTestOpen(false)}
+      />
     </main>
   );
 }

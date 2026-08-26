@@ -146,17 +146,25 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
 
     try {
       for (let shot = currentShot; shot < totalShots; shot += 1) {
-        // If not the very first shot, wait for LiveView to truly resume before starting countdown!
+        // If not the very first shot, wait for previous shot's download & LiveView to truly resume before countdown!
         if (shot > 0) {
           setCaptureStep('saving');
+          // 1. Wait for previous shot's full-res JPEG download to finish
+          const prevSavePromise = pendingSavePromises[shot - 1];
+          if (prevSavePromise) {
+            await prevSavePromise.catch(() => null);
+          }
+
+          // 2. Mark timestamp when download finished
+          const downloadDoneTimestamp = Date.now();
+
+          // 3. Wait for the first fresh EVF frame arriving AFTER download finished
           const waitStart = Date.now();
-          // Give guest ~1s to view previous shot, and wait until Canon EVF stream delivers fresh live frame
-          while (Date.now() - waitStart < 4000) {
-            const elapsed = Date.now() - waitStart;
-            if (elapsed >= 800 && lastEvfFrameTimeRef.current > lastShutterTimeRef.current) {
+          while (Date.now() - waitStart < 3000) {
+            if (lastEvfFrameTimeRef.current > downloadDoneTimestamp) {
               break;
             }
-            await wait(40);
+            await wait(30);
           }
           await wait(150);
         }
@@ -253,8 +261,8 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
           id: `photo_${Date.now()}_${shot}`,
           index: shotIndex,
           dataUrl: instantDataUrl || 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-          width: canvasRef.current?.width || 1920,
-          height: canvasRef.current?.height || 1080,
+          width: canvasRef.current?.width || 5472,
+          height: canvasRef.current?.height || 3648,
           timestamp: new Date().toLocaleTimeString('vi-VN'),
         };
         completedPhotos.push(newPhoto);
@@ -292,7 +300,11 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
 
           if (originalDataUrl) {
             completedPhotos[currentShotIndex].dataUrl = originalDataUrl;
+            completedPhotos[currentShotIndex].width = 5472;
+            completedPhotos[currentShotIndex].height = 3648;
             newPhoto.dataUrl = originalDataUrl;
+            newPhoto.width = 5472;
+            newPhoto.height = 3648;
           }
         })();
         pendingSavePromises.push(savePromise);

@@ -126,7 +126,7 @@ export function calculateSourceCropRect(
   const dstH = slotH > 0 ? slotH : 1;
 
   const hAnchor = policy.horizontalAnchor ?? "center";
-  const vAnchor = policy.verticalAnchor ?? "bottom";
+  const vAnchor = policy.verticalAnchor ?? "center";
 
   const sourceAspect = srcW / srcH;
   const slotAspect = dstW / dstH;
@@ -153,10 +153,10 @@ export function calculateSourceCropRect(
     cropX = 0;
     if (vAnchor === "top") {
       cropY = 0;
-    } else if (vAnchor === "center") {
-      cropY = (srcH - cropH) / 2;
-    } else {
+    } else if (vAnchor === "bottom") {
       cropY = srcH - cropH;
+    } else {
+      cropY = (srcH - cropH) / 2;
     }
   }
 
@@ -315,12 +315,12 @@ export async function renderFrameComposition(
         throw new DOMException("Composition aborted", "AbortError");
       }
 
-      const imgNaturalW = assignedPhoto?.width || img.naturalWidth || img.width || 1920;
-      const imgNaturalH = assignedPhoto?.height || img.naturalHeight || img.height || 1080;
+      const imgNaturalW = img.naturalWidth || img.width || assignedPhoto?.width || 5472;
+      const imgNaturalH = img.naturalHeight || img.height || assignedPhoto?.height || 3648;
 
       const crop = calculateSourceCropRect(imgNaturalW, imgNaturalH, slotPx.width, slotPx.height, {
         horizontalAnchor: "center",
-        verticalAnchor: "bottom",
+        verticalAnchor: "center",
         fit: "cover",
       });
 

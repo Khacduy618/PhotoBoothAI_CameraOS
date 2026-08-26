@@ -57,21 +57,18 @@ describe("calculateSourceCropRect", () => {
     expect(crop.cropY + crop.cropH).toBeLessThanOrEqual(sourceH);
   });
 
-  it("Case B: Landscape photo into taller slot (source taller/narrower than slot) -> BOTTOM vertical crop", () => {
+  it("Case B: Landscape photo into wider slot -> CENTER vertical crop by default", () => {
     const sourceW = 1920;
     const sourceH = 1080; // ratio 1.777
     const slotW = 2000;
     const slotH = 500; // ratio 4.0 (much wider than 1.777)
 
-    const crop = calculateSourceCropRect(sourceW, sourceH, slotW, slotH, {
-      horizontalAnchor: "center",
-      verticalAnchor: "bottom",
-    });
+    const crop = calculateSourceCropRect(sourceW, sourceH, slotW, slotH);
 
     expect(crop.cropW).toBe(1920);
     expect(crop.cropH).toBe(1920 / 4.0); // 480px
     expect(crop.cropX).toBe(0);
-    expect(crop.cropY).toBe(1080 - 480); // 600px (BOTTOM anchor: aligns bottom, crops top)
+    expect(crop.cropY).toBe((1080 - 480) / 2); // 300px (CENTER anchor: symmetric top and bottom)
 
     expect(crop.cropX + crop.cropW).toBeLessThanOrEqual(sourceW);
     expect(crop.cropY + crop.cropH).toBeLessThanOrEqual(sourceH);

@@ -191,7 +191,17 @@ export function MomentAIGuestFlowController() {
 
   const handleCaptureCompleted = async (capturedPhotos: PhotoItem[]) => {
     if (!backendSession || !currentSession) return;
-    const sessionWithPhotos = { ...currentSession, photos: capturedPhotos };
+    console.log('[GuestFlowController] handleCaptureCompleted with photos:', capturedPhotos.map((p) => ({
+      index: p.index,
+      dataUrlLength: p.dataUrl?.length,
+      preview: p.dataUrl?.slice(0, 40),
+    })));
+
+    const sessionWithPhotos: SessionData = {
+      ...currentSession,
+      photos: capturedPhotos,
+      slotAssignments: capturedPhotos,
+    };
     setCurrentSession(sessionWithPhotos);
     let updatedBackend = backendSession.captureFormat
       ? backendSession

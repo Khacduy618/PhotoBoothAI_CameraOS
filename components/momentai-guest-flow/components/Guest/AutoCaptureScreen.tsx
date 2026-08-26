@@ -305,6 +305,11 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
       setCaptureStep('complete');
       if (!completionNotifiedRef.current) {
         completionNotifiedRef.current = true;
+        console.log('[AutoCaptureScreen] onCaptureCompleted dispatched with photos:', completedPhotos.map((p) => ({
+          index: p.index,
+          dataUrlLength: p.dataUrl?.length,
+          preview: p.dataUrl?.slice(0, 40),
+        })));
         onCaptureCompleted(completedPhotos);
       }
     } catch (err) {

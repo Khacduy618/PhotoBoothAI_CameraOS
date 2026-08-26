@@ -289,6 +289,7 @@ export async function renderFrameComposition(
     const allowFallback = allowSampleFallback && !isProduction;
 
     let imgUrl = assignedPhoto?.dataUrl || null;
+    console.log(`[renderFrameComposition] Slot #${i + 1} imgUrl length: ${imgUrl?.length || 0}, prefix: ${imgUrl?.slice(0, 40) || 'NULL'}`);
     if (!imgUrl) {
       if (allowFallback) {
         imgUrl = HOI_AN_SAMPLE_PHOTOS[i % HOI_AN_SAMPLE_PHOTOS.length];

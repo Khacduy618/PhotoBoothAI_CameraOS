@@ -89,6 +89,12 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
 
     setIsComposing(true);
 
+    console.log('[FramePreviewCard] Rendering template:', template.id, 'photosList count:', photosList.length, photosList.map((p) => ({
+      index: p?.index,
+      dataUrlLength: p?.dataUrl?.length,
+      preview: p?.dataUrl?.slice(0, 40),
+    })));
+
     const isProduction = typeof process !== 'undefined' && process.env.NODE_ENV === 'production';
     const allowSampleFallback = !isProduction;
 

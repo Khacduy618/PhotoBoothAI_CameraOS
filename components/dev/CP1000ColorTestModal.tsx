@@ -60,7 +60,7 @@ export function CP1000ColorTestModal({
       setTestResult(res);
       setPreviewDataUrl(res.toDataURL('image/jpeg', 1.0));
     } catch (err) {
-      console.error('[CP1000ColorTest] Failed to generate test sheet:', err);
+      console.error('[CP1000CalibrationV2] Failed to generate test sheet:', err);
     } finally {
       setIsGenerating(false);
     }
@@ -75,16 +75,22 @@ export function CP1000ColorTestModal({
     }
   };
 
-  const handleDownload = () => {
+  const handleDownloadJpg = () => {
     if (testResult) {
-      testResult.download('CP1000-color-calibration-test.jpg');
+      testResult.download('CP1000-magenta-calibration-v2.jpg', 'image/jpeg');
+    }
+  };
+
+  const handleDownloadPng = () => {
+    if (testResult) {
+      testResult.download('CP1000-magenta-calibration-v2.png', 'image/png');
     }
   };
 
   const handleDirectPrint = async () => {
     if (!testResult) return;
     setIsPrinting(true);
-    setPrintFeedback('Đang gửi file test sang máy in Canon CP1000...');
+    setPrintFeedback('Đang chuẩn bị gửi file test sang máy in Canon CP1000...');
 
     try {
       const testDataUrl = testResult.toDataURL('image/jpeg', 1.0);
@@ -111,9 +117,8 @@ export function CP1000ColorTestModal({
         }
         setPrintFeedback('✅ Đã nạp thành công vào Spooler Windows: Máy in Canon CP1000 đang tiến hành in 1 tờ test 10x15!');
       } else {
-        // Fallback for browser testing: Download file directly
-        testResult.download('CP1000-color-calibration-test.jpg');
-        setPrintFeedback('ℹ️ Đã tải file CP1000-color-calibration-test.jpg về máy để in.');
+        testResult.download('CP1000-magenta-calibration-v2.jpg', 'image/jpeg');
+        setPrintFeedback('ℹ️ Đã tải file CP1000-magenta-calibration-v2.jpg về máy để in thủ công.');
       }
     } catch (err) {
       setPrintFeedback(`⚠️ Lỗi khi in: ${err instanceof Error ? err.message : String(err)}`);
@@ -132,17 +137,17 @@ export function CP1000ColorTestModal({
         <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 bg-neutral-900 text-white">
           <div className="flex items-center gap-3">
             <div className="grid h-8 w-8 place-items-center rounded-lg bg-[#F6C453] text-black font-black text-xs">
-              RGB
+              V2
             </div>
             <div>
               <h2 className="font-serif text-lg font-bold tracking-wide flex items-center gap-2">
-                Canon SELPHY CP1000 — Color Calibration Test
+                Canon SELPHY CP1000 — Calibration V2 (Magenta Test)
                 <span className="text-[10px] font-mono bg-amber-500/30 text-[#F6C453] border border-amber-500/40 px-2 py-0.5 rounded-full uppercase tracking-wider font-bold">
-                  Isolated Tool
+                  Dev Isolated
                 </span>
               </h2>
               <p className="text-xs text-neutral-400 font-mono">
-                Tạo 1 tờ test 10×15 cm (1800×2700 px) gồm 4 ô cùng 1 ảnh với 4 profile RGB độc lập
+                1 tờ test 10×15 cm (1800×2700 px) gồm 4 ô từ CÙNG 1 ảnh gốc: ORIGINAL, M1, M2, M3
               </p>
             </div>
           </div>
@@ -164,13 +169,13 @@ export function CP1000ColorTestModal({
             {isGenerating ? (
               <div className="flex flex-col items-center gap-3 text-neutral-500 animate-pulse">
                 <div className="w-10 h-10 border-4 border-[#F6C453] border-t-transparent rounded-full animate-spin" />
-                <span className="text-xs font-mono font-bold tracking-wider">Đang render 4 profile RGB từ ảnh gốc...</span>
+                <span className="text-xs font-mono font-bold tracking-wider">Đang render 4 profile V2 từ ảnh gốc...</span>
               </div>
             ) : previewDataUrl ? (
               <div className="relative shadow-xl border border-neutral-400/60 rounded-md overflow-hidden bg-white max-h-[55vh] aspect-[2/3]">
                 <img
                   src={previewDataUrl}
-                  alt="CP1000 Calibration Test Sheet Preview"
+                  alt="CP1000 Calibration V2 Test Sheet Preview"
                   className="w-full h-full object-contain"
                 />
                 <div className="absolute top-2 right-2 bg-black/80 text-white text-[9px] font-mono font-bold px-2 py-1 rounded backdrop-blur">
@@ -194,7 +199,7 @@ export function CP1000ColorTestModal({
             {/* Presets List */}
             <div className="flex flex-col gap-2">
               <span className="text-xs font-mono font-black uppercase tracking-wider text-neutral-500">
-                4 Profile màu kiểm thử:
+                4 Profile Magenta Test V2:
               </span>
 
               <div className="flex flex-col gap-2 text-xs">
@@ -204,8 +209,11 @@ export function CP1000ColorTestModal({
                     className="p-2.5 rounded-lg border border-neutral-200 bg-white hover:border-neutral-400 transition"
                   >
                     <div className="flex items-center justify-between font-mono font-bold text-neutral-900">
-                      <span>{preset.label}</span>
-                      <span className="text-[10px] bg-neutral-100 px-1.5 py-0.5 rounded border border-neutral-300">
+                      <span className="text-sm font-black">{preset.name}</span>
+                      <span className="text-[11px] font-mono font-semibold bg-amber-50 text-amber-900 border border-amber-200 px-2 py-0.5 rounded">
+                        {preset.formula}
+                      </span>
+                      <span className="text-[10px] text-neutral-400">
                         {idx === 0 ? 'Top-Left' : idx === 1 ? 'Top-Right' : idx === 2 ? 'Bottom-Left' : 'Bottom-Right'}
                       </span>
                     </div>
@@ -220,7 +228,7 @@ export function CP1000ColorTestModal({
             {/* Image Selection Actions */}
             <div className="flex flex-col gap-2 border-t border-neutral-200 pt-4">
               <span className="text-xs font-mono font-black uppercase tracking-wider text-neutral-500">
-                Chọn ảnh nguồn:
+                Chọn ảnh nguồn Canon 6D:
               </span>
 
               <div className="grid grid-cols-2 gap-2">
@@ -255,28 +263,37 @@ export function CP1000ColorTestModal({
 
             {/* Bottom Actions */}
             <div className="flex flex-col gap-2 border-t border-neutral-200 pt-4">
-              <div className="flex gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={handleDownload}
+                  onClick={handleDownloadJpg}
                   disabled={!testResult || isGenerating}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-xl border border-neutral-300 bg-white py-3 text-xs font-black uppercase tracking-wider text-neutral-900 hover:bg-neutral-100 active:scale-95 disabled:opacity-50 transition shadow-sm"
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-neutral-300 bg-white py-2.5 text-xs font-black uppercase tracking-wider text-neutral-900 hover:bg-neutral-100 active:scale-95 disabled:opacity-50 transition shadow-sm"
                 >
-                  📥 Tải file Test (.jpg)
+                  📥 Tải file (.jpg)
                 </button>
 
                 <button
                   type="button"
-                  onClick={handleDirectPrint}
-                  disabled={!testResult || isGenerating || isPrinting}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-neutral-900 py-3 text-xs font-black uppercase tracking-wider text-[#F6C453] hover:bg-neutral-800 active:scale-95 disabled:opacity-50 transition shadow-md"
+                  onClick={handleDownloadPng}
+                  disabled={!testResult || isGenerating}
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-neutral-300 bg-white py-2.5 text-xs font-black uppercase tracking-wider text-neutral-900 hover:bg-neutral-100 active:scale-95 disabled:opacity-50 transition shadow-sm"
                 >
-                  {isPrinting ? '⏳ Đang in...' : '🖨️ In ra CP1000'}
+                  📥 Tải file (.png)
                 </button>
               </div>
 
+              <button
+                type="button"
+                onClick={handleDirectPrint}
+                disabled={!testResult || isGenerating || isPrinting}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-neutral-900 py-3 text-xs font-black uppercase tracking-wider text-[#F6C453] hover:bg-neutral-800 active:scale-95 disabled:opacity-50 transition shadow-md"
+              >
+                {isPrinting ? '⏳ Đang in...' : '🖨️ In thử ra CP1000'}
+              </button>
+
               <p className="text-[10px] font-mono text-neutral-400 text-center">
-                * Không lưu vào cơ sở dữ liệu và không làm thay đổi màu của bất kỳ lần in nào sau này.
+                * Calibration V2: Chỉ dùng để đánh giá trực quan trên giấy in, không thay đổi bất kỳ ảnh production nào.
               </p>
             </div>
 

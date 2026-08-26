@@ -99,7 +99,7 @@ export function WindowMiniAdminShell() {
             onClick={() => setIsColorTestOpen(true)}
             className="flex items-center gap-1.5 rounded-lg border border-amber-400/80 bg-amber-50 px-3 py-1.5 text-xs font-black uppercase tracking-wider text-amber-900 shadow-sm transition hover:bg-amber-100 active:scale-95"
           >
-            🎨 CP1000 Color Test
+            🎨 CP1000 Calibration V2
           </button>
         </div>
         <div className="text-right text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500">

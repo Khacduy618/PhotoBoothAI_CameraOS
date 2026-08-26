@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+  CP1000_MAGENTA_TEST_PROFILES,
   CP1000_COLOR_PRESETS,
   createCP1000ColorTest,
 } from './cp1000-color-test.service';
@@ -73,33 +74,37 @@ function createMockCanvas(w = 1800, h = 2700) {
   return { canvas, ctx, drawImage, getImageData, putImageData };
 }
 
-describe('CP1000 Color Calibration Test Service', () => {
-  it('1. Has exact 4 specified presets with exact RGB multipliers', () => {
+describe('CP1000 Color Calibration V2 Test Service', () => {
+  it('1. Has exact 4 Magenta Test V2 presets with exact RGB multipliers and formulas', () => {
     expect(CP1000_COLOR_PRESETS).toHaveLength(4);
 
     // 1. ORIGINAL
-    expect(CP1000_COLOR_PRESETS[0].id).toBe('ORIGINAL');
-    expect(CP1000_COLOR_PRESETS[0].red).toBe(1.00);
-    expect(CP1000_COLOR_PRESETS[0].green).toBe(1.00);
-    expect(CP1000_COLOR_PRESETS[0].blue).toBe(1.00);
+    expect(CP1000_MAGENTA_TEST_PROFILES.original.id).toBe('ORIGINAL');
+    expect(CP1000_MAGENTA_TEST_PROFILES.original.red).toBe(1.00);
+    expect(CP1000_MAGENTA_TEST_PROFILES.original.green).toBe(1.00);
+    expect(CP1000_MAGENTA_TEST_PROFILES.original.blue).toBe(1.00);
+    expect(CP1000_MAGENTA_TEST_PROFILES.original.formula).toBe('R1.00 G1.00 B1.00');
 
-    // 2. WARMER
-    expect(CP1000_COLOR_PRESETS[1].id).toBe('WARMER');
-    expect(CP1000_COLOR_PRESETS[1].red).toBe(1.06);
-    expect(CP1000_COLOR_PRESETS[1].green).toBe(1.00);
-    expect(CP1000_COLOR_PRESETS[1].blue).toBe(0.94);
+    // 2. M1 (Magenta nhẹ)
+    expect(CP1000_MAGENTA_TEST_PROFILES.m1.id).toBe('M1');
+    expect(CP1000_MAGENTA_TEST_PROFILES.m1.red).toBe(1.02);
+    expect(CP1000_MAGENTA_TEST_PROFILES.m1.green).toBe(0.98);
+    expect(CP1000_MAGENTA_TEST_PROFILES.m1.blue).toBe(1.00);
+    expect(CP1000_MAGENTA_TEST_PROFILES.m1.formula).toBe('R1.02 G0.98 B1.00');
 
-    // 3. +MAGENTA
-    expect(CP1000_COLOR_PRESETS[2].id).toBe('PLUS_MAGENTA');
-    expect(CP1000_COLOR_PRESETS[2].red).toBe(1.05);
-    expect(CP1000_COLOR_PRESETS[2].green).toBe(0.94);
-    expect(CP1000_COLOR_PRESETS[2].blue).toBe(1.03);
+    // 3. M2 (Magenta trung bình)
+    expect(CP1000_MAGENTA_TEST_PROFILES.m2.id).toBe('M2');
+    expect(CP1000_MAGENTA_TEST_PROFILES.m2.red).toBe(1.03);
+    expect(CP1000_MAGENTA_TEST_PROFILES.m2.green).toBe(0.96);
+    expect(CP1000_MAGENTA_TEST_PROFILES.m2.blue).toBe(1.01);
+    expect(CP1000_MAGENTA_TEST_PROFILES.m2.formula).toBe('R1.03 G0.96 B1.01');
 
-    // 4. LESS BLUE
-    expect(CP1000_COLOR_PRESETS[3].id).toBe('LESS_BLUE');
-    expect(CP1000_COLOR_PRESETS[3].red).toBe(1.00);
-    expect(CP1000_COLOR_PRESETS[3].green).toBe(1.00);
-    expect(CP1000_COLOR_PRESETS[3].blue).toBe(0.90);
+    // 4. M3 (Magenta mạnh hơn)
+    expect(CP1000_MAGENTA_TEST_PROFILES.m3.id).toBe('M3');
+    expect(CP1000_MAGENTA_TEST_PROFILES.m3.red).toBe(1.04);
+    expect(CP1000_MAGENTA_TEST_PROFILES.m3.green).toBe(0.94);
+    expect(CP1000_MAGENTA_TEST_PROFILES.m3.blue).toBe(1.02);
+    expect(CP1000_MAGENTA_TEST_PROFILES.m3.formula).toBe('R1.04 G0.94 B1.02');
   });
 
   it('2. Generates exact 1800x2700 calibration sheet with 4 quadrants', async () => {

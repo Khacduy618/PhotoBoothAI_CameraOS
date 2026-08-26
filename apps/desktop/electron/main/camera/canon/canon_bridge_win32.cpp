@@ -599,7 +599,7 @@ static EdsError EDSCALLBACK handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef
 
         if (g_wasLiveViewBeforeCapture) {
             g_wasLiveViewBeforeCapture = 0;
-            Sleep(150);
+            Sleep(30);
             EdsUInt32 evfOn = 0;
             if (pEdsGetPropertyData) {
                 pEdsGetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn);
@@ -872,31 +872,19 @@ static void processCommandJson(const std::string& line) {
         sendJsonLine("{\"event\":\"captureStarted\",\"shotIndex\":" + std::to_string(shotIndex) + "}");
         g_wasLiveViewBeforeCapture = g_liveViewActive.load();
 
-        if (g_wasLiveViewBeforeCapture) {
-            EdsUInt32 evfOff = 0;
-            if (pEdsGetPropertyData) {
-                pEdsGetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOff), &evfOff);
-            }
-            evfOff &= ~kEdsEvfOutputDevice_PC;
-            if (pEdsSetPropertyData) {
-                pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOff), &evfOff);
-            }
-            g_liveViewActive = 0;
-            Sleep(300);
-        }
-
+        // Direct Single-Exposure Shutter Trigger from LiveView (eliminates double mirror slap)
         EdsError err = pEdsSendCommand ? pEdsSendCommand(g_camera, kEdsCameraCommand_TakePicture, 0) : 0xFFFFFFFF;
         std::string usedCmd = "TakePicture";
         if (err != EDS_ERR_OK && pEdsSendCommand) {
             usedCmd = "PressShutterButton_Completely_NonAF";
             err = pEdsSendCommand(g_camera, kEdsCameraCommand_PressShutterButton, kEdsCameraCommand_ShutterButton_Completely_NonAF);
-            Sleep(200);
+            Sleep(50);
             pEdsSendCommand(g_camera, kEdsCameraCommand_PressShutterButton, kEdsCameraCommand_ShutterButton_OFF);
         }
         if (err != EDS_ERR_OK && pEdsSendCommand) {
             usedCmd = "PressShutterButton_Completely";
             err = pEdsSendCommand(g_camera, kEdsCameraCommand_PressShutterButton, kEdsCameraCommand_ShutterButton_Completely);
-            Sleep(200);
+            Sleep(50);
             pEdsSendCommand(g_camera, kEdsCameraCommand_PressShutterButton, kEdsCameraCommand_ShutterButton_OFF);
         }
 

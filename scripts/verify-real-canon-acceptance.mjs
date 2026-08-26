@@ -29,8 +29,43 @@ function sha256(filePath) {
   return crypto.createHash('sha256').update(data).digest('hex');
 }
 
+import os from 'node:os';
+
+function resolveBinary(name) {
+  const envVar = name === 'ffmpeg'
+    ? (process.env.MOMENTAI_FFMPEG_PATH || process.env.FFMPEG_PATH)
+    : (process.env.MOMENTAI_FFPROBE_PATH || process.env.FFPROBE_PATH);
+  if (envVar && fs.existsSync(envVar)) return envVar;
+
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  const fullName = `${name}${ext}`;
+  const candidates = [
+    path.join(projectRoot, 'vendor', 'ffmpeg', 'bin', fullName),
+    path.join(projectRoot, 'vendor', 'ffmpeg', fullName),
+    path.join(projectRoot, 'bin', fullName),
+    `C:\\ffmpeg\\bin\\${fullName}`,
+    `C:\\Program Files\\ffmpeg\\bin\\${fullName}`,
+    `C:\\Program Files (x86)\\ffmpeg\\bin\\${fullName}`,
+    `C:\\ProgramData\\chocolatey\\bin\\${fullName}`,
+    path.join(os.homedir(), 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', fullName),
+    path.join(os.homedir(), 'scoop', 'shims', fullName),
+    path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'ffmpeg', 'bin', fullName),
+    path.join(os.homedir(), 'AppData', 'Local', 'ffmpeg', 'bin', fullName),
+    `/opt/homebrew/bin/${name}`,
+    `/usr/local/bin/${name}`,
+    `/usr/bin/${name}`,
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return name;
+}
+
+const ffmpegBin = resolveBinary('ffmpeg');
+const ffprobeBin = resolveBinary('ffprobe');
+
 function probe(filePath) {
-  const json = execFileSync('ffprobe', [
+  const json = execFileSync(ffprobeBin, [
     '-v', 'quiet',
     '-print_format', 'json',
     '-show_format',
@@ -41,13 +76,22 @@ function probe(filePath) {
 }
 
 function probeImage(filePath) {
-  const out = execFileSync('sips', ['-g', 'pixelWidth', '-g', 'pixelHeight', filePath], { encoding: 'utf8' });
-  const wMatch = out.match(/pixelWidth:\s*(\d+)/);
-  const hMatch = out.match(/pixelHeight:\s*(\d+)/);
-  return {
-    width: wMatch ? Number(wMatch[1]) : 0,
-    height: hMatch ? Number(hMatch[1]) : 0,
-  };
+  try {
+    const buf = fs.readFileSync(filePath);
+    let offset = 2;
+    while (offset < buf.length - 8) {
+      if (buf[offset] !== 0xFF) break;
+      const marker = buf[offset + 1];
+      const len = buf.readUInt16BE(offset + 2);
+      if ((marker >= 0xC0 && marker <= 0xC3) || (marker >= 0xC5 && marker <= 0xC7) || (marker >= 0xC9 && marker <= 0xCB) || (marker >= 0xCD && marker <= 0xCF)) {
+        const height = buf.readUInt16BE(offset + 5);
+        const width = buf.readUInt16BE(offset + 7);
+        return { width, height };
+      }
+      offset += 2 + len;
+    }
+  } catch {}
+  return { width: 0, height: 0 };
 }
 
 async function run() {
@@ -214,7 +258,7 @@ async function run() {
     '[b2][p3] overlay=90:1296 [b3]',
     '[b3][p4] overlay=90:1890 [out]',
   ].join('; ');
-  execFileSync('ffmpeg', ['-y', ...inputArgs, '-filter_complex', filterComplex, '-map', '[out]', '-vframes', '1', '-q:v', '2', finalImagePath]);
+  execFileSync(ffmpegBin, ['-y', ...inputArgs, '-filter_complex', filterComplex, '-map', '[out]', '-vframes', '1', '-q:v', '2', finalImagePath]);
 
   console.log(`  FINAL_IMAGE_PATH = ${finalImagePath}`);
   const finalImageDims = probeImage(finalImagePath);

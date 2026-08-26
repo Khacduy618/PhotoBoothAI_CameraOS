@@ -22,7 +22,6 @@ import { RawPhotosGallery } from './components/RawPhotosGallery';
 import { SAMPLE_SESSIONS } from './data/sampleSessions';
 import { PhotoboothSession } from './types';
 import { saveToAlbumDirect, saveBothDirectToAlbum } from './utils/downloadHelpers';
-import { firebaseConfig, fetchSessionViaRest } from './firebase/config';
 
 type CloudState =
   | 'IDLE'
@@ -30,6 +29,7 @@ type CloudState =
   | 'CREATED'
   | 'UPLOADING_ORIGINALS'
   | 'ORIGINALS_READY'
+  | 'IMAGE_READY'
   | 'COMPOSING_FINAL'
   | 'UPLOADING_FINAL'
   | 'READY'
@@ -82,14 +82,14 @@ export default function App() {
     setTimeout(() => setToastMsg(null), 3500);
   };
 
-  // 1. Extract Public Token & Subscribe to Real Session Data
+  // 1. Extract Public Token & Subscribe to Real Session Data via Cloudflare R2 + Neon API
   useEffect(() => {
     let isMounted = true;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
     const resolveToken = () => {
-      // 1. Match from pathname: /s/:publicToken or /session/:publicToken
-      const pathMatch = window.location.pathname.match(/\/(?:s|session)\/([a-zA-Z0-9_-]+)/i);
+      // 1. Match from pathname: /s/:publicToken, /session/:publicToken, /p/:publicToken
+      const pathMatch = window.location.pathname.match(/\/(?:s|session|p)\/([a-zA-Z0-9_-]+)/i);
       if (pathMatch?.[1]) return pathMatch[1];
 
       // 2. Match from query parameters: ?token=... or ?session=...
@@ -109,81 +109,79 @@ export default function App() {
       }
 
       try {
-        const projectId = firebaseConfig.projectId;
-        if (projectId) {
-          // Real Firebase Firestore query
-          const cloudDoc = await fetchSessionViaRest(projectId, token, firebaseConfig.apiKey);
-          if (!isMounted) return;
+        const res = await fetch(`/api/sessions/${encodeURIComponent(token)}`);
+        if (!isMounted) return;
 
-          if (cloudDoc) {
-            const status = String(cloudDoc.status || '').toUpperCase() as CloudState;
-            const isImageReady = cloudDoc.finalImage?.status === 'READY' || Boolean(cloudDoc.finalImage?.url);
-            const isVideoReady = cloudDoc.finalVideo?.status === 'READY' || Boolean(cloudDoc.finalVideo?.url);
+        if (res.status === 404) {
+          setCloudState('NOT_FOUND');
+          return;
+        }
 
-            if (isImageReady || isVideoReady || status === 'READY') {
-              const codeDisplay = token.slice(0, 6).toUpperCase();
-              const formattedSession: PhotoboothSession = {
-                id: token,
-                code: codeDisplay,
-                boothName: cloudDoc.boothName || 'TIỆM ẢNH DI SẢN • MOMENTAI',
-                location: 'MomentAI Cloud Storage',
-                createdAt: cloudDoc.createdAt || new Date().toISOString(),
-                expiresAt: new Date(new Date(cloudDoc.createdAt || Date.now()).getTime() + 48 * 60 * 60 * 1000).toISOString(),
-                stripMedia: isImageReady ? {
-                  id: `strip-${token}`,
-                  url: cloudDoc.finalImage?.url || '',
-                  name: `MomentAI-${codeDisplay}-photo.jpg`,
-                  type: 'image',
-                  width: cloudDoc.finalImage?.width || 1800,
-                  height: cloudDoc.finalImage?.height || 2700,
-                } : {
-                  id: `strip-${token}`,
-                  url: '',
-                  name: `MomentAI-${codeDisplay}-photo.jpg`,
-                  type: 'image',
-                },
-                videoMedia: isVideoReady ? {
-                  id: `video-${token}`,
-                  url: cloudDoc.finalVideo?.url || '',
-                  name: `MomentAI-${codeDisplay}-video.mp4`,
-                  type: 'video',
-                  width: cloudDoc.finalVideo?.width || 1800,
-                  height: cloudDoc.finalVideo?.height || 2700,
-                } : undefined,
-                rawPhotos: (cloudDoc.rawPhotos || []).map((p, idx) => ({
-                  id: `raw-${token}-${p.shotIndex || idx + 1}`,
-                  url: p.url,
-                  name: p.name || `Shot_${p.shotIndex || idx + 1}_${codeDisplay}.jpg`,
-                  type: 'image' as const,
-                })),
-              };
+        if (!res.ok) {
+          throw new Error(`HTTP error ${res.status}`);
+        }
 
-              setSession(formattedSession);
-              setCloudState(status === 'READY' ? 'READY' : isImageReady ? 'PARTIAL' : status);
+        const data = await res.json();
+        if (!isMounted) return;
 
-              // If video is still processing, keep polling in background for video readiness
-              if (!isVideoReady && status !== 'READY') {
-                pollTimer = setTimeout(querySession, 2000);
-              }
-              return;
-            } else {
-              // Document exists but still processing initial uploads
-              setCloudState(status || 'UPLOADING_ORIGINALS');
-              pollTimer = setTimeout(querySession, 2000);
-              return;
-            }
-          } else {
-            // Not found in Firestore, poll up to a few times in case upload is just starting
-            setCloudState('NOT_FOUND');
+        if (data && data.session) {
+          const s = data.session;
+          const status = String(s.status || '').toUpperCase() as CloudState;
+          const isImageReady = Boolean(data.finalImage?.url);
+          const isVideoReady = Boolean(data.finalVideo?.url);
+
+          const codeDisplay = token.slice(0, 6).toUpperCase();
+          const formattedSession: PhotoboothSession = {
+            id: token,
+            code: codeDisplay,
+            boothName: s.boothName || 'TIỆM ẢNH DI SẢN • MOMENTAI',
+            location: 'MomentAI R2 Object Storage',
+            createdAt: s.createdAt || new Date().toISOString(),
+            expiresAt: s.expiresAt || new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
+            stripMedia: isImageReady ? {
+              id: `strip-${token}`,
+              url: data.finalImage.url,
+              name: `MomentAI-${codeDisplay}-photo.jpg`,
+              type: 'image',
+              width: data.finalImage.width || 1800,
+              height: data.finalImage.height || 2700,
+            } : {
+              id: `strip-${token}`,
+              url: '',
+              name: `MomentAI-${codeDisplay}-photo.jpg`,
+              type: 'image',
+            },
+            videoMedia: isVideoReady ? {
+              id: `video-${token}`,
+              url: data.finalVideo.url,
+              name: `MomentAI-${codeDisplay}-video.mp4`,
+              type: 'video',
+              width: data.finalVideo.width || 1800,
+              height: data.finalVideo.height || 2700,
+            } : undefined,
+            rawPhotos: (data.rawPhotos || []).map((p: any, idx: number) => ({
+              id: `raw-${token}-${idx + 1}`,
+              url: p.url || '',
+              name: p.fileName || `Shot_${idx + 1}_${codeDisplay}.jpg`,
+              type: 'image' as const,
+            })),
+          };
+
+          setSession(formattedSession);
+          setCloudState(status === 'READY' ? 'READY' : isImageReady ? 'PARTIAL' : status);
+
+          // If video is still processing, keep polling in background
+          if (!isVideoReady && status !== 'READY') {
+            pollTimer = setTimeout(querySession, 2000);
           }
+          return;
         } else {
-          // If Firebase project ID not configured, fallback to local demo / sample
-          setSession(SAMPLE_SESSIONS[0]);
-          setCloudState('READY');
+          setCloudState('NOT_FOUND');
         }
       } catch (err) {
         console.warn('Session query error:', err);
-        setCloudState('ERROR');
+        // Retry polling in case network temporarily dropped
+        pollTimer = setTimeout(querySession, 3000);
       }
     };
 

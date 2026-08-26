@@ -13,6 +13,9 @@ function createMockCanvas(w = 1800, h = 2700) {
   const fillText = vi.fn();
   const setLineDash = vi.fn();
 
+  const save = vi.fn();
+  const restore = vi.fn();
+
   const ctx = {
     fillStyle: '#ffffff',
     strokeStyle: '#000000',
@@ -31,6 +34,8 @@ function createMockCanvas(w = 1800, h = 2700) {
     stroke,
     fillText,
     setLineDash,
+    save,
+    restore,
   };
 
   const canvas = {
@@ -41,11 +46,11 @@ function createMockCanvas(w = 1800, h = 2700) {
     toBlob: (cb: (b: Blob) => void, format = 'image/jpeg') => cb(new Blob(['mock'], { type: format })),
   } as unknown as HTMLCanvasElement;
 
-  return { canvas, ctx, drawImage, fillRect, stroke, beginPath, moveTo, lineTo };
+  return { canvas, ctx, drawImage, fillRect, stroke, beginPath, moveTo, lineTo, setLineDash, save, restore };
 }
 
 describe('buildPrintMaster & CP1000 Physical Raster', () => {
-  it('A. PREMIUM_POSTCARD -> 1181x1748 physical print master', async () => {
+  it('A. PREMIUM_POSTCARD -> 2362x3496 physical print master', async () => {
     const { canvas } = createMockCanvas();
     const { canvas: sourceCanvas } = createMockCanvas(1800, 2700);
 
@@ -55,11 +60,11 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
       targetCanvas: canvas,
     });
 
-    expect(master.width).toBe(1181);
-    expect(master.height).toBe(1748);
+    expect(master.width).toBe(2362);
+    expect(master.height).toBe(3496);
   });
 
-  it('B. SHEET_4 -> 1181x1748 physical print master', async () => {
+  it('B. SHEET_4 -> 2362x3496 physical print master', async () => {
     const { canvas } = createMockCanvas();
     const { canvas: sourceCanvas } = createMockCanvas(1800, 2700);
 
@@ -69,11 +74,11 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
       targetCanvas: canvas,
     });
 
-    expect(master.width).toBe(1181);
-    expect(master.height).toBe(1748);
+    expect(master.width).toBe(2362);
+    expect(master.height).toBe(3496);
   });
 
-  it('C. SHEET_6 -> 1181x1748 physical print master', async () => {
+  it('C. SHEET_6 -> 2362x3496 physical print master', async () => {
     const { canvas } = createMockCanvas();
     const { canvas: sourceCanvas } = createMockCanvas(1800, 2700);
 
@@ -83,11 +88,11 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
       targetCanvas: canvas,
     });
 
-    expect(master.width).toBe(1181);
-    expect(master.height).toBe(1748);
+    expect(master.width).toBe(2362);
+    expect(master.height).toBe(3496);
   });
 
-  it('D. STRIP_2 -> 1181x1748 with left (590px) and right (591px) duplication', async () => {
+  it('D. STRIP_2 -> 2362x3496 with left (1110px) and right (1110px) duplication', async () => {
     const { canvas, drawImage } = createMockCanvas();
     const { canvas: stripCanvas } = createMockCanvas(900, 2700);
 
@@ -97,33 +102,33 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
       targetCanvas: canvas,
     });
 
-    expect(master.width).toBe(1181);
-    expect(master.height).toBe(1748);
+    expect(master.width).toBe(2362);
+    expect(master.height).toBe(3496);
 
     // Verify 2 drawImage calls for two-up layout
     expect(drawImage).toHaveBeenCalledTimes(2);
 
-    // Call 1: Left strip drawn at x=0, y=0, w=590, h=1748
+    // Call 1: Left strip drawn inside safe margins (Left: 82px, Top: 82px)
     const call1 = drawImage.mock.calls[0];
     expect(call1[0]).toBe(stripCanvas);
-    expect(call1[5]).toBe(0); // destX
-    expect(call1[6]).toBe(0); // destY
-    expect(call1[7]).toBe(590); // destWidth
-    expect(call1[8]).toBe(1748); // destHeight
+    expect(call1[5]).toBe(82); // destX (insetLeft = 3.5mm = 82px)
+    expect(call1[6]).toBe(82); // destY (insetTop = 3.5mm = 82px)
+    expect(call1[7]).toBe(1099); // destWidth
+    expect(call1[8]).toBe(3332); // destHeight (3496 - 82 - 82)
 
-    // Call 2: Right strip drawn at x=590, y=0, w=591, h=1748
+    // Call 2: Right strip drawn inside safe margins (Right: 82px)
     const call2 = drawImage.mock.calls[1];
     expect(call2[0]).toBe(stripCanvas);
-    expect(call2[5]).toBe(590); // destX
-    expect(call2[6]).toBe(0); // destY
-    expect(call2[7]).toBe(591); // destWidth
-    expect(call2[8]).toBe(1748); // destHeight
+    expect(call2[5]).toBe(1181); // destX (insetLeft + leftStripW = 82 + 1099)
+    expect(call2[6]).toBe(82); // destY (insetTop = 3.5mm = 82px)
+    expect(call2[7]).toBe(1099); // destWidth
+    expect(call2[8]).toBe(3332); // destHeight
 
-    // Total width = 590 + 591 = 1181 (zero gap / zero overlap)
-    expect(call1[7] + call2[7]).toBe(1181);
+    // Total content width = 1099 + 1099 = 2198 px (2362 - 2*82)
+    expect(call1[7] + call2[7]).toBe(2198);
   });
 
-  it('F. STRIP_4 -> 1181x1748 with left (590px) and right (591px) duplication', async () => {
+  it('F. STRIP_4 -> 2362x3496 with left (1110px) and right (1110px) duplication', async () => {
     const { canvas, drawImage } = createMockCanvas();
     const { canvas: stripCanvas } = createMockCanvas(900, 2700);
 
@@ -133,8 +138,8 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
       targetCanvas: canvas,
     });
 
-    expect(master.width).toBe(1181);
-    expect(master.height).toBe(1748);
+    expect(master.width).toBe(2362);
+    expect(master.height).toBe(3496);
     expect(drawImage).toHaveBeenCalledTimes(2);
   });
 
@@ -152,7 +157,7 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
     expect(drawImage.mock.calls[1][0]).toBe(stripCanvas);
   });
 
-  it('H. Landscape PREMIUM_POSTCARD produces 1748x1181 physical master', async () => {
+  it('H. Landscape PREMIUM_POSTCARD produces 3496x2362 physical master', async () => {
     const { canvas, drawImage } = createMockCanvas();
     const { canvas: sourceCanvas } = createMockCanvas(2700, 1800);
 
@@ -163,15 +168,15 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
       targetCanvas: canvas,
     });
 
-    expect(master.width).toBe(1748);
-    expect(master.height).toBe(1181);
+    expect(master.width).toBe(3496);
+    expect(master.height).toBe(2362);
 
     expect(drawImage).toHaveBeenCalledTimes(1);
     const call = drawImage.mock.calls[0];
-    expect(call[5]).toBe(0);
-    expect(call[6]).toBe(0);
-    expect(call[7]).toBe(1748);
-    expect(call[8]).toBe(1181);
+    expect(call[5]).toBe(82);
+    expect(call[6]).toBe(82);
+    expect(call[7]).toBe(3332);
+    expect(call[8]).toBe(2198);
   });
 
   it('K. Generates valid JPEG dataURL by default', async () => {
@@ -188,8 +193,8 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
     expect(dataUrl).toContain('image/jpeg');
   });
 
-  it('L. Production strip master contains NO visible calibration cut marks', async () => {
-    const { canvas, stroke } = createMockCanvas();
+  it('L. Production strip master draws subtle dashed cut guide line at center', async () => {
+    const { canvas, stroke, setLineDash, moveTo, lineTo } = createMockCanvas();
     const { canvas: stripCanvas } = createMockCanvas(900, 2700);
 
     await buildPrintMaster({
@@ -198,15 +203,32 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
       targetCanvas: canvas,
     });
 
-    // Stroke must not be called during production strip printing (no calibration lines)
-    expect(stroke).not.toHaveBeenCalled();
+    // Stroke is called for the center dashed cut guide line
+    expect(stroke).toHaveBeenCalled();
+    expect(setLineDash).toHaveBeenCalledWith([8, 8]);
+    expect(moveTo).toHaveBeenCalledWith(1181, 0);
+    expect(lineTo).toHaveBeenCalledWith(1181, 3496);
   });
 
-  it('Calibration sheet generator produces exact 1181x1748 calibration raster', () => {
+  it('Calibration sheet generator produces exact 2362x3496 calibration raster', () => {
     const { canvas } = createMockCanvas();
     const cal = generateCalibrationSheet({ targetCanvas: canvas });
 
-    expect(cal.width).toBe(1181);
-    expect(cal.height).toBe(1748);
+    expect(cal.width).toBe(2362);
+    expect(cal.height).toBe(3496);
+  });
+
+  it('M. Ultra-Res 177MP Sheet Composite preserves full 10944x16200 resolution in print master', async () => {
+    const { canvas } = createMockCanvas();
+    const { canvas: ultraCanvas } = createMockCanvas(10944, 16200);
+
+    const master = await buildPrintMaster({
+      logicalProductImage: ultraCanvas,
+      targetProduct: 'SHEET_4',
+      targetCanvas: canvas,
+    });
+
+    expect(master.width).toBe(10944);
+    expect(master.height).toBe(16200);
   });
 });

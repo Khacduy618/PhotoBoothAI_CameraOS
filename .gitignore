@@ -47,6 +47,7 @@ next-env.d.ts
 # scratch, logs, and local captured media
 .cameraos-data/
 *.png
+!public/**
 *.log
 *.txt
 *.backup-before-browser

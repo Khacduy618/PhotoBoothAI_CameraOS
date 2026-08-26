@@ -38,12 +38,38 @@ export class VideoEncoderService {
   private ffprobePath: string;
 
   constructor(options?: { ffmpegPath?: string; ffprobePath?: string }) {
-    this.ffmpegPath = options?.ffmpegPath || this.findBinary('ffmpeg', ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg']);
-    this.ffprobePath = options?.ffprobePath || this.findBinary('ffprobe', ['/opt/homebrew/bin/ffprobe', '/usr/local/bin/ffprobe', '/usr/bin/ffprobe']);
+    this.ffmpegPath = options?.ffmpegPath || this.resolveBinary('ffmpeg');
+    this.ffprobePath = options?.ffprobePath || this.resolveBinary('ffprobe');
   }
 
-  private findBinary(name: string, fallbackPaths: string[]): string {
-    for (const p of fallbackPaths) {
+  private resolveBinary(name: string): string {
+    const envVar = name === 'ffmpeg'
+      ? (process.env.MOMENTAI_FFMPEG_PATH || process.env.FFMPEG_PATH)
+      : (process.env.MOMENTAI_FFPROBE_PATH || process.env.FFPROBE_PATH);
+    if (envVar && fs.existsSync(envVar)) return envVar;
+
+    const ext = process.platform === 'win32' ? '.exe' : '';
+    const fullName = `${name}${ext}`;
+    const projectRoot = process.cwd();
+
+    const candidates = [
+      path.join(projectRoot, 'vendor', 'ffmpeg', 'bin', fullName),
+      path.join(projectRoot, 'vendor', 'ffmpeg', fullName),
+      path.join(projectRoot, 'bin', fullName),
+      `C:\\ffmpeg\\bin\\${fullName}`,
+      `C:\\Program Files\\ffmpeg\\bin\\${fullName}`,
+      `C:\\Program Files (x86)\\ffmpeg\\bin\\${fullName}`,
+      `C:\\ProgramData\\chocolatey\\bin\\${fullName}`,
+      path.join(os.homedir(), 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', fullName),
+      path.join(os.homedir(), 'scoop', 'shims', fullName),
+      path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'ffmpeg', 'bin', fullName),
+      path.join(os.homedir(), 'AppData', 'Local', 'ffmpeg', 'bin', fullName),
+      `/opt/homebrew/bin/${name}`,
+      `/usr/local/bin/${name}`,
+      `/usr/bin/${name}`,
+    ];
+
+    for (const p of candidates) {
       if (fs.existsSync(p)) return p;
     }
     return name;

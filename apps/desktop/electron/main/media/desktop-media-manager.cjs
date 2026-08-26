@@ -18,15 +18,41 @@ const crypto = require('crypto');
 
 const execFileAsync = promisify(execFile);
 
-function findBinary(name, fallbackPaths) {
-  for (const p of fallbackPaths) {
+function resolveBinaryPath(name) {
+  const envVar = name === 'ffmpeg'
+    ? (process.env.MOMENTAI_FFMPEG_PATH || process.env.FFMPEG_PATH)
+    : (process.env.MOMENTAI_FFPROBE_PATH || process.env.FFPROBE_PATH);
+  if (envVar && fs.existsSync(envVar)) return envVar;
+
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  const fullName = `${name}${ext}`;
+  const projectRoot = path.resolve(__dirname, '../../../../..');
+
+  const candidates = [
+    path.join(projectRoot, 'vendor', 'ffmpeg', 'bin', fullName),
+    path.join(projectRoot, 'vendor', 'ffmpeg', fullName),
+    path.join(projectRoot, 'bin', fullName),
+    `C:\\ffmpeg\\bin\\${fullName}`,
+    `C:\\Program Files\\ffmpeg\\bin\\${fullName}`,
+    `C:\\Program Files (x86)\\ffmpeg\\bin\\${fullName}`,
+    `C:\\ProgramData\\chocolatey\\bin\\${fullName}`,
+    path.join(os.homedir(), 'AppData', 'Local', 'Microsoft', 'WinGet', 'Links', fullName),
+    path.join(os.homedir(), 'scoop', 'shims', fullName),
+    path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'ffmpeg', 'bin', fullName),
+    path.join(os.homedir(), 'AppData', 'Local', 'ffmpeg', 'bin', fullName),
+    `/opt/homebrew/bin/${name}`,
+    `/usr/local/bin/${name}`,
+    `/usr/bin/${name}`,
+  ];
+
+  for (const p of candidates) {
     if (fs.existsSync(p)) return p;
   }
   return name;
 }
 
-const ffmpegPath = findBinary('ffmpeg', ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg']);
-const ffprobePath = findBinary('ffprobe', ['/opt/homebrew/bin/ffprobe', '/usr/local/bin/ffprobe', '/usr/bin/ffprobe']);
+const ffmpegPath = resolveBinaryPath('ffmpeg');
+const ffprobePath = resolveBinaryPath('ffprobe');
 
 function normalizeSlotToPixels(slot, frameWidth, frameHeight) {
   const fw = frameWidth > 0 ? frameWidth : 1800;
@@ -719,10 +745,22 @@ class DesktopMediaManager {
 
     const clips = await this.waitForClipsReady(sessionId, slots.length, 15000);
 
-    const rawW = targetWidth || frame.outputWidth || 1800;
-    const rawH = targetHeight || frame.outputHeight || 2700;
-    const outputWidth = Math.floor(rawW / 2) * 2;
-    const outputHeight = Math.floor(rawH / 2) * 2;
+    const isStrip = (frame?.targetProduct === 'STRIP_2' || frame?.targetProduct === 'STRIP_4' || frame?.preferredPaper === '2x6-double' || (frame?.slots && frame.slots.length === 2) || (frame?.slots && frame.slots.length === 4 && (!frame.outputWidth || !frame.outputHeight || frame.outputHeight >= frame.outputWidth * 2)));
+    const isLandscape = !isStrip && (frame?.orientation === 'landscape' || (targetWidth && targetHeight && targetWidth > targetHeight));
+
+    const defaultW = isStrip ? 900 : isLandscape ? 2700 : 1800;
+    const defaultH = isStrip ? 2700 : isLandscape ? 1800 : 2700;
+
+    let finalW = targetWidth || frame?.outputWidth || defaultW;
+    let finalH = targetHeight || frame?.outputHeight || defaultH;
+
+    if (finalW < 600 || finalH < 1200 || (isStrip && finalW >= finalH * 0.5)) {
+      finalW = defaultW;
+      finalH = defaultH;
+    }
+
+    const outputWidth = Math.floor(finalW / 2) * 2;
+    const outputHeight = Math.floor(finalH / 2) * 2;
     const durationSec = durationMs / 1000;
 
     const outputsDir = this.sessionMediaPaths.outputsDir(sessionId);

@@ -55,19 +55,42 @@ export async function buildPrintMaster(
     sessionId = 'unknown',
   } = options;
 
+  let sourceImg: HTMLCanvasElement | HTMLImageElement;
+  if (typeof logicalProductImage === 'string') {
+    sourceImg = await loadImage(logicalProductImage);
+  } else {
+    sourceImg = logicalProductImage;
+  }
+
+  const srcW =
+    (sourceImg as HTMLImageElement).naturalWidth ||
+    sourceImg.width ||
+    1800;
+  const srcH =
+    (sourceImg as HTMLImageElement).naturalHeight ||
+    sourceImg.height ||
+    2700;
+
   const isStrip = isStripProduct(targetProduct as CanonicalProduct);
 
-  const targetW = isStrip
+  // Preserve 100% full resolution of the Final Composite
+  const defaultW = isStrip
     ? printerProfile.portrait.widthPx
     : isLandscape
     ? printerProfile.landscape.widthPx
     : printerProfile.portrait.widthPx;
 
-  const targetH = isStrip
+  const defaultH = isStrip
     ? printerProfile.portrait.heightPx
     : isLandscape
     ? printerProfile.landscape.heightPx
     : printerProfile.portrait.heightPx;
+
+  const targetW = isStrip
+    ? Math.max(defaultW, srcW * 2)
+    : Math.max(defaultW, srcW);
+
+  const targetH = Math.max(defaultH, srcH);
 
   if (typeof console !== 'undefined' && console.log) {
     console.log(
@@ -91,83 +114,71 @@ export async function buildPrintMaster(
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, targetW, targetH);
 
-  let sourceImg: HTMLCanvasElement | HTMLImageElement;
-  if (typeof logicalProductImage === 'string') {
-    sourceImg = await loadImage(logicalProductImage);
-  } else {
-    sourceImg = logicalProductImage;
-  }
+  // Calculate safe insets scaled proportionally from printerProfile
+  const baseInsetLeft = printerProfile.safeAreaInsetsPx?.left ?? 82;
+  const baseInsetTop = printerProfile.safeAreaInsetsPx?.top ?? 82;
+  const insetLeft = Math.round(baseInsetLeft * (targetW / defaultW));
+  const insetRight = insetLeft;
+  const insetTop = Math.round(baseInsetTop * (targetH / defaultH));
+  const insetBottom = insetTop;
 
-  const srcW =
-    (sourceImg as HTMLImageElement).naturalWidth ||
-    sourceImg.width ||
-    1800;
-  const srcH =
-    (sourceImg as HTMLImageElement).naturalHeight ||
-    sourceImg.height ||
-    2700;
+  const printableW = targetW - insetLeft - insetRight;
+  const printableH = targetH - insetTop - insetBottom;
 
   if (isStrip) {
     // Physical 100x148mm sheet holds TWO identical 5x15 strips side-by-side.
-    // 1181px total width: Left strip = 590px (0..590), Right strip = 591px (590..1181)
-    const leftW = 590;
-    const rightW = targetW - leftW; // 591 px
+    const leftStripW = Math.round(printableW / 2);
+    const rightStripW = printableW - leftStripW;
 
-    // Left strip crop and render
-    const cropLeft = calculateSourceCropRect(srcW, srcH, leftW, targetH, {
-      horizontalAnchor: 'center',
-      verticalAnchor: 'center',
-      fit: 'cover',
-    });
-
+    // Left strip direct render
     ctx.drawImage(
       sourceImg,
-      cropLeft.cropX,
-      cropLeft.cropY,
-      cropLeft.cropW,
-      cropLeft.cropH,
       0,
       0,
-      leftW,
-      targetH,
+      srcW,
+      srcH,
+      insetLeft,
+      insetTop,
+      leftStripW,
+      printableH,
     );
 
-    // Right strip crop and render (identical source)
-    const cropRight = calculateSourceCropRect(srcW, srcH, rightW, targetH, {
-      horizontalAnchor: 'center',
-      verticalAnchor: 'center',
-      fit: 'cover',
-    });
-
+    // Right strip direct render
     ctx.drawImage(
       sourceImg,
-      cropRight.cropX,
-      cropRight.cropY,
-      cropRight.cropW,
-      cropRight.cropH,
-      leftW,
       0,
-      rightW,
-      targetH,
+      0,
+      srcW,
+      srcH,
+      insetLeft + leftStripW,
+      insetTop,
+      rightStripW,
+      printableH,
     );
+
+    // Subtle dashed centerline cut guide between the two 5x15 strips (x = targetW / 2 = 590.5 px)
+    const centerX = targetW / 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.setLineDash([8, 8]);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.moveTo(centerX, 0);
+    ctx.lineTo(centerX, targetH);
+    ctx.stroke();
+    ctx.restore();
   } else {
     // Single full 10x15 master sheet (1181x1748 or 1748x1181)
-    const crop = calculateSourceCropRect(srcW, srcH, targetW, targetH, {
-      horizontalAnchor: 'center',
-      verticalAnchor: 'center',
-      fit: 'cover',
-    });
-
     ctx.drawImage(
       sourceImg,
-      crop.cropX,
-      crop.cropY,
-      crop.cropW,
-      crop.cropH,
       0,
       0,
-      targetW,
-      targetH,
+      srcW,
+      srcH,
+      insetLeft,
+      insetTop,
+      printableW,
+      printableH,
     );
   }
 

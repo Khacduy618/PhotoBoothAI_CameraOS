@@ -120,20 +120,83 @@ class WindowsPrinterAdapter {
     }
 
     return new Promise((resolve) => {
-      // Silent unattended printing strictly to configured CP1000 printer via PowerShell / PrintTo verb
-      // Strictly rejects sending to default printer if CP1000 is not found!
       const escapedPath = printMasterPath.replace(/'/g, "''");
       const printerTarget = this.preferredPrinterName.replace(/'/g, "''");
 
       const script = `
+        Add-Type -AssemblyName System.Drawing
         $printer = Get-CimInstance Win32_Printer | Where-Object { $_.Name -like "*${printerTarget}*" } | Select-Object -First 1
         if (-not $printer) {
           Write-Error "CANON_CP1000_NOT_FOUND: No printer matching '${printerTarget}' found on Windows system."
           exit 1
         }
         $targetName = $printer.Name
-        for ($i = 0; $i -lt ${copies}; $i++) {
-          Start-Process -FilePath '${escapedPath}' -Verb PrintTo -ArgumentList ('"' + $targetName + '"') -WindowStyle Hidden -Wait
+
+        if (-not (Test-Path -LiteralPath '${escapedPath}')) {
+          Write-Error "PRINT_MASTER_NOT_FOUND: File '${escapedPath}' does not exist."
+          exit 1
+        }
+
+        $img = [System.Drawing.Image]::FromFile('${escapedPath}')
+        try {
+          $pd = New-Object System.Drawing.Printing.PrintDocument
+          $pd.PrinterSettings.PrinterName = $targetName
+          $pd.PrinterSettings.Copies = ${copies}
+          $pd.PrintController = New-Object System.Drawing.Printing.StandardPrintController
+
+          $isLandscape = $img.Width -gt $img.Height
+          $pd.DefaultPageSettings.Landscape = $isLandscape
+
+          # Respect active paper setting (Borderless or Bordered) from Windows Printing Preferences
+          $currentPaper = $pd.DefaultPageSettings.PaperSize
+          if (-not $currentPaper -or ($currentPaper.PaperName -notlike "*Postcard*" -and $currentPaper.PaperName -notlike "*100*148*" -and $currentPaper.PaperName -notlike "*4*6*" -and $currentPaper.PaperName -notlike "*KG*")) {
+            $postcardSize = $pd.PrinterSettings.PaperSizes | Where-Object {
+              $_.PaperName -like "*Postcard*" -or $_.PaperName -like "*100*148*" -or $_.PaperName -like "*4*6*" -or $_.PaperName -like "*KG*"
+            } | Select-Object -First 1
+            if ($postcardSize) {
+              $pd.DefaultPageSettings.PaperSize = $postcardSize
+            }
+          }
+
+          $pd.OriginAtMargins = $false
+          $pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
+
+          $pd.add_PrintPage({
+            param($sender, $ev)
+            $ev.Graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $ev.Graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+            $ev.Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+
+            $clip = $ev.Graphics.VisibleClipBounds
+            $pageW = $clip.Width
+            $pageH = $clip.Height
+            $pageIsLandscape = $pageW -gt $pageH
+
+            # If page orientation does not match image orientation, apply 90-degree transform
+            if ($isLandscape -ne $pageIsLandscape) {
+              $ev.Graphics.TranslateTransform($clip.X + $pageW / 2, $clip.Y + $pageH / 2)
+              $ev.Graphics.RotateTransform(90)
+              $ev.Graphics.TranslateTransform(-($clip.Y + $pageH / 2), -($clip.X + $pageW / 2))
+              $destRect = New-Object System.Drawing.RectangleF($clip.Y, $clip.X, $pageH, $pageW)
+            } else {
+              $destRect = New-Object System.Drawing.RectangleF($clip.X, $clip.Y, $pageW, $pageH)
+            }
+
+            # Draw image directly into the physical visible clip rectangle
+            $srcRect = New-Object System.Drawing.RectangleF(0, 0, $img.Width, $img.Height)
+            $ev.Graphics.DrawImage(
+              $img,
+              $destRect,
+              $srcRect,
+              [System.Drawing.GraphicsUnit]::Pixel
+            )
+            $ev.HasMorePages = $false
+          })
+
+          $pd.Print()
+          $pd.Dispose()
+        } finally {
+          $img.Dispose()
         }
       `;
 

@@ -18,34 +18,52 @@ function auditMacOsUsb() {
   let locationId = "N/A";
   let usbExclusiveOwner = "N/A";
 
-  try {
-    const out = execSync("ioreg -p IOUSB -w0 -l", { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"], timeout: 2000 });
-    const lines = out.split("\n");
-    let inCanon = false;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (/Canon|EOS|1193/i.test(line) && /IOUSBHostDevice|AppleUSB/i.test(line)) {
-        inCanon = true;
-        macosUsbPresent = true;
-      }
-      if (inCanon) {
-        const vMatch = line.match(/"idVendor"\s*=\s*(\d+)/);
-        if (vMatch) vendorId = vMatch[1] === "1193" ? "0x04A9 (Canon Inc.)" : vMatch[1];
-        const pMatch = line.match(/"idProduct"\s*=\s*(\d+)/);
-        if (pMatch) productId = pMatch[1] === "12880" ? "0x3250 (EOS 6D)" : pMatch[1];
-        const nMatch = line.match(/"USB Product Name"\s*=\s*"([^"]+)"/);
-        if (nMatch) productName = nMatch[1];
-        const lMatch = line.match(/"locationID"\s*=\s*(\d+)/);
-        if (lMatch) locationId = lMatch[1];
-        const oMatch = line.match(/"UsbExclusiveOwner"\s*=\s*"([^"]+)"/);
-        if (oMatch) usbExclusiveOwner = oMatch[1];
-        if (line.includes("+-o ") && !line.includes("Canon")) {
-          inCanon = false;
+  if (process.platform === "win32") {
+    try {
+      const out = execSync('powershell -NoProfile -NonInteractive -Command "Get-PnpDevice -PresentOnly | Where-Object { $_.FriendlyName -like \'*Canon*\' -or $_.InstanceId -like \'*04A9*\' } | Select-Object FriendlyName, InstanceId, Status, Class | ConvertTo-Json -Compress"', { encoding: "utf8", timeout: 3000 });
+      if (out && out.trim()) {
+        const parsed = JSON.parse(out);
+        const item = Array.isArray(parsed) ? parsed[0] : parsed;
+        if (item) {
+          macosUsbPresent = true;
+          productName = item.FriendlyName || "Canon Camera";
+          vendorId = "0x04A9 (Canon Inc.)";
+          productId = item.InstanceId || "0x3250";
         }
       }
+    } catch (e) {
+      // ignore
     }
-  } catch (e) {
-    // ignore
+  } else {
+    try {
+      const out = execSync("ioreg -p IOUSB -w0 -l", { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"], timeout: 2000 });
+      const lines = out.split("\n");
+      let inCanon = false;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (/Canon|EOS|1193/i.test(line) && /IOUSBHostDevice|AppleUSB/i.test(line)) {
+          inCanon = true;
+          macosUsbPresent = true;
+        }
+        if (inCanon) {
+          const vMatch = line.match(/"idVendor"\s*=\s*(\d+)/);
+          if (vMatch) vendorId = vMatch[1] === "1193" ? "0x04A9 (Canon Inc.)" : vMatch[1];
+          const pMatch = line.match(/"idProduct"\s*=\s*(\d+)/);
+          if (pMatch) productId = pMatch[1] === "12880" ? "0x3250 (EOS 6D)" : pMatch[1];
+          const nMatch = line.match(/"USB Product Name"\s*=\s*"([^"]+)"/);
+          if (nMatch) productName = nMatch[1];
+          const lMatch = line.match(/"locationID"\s*=\s*(\d+)/);
+          if (lMatch) locationId = lMatch[1];
+          const oMatch = line.match(/"UsbExclusiveOwner"\s*=\s*"([^"]+)"/);
+          if (oMatch) usbExclusiveOwner = oMatch[1];
+          if (line.includes("+-o ") && !line.includes("Canon")) {
+            inCanon = false;
+          }
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
   }
 
   console.log(`[CANON_USB_NATIVE_AUDIT] macosUsbPresent=${macosUsbPresent} vendorId=${vendorId} productId=${productId} productName=${productName} locationId=${locationId} usbExclusiveOwner=${usbExclusiveOwner}`);
@@ -59,25 +77,47 @@ function auditProcessOwners(bridgePid) {
   let eosUtilityRunning = false;
   let ptpCameraRunning = false;
 
-  try {
-    const out = execSync("ps -eo pid,comm", { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"], timeout: 2000 });
-    const lines = out.split("\n");
-    for (const line of lines) {
-      const match = line.trim().match(/^(\d+)\s+(.+)$/);
-      if (match) {
-        const p = match[1];
-        const c = match[2];
-        if (/canon-runtime/i.test(c)) canonRuntimeCount++;
-        if (/canon_bridge_mac/i.test(c)) {
-          canonBridgeCount++;
-          bridgePids.push(p);
+  if (process.platform === "win32") {
+    try {
+      const out = execSync("tasklist /FO CSV /NH", { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"], timeout: 2000 });
+      const lines = out.split("\n");
+      for (const line of lines) {
+        const parts = line.split(",").map((s) => s.replace(/^"|"$/g, "").trim());
+        if (parts.length >= 2) {
+          const c = parts[0];
+          const p = parts[1];
+          if (/canon-runtime/i.test(c)) canonRuntimeCount++;
+          if (/canon_bridge/i.test(c)) {
+            canonBridgeCount++;
+            bridgePids.push(p);
+          }
+          if (/EOS Utility|EOSUPNPSV|EOS Web/i.test(c)) eosUtilityRunning = true;
         }
-        if (/EOS Utility|EOS Utility 3|EOS Utility Launcher/i.test(c)) eosUtilityRunning = true;
-        if (/PTPCamera|ptpcamerad/i.test(c)) ptpCameraRunning = true;
       }
+    } catch (e) {
+      // ignore
     }
-  } catch (e) {
-    // ignore
+  } else {
+    try {
+      const out = execSync("ps -eo pid,comm", { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"], timeout: 2000 });
+      const lines = out.split("\n");
+      for (const line of lines) {
+        const match = line.trim().match(/^(\d+)\s+(.+)$/);
+        if (match) {
+          const p = match[1];
+          const c = match[2];
+          if (/canon-runtime/i.test(c)) canonRuntimeCount++;
+          if (/canon_bridge/i.test(c)) {
+            canonBridgeCount++;
+            bridgePids.push(p);
+          }
+          if (/EOS Utility|EOS Utility 3|EOS Utility Launcher/i.test(c)) eosUtilityRunning = true;
+          if (/PTPCamera|ptpcamerad/i.test(c)) ptpCameraRunning = true;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
   }
 
   console.log(`[CANON_OWNER_AUDIT] electronPid=${process.ppid} canonRuntimePid=${process.pid} canonBridgePid=${bridgePid || "none"} canonRuntimeCount=${canonRuntimeCount} canonBridgeCount=${canonBridgeCount} eosUtilityRunning=${eosUtilityRunning} ptpCameraRunning=${ptpCameraRunning}`);
@@ -844,9 +884,6 @@ class CanonRuntimeService {
   }
 
   canPerformStaleLockRecovery() {
-    if (!this.abnormalPredecessorConfirmed) {
-      return false;
-    }
     const audit = auditProcessOwners(this.currentBridgePid);
     if (audit.eosUtilityRunning || audit.ptpCameraRunning || audit.canonBridgeCount > 1) {
       console.warn("[CanonRuntime] Refusing stale lock cleanup due to active camera daemon or second bridge.");
@@ -957,7 +994,7 @@ ACTION REQUIRED FOR OPERATOR:
     this.setState(STATES.OPENING_SESSION);
     console.log(`[CanonRuntime] Opening session with camera: ${this.cameraModel}`);
 
-    const sessionPromise = this.waitForBridgeEvent("sessionOpened", 3500);
+    const sessionPromise = this.waitForBridgeEvent("sessionOpened", 6000);
     await this.sendCommand({ command: "openSession" });
     const evt = await sessionPromise;
     const opened = Boolean(evt);
@@ -970,18 +1007,18 @@ ACTION REQUIRED FOR OPERATOR:
 
     if (!opened && this.state !== STATES.READY && this.state !== STATES.LIVEVIEW) {
       if (checkSystemContention()) {
-        console.warn("[CanonRuntime] OpenSession contention detected with macOS photo/camera daemons.");
+        console.warn("[CanonRuntime] OpenSession contention detected with camera daemons.");
         this.setState(STATES.ERROR, { error: "CAMERA_BUSY_CONTENTION" });
         return false;
       }
 
       if (this.canPerformStaleLockRecovery()) {
-        console.log("[CanonRuntime] Abnormal predecessor confirmed. Executing safe stale lock recovery...");
+        console.log("[CanonRuntime] Executing safe stale lock recovery...");
         const cleanPromise = this.waitForBridgeEvent("staleLockCleaned", 2000);
         await this.sendCommand({ command: "cleanStaleLock" });
         await cleanPromise;
 
-        const retryPromise = this.waitForBridgeEvent("sessionOpened", 3000);
+        const retryPromise = this.waitForBridgeEvent("sessionOpened", 5000);
         await this.sendCommand({ command: "openSession" });
         const retryEvt = await retryPromise;
         if (retryEvt) {
@@ -989,9 +1026,10 @@ ACTION REQUIRED FOR OPERATOR:
           this.setState(STATES.READY);
           return true;
         }
-      } else {
-        console.warn("[CanonRuntime] OpenSession timeout/failed. STALE_LOCK_CLEANUP_ALLOWED = NO.");
       }
+
+      console.warn("[CanonRuntime] OpenSession failed after retry. Setting DISCONNECTED state.");
+      this.setState(STATES.DISCONNECTED);
       return false;
     }
     return true;

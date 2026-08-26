@@ -1,4 +1,4 @@
-import { listAdminFrames, updateAdminFrameStatus } from '@/services/admin/server/admin-registry-store';
+import { clearAdminFrames, deleteAdminFrame, listAdminFrames, saveAdminFrame, updateAdminFrameStatus } from '@/services/admin/server/admin-registry-store';
 import type { AdminTemplateSummary } from '@momentai/admin-contract';
 import type { Result } from '@momentai/shared-types';
 
@@ -62,6 +62,11 @@ export class WindowMiniAdminTemplatesService {
         eventId: scopedEventId,
         status: template.status === 'private' ? 'private' : 'published',
       });
+      try {
+        saveAdminFrame(template as never, scopedEventId);
+      } catch {
+        // Fallback to in-memory if SQLite save cannot parse full definition
+      }
       return { ok: true, value: undefined };
     } catch (cause) {
       return templateResultError(cause, 'ADMIN_TEMPLATE_SAVE_FAILED', 'Không lưu được template admin.');
@@ -73,9 +78,12 @@ export class WindowMiniAdminTemplatesService {
       const scopedEventId = assertAdminId(eventId, 'event id');
       const id = assertAdminId(templateId, 'template id');
       const key = templateKey(scopedEventId, id);
-      const template = inMemoryTemplates.get(key);
-      if (!template) throw new Error('Template not found for event.');
       inMemoryTemplates.delete(key);
+      try {
+        deleteAdminFrame(id, scopedEventId);
+      } catch {
+        // Ignore DB deletion errors
+      }
       return { ok: true, value: undefined };
     } catch (cause) {
       return templateResultError(cause, 'ADMIN_TEMPLATE_REMOVE_FAILED', 'Không xoá được template admin.');
@@ -87,6 +95,11 @@ export class WindowMiniAdminTemplatesService {
       const scopedEventId = assertAdminId(eventId, 'event id');
       for (const [templateId, template] of inMemoryTemplates.entries()) {
         if (template.eventId === scopedEventId) inMemoryTemplates.delete(templateId);
+      }
+      try {
+        clearAdminFrames(scopedEventId);
+      } catch {
+        // Ignore DB clear errors
       }
       return { ok: true, value: undefined };
     } catch (cause) {

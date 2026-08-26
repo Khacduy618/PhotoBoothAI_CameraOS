@@ -47,6 +47,38 @@ describe('Canon Runtime Protocol & Lifecycle Constants', () => {
     const edsdkInfo = resolveEdsdkPath();
     expect(typeof edsdkInfo.path).toBe('string');
   });
+
+  it('respects MOMENTAI_CANON_BRIDGE_PATH and CANON_BRIDGE_PATH override', () => {
+    const originalEnv = process.env.MOMENTAI_CANON_BRIDGE_PATH;
+    process.env.MOMENTAI_CANON_BRIDGE_PATH = __filename;
+    try {
+      const binInfo = resolveBridgeBinary();
+      expect(binInfo.source).toBe('ENV_CANON_BRIDGE_PATH');
+      expect(binInfo.path).toBe(__filename);
+    } finally {
+      if (originalEnv !== undefined) {
+        process.env.MOMENTAI_CANON_BRIDGE_PATH = originalEnv;
+      } else {
+        delete process.env.MOMENTAI_CANON_BRIDGE_PATH;
+      }
+    }
+  });
+
+  it('respects MOMENTAI_EDSDK_PATH and CANON_EDSDK_PATH override', () => {
+    const originalEnv = process.env.MOMENTAI_EDSDK_PATH;
+    process.env.MOMENTAI_EDSDK_PATH = __filename;
+    try {
+      const edsdkInfo = resolveEdsdkPath();
+      expect(edsdkInfo.source).toBe('ENV_CANON_EDSDK_PATH');
+      expect(edsdkInfo.path).toBe(__filename);
+    } finally {
+      if (originalEnv !== undefined) {
+        process.env.MOMENTAI_EDSDK_PATH = originalEnv;
+      } else {
+        delete process.env.MOMENTAI_EDSDK_PATH;
+      }
+    }
+  });
 });
 
 describe('CanonRuntimeClient State Machine & Event Flow', () => {

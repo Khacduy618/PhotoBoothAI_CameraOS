@@ -67,6 +67,11 @@ function mapTemplateSummaryToFrameDefinition(summary: unknown): AdminFrameDefini
     const value = summary as Partial<AdminFrameDefinition> & { templateId?: string; captureFormatId?: string };
     const parsedShotCount = Number(value.shotCount ?? String(value.captureFormatId ?? "format_4shot").match(/format_(\d+)shot/)?.[1] ?? 4);
     const shotCount: ImportedFrameShotCount = parsedShotCount === 1 || parsedShotCount === 2 || parsedShotCount === 6 || parsedShotCount === 8 ? parsedShotCount : 4;
+    const isStrip = value.targetProduct === "STRIP_2" || value.targetProduct === "STRIP_4" || value.outputPaper === "5x15" || shotCount === 2 || (shotCount === 4 && (!value.outputWidth || !value.outputHeight || value.outputHeight >= value.outputWidth * 2.2));
+    const targetProduct = value.targetProduct || (isStrip ? (shotCount === 2 ? "STRIP_2" : "STRIP_4") : (shotCount === 1 ? "PREMIUM_POSTCARD" : shotCount === 6 ? "SHEET_6" : "SHEET_4"));
+    const outputPaper = value.outputPaper || (isStrip ? "5x15" : "10x15");
+    const outputWidth = value.outputWidth && (!isStrip || value.outputWidth <= (value.outputHeight || 2700) * 0.5) ? value.outputWidth : (isStrip ? 900 : 1800);
+    const outputHeight = value.outputHeight ?? 2700;
     const now = new Date().toISOString();
     return {
         id: String(value.id ?? value.templateId ?? `template_${shotCount}shot`),
@@ -76,11 +81,14 @@ function mapTemplateSummaryToFrameDefinition(summary: unknown): AdminFrameDefini
         source: value.source ?? "canva",
         assetUrl: value.assetUrl ?? "",
         shotCount,
+        targetProduct,
+        outputPaper,
+        orientation: value.orientation ?? value.photoViewportOrientation ?? "portrait",
         photoViewportOrientation: value.photoViewportOrientation ?? "portrait",
         photoAspectRatio: value.photoAspectRatio ?? "2:3",
         photoFit: value.photoFit ?? "contain",
-        outputWidth: value.outputWidth ?? 1800,
-        outputHeight: value.outputHeight ?? 2700,
+        outputWidth,
+        outputHeight,
         slots: value.slots ?? Array.from({ length: shotCount }, (_, index) => ({ id: `slot_${index + 1}`, index: index + 1, x: 0.1, y: 0.1 + index * (0.75 / shotCount), width: 0.8, height: Math.max(0.1, 0.7 / shotCount), photoViewportOrientation: "portrait" as const, shape: "rect" as const })),
         status: value.status === "private" ? "private" : "published",
         eventId: value.eventId,
@@ -99,6 +107,7 @@ export function FrameImportPanel() {
     const [selectedEventId, setSelectedEventId] = useState("event_hoi_an_heritage");
     const [newEventName, setNewEventName] = useState("");
     const [registryFilter, setRegistryFilter] = useState<"all" | "published" | "private">("all");
+    const [isPublishing, setIsPublishing] = useState(false);
 
     const refreshAdminRegistry = async (eventId = selectedEventId) => {
         const bridge = getAdminBridge();
@@ -279,7 +288,7 @@ export function FrameImportPanel() {
         setSelectedEventId(localEvent.eventId);
     };
 
-    const saveFrameToSelectedEvent = async (definition: FrameDefinition, targetEventId?: string) => {
+    const saveFrameToSelectedEvent = async (definition: FrameDefinition, targetEventId?: string, shouldRefresh = true) => {
         const eventIdToUse = targetEventId || selectedEventId;
         const cleanId = String(definition.id || "").replace(/[^a-zA-Z0-9_-]/g, "_").replace(/^_+|_+$/g, "") || "frame_id";
         const cleanEventId = String(eventIdToUse || "").replace(/[^a-zA-Z0-9_-]/g, "_").replace(/^_+|_+$/g, "") || "event";
@@ -293,7 +302,9 @@ export function FrameImportPanel() {
         const result = await bridge?.templates?.save?.(cleanEventId, definitionWithEvent);
         if (result?.ok) {
             LocalFrameRegistry.notifyExternalChange();
-            await refreshAdminRegistry(cleanEventId);
+            if (shouldRefresh) {
+                await refreshAdminRegistry(cleanEventId);
+            }
             return;
         }
         if (isElectronAdminRequired()) {
@@ -310,12 +321,14 @@ export function FrameImportPanel() {
         }
         LocalFrameRegistry.registerFrame(definitionWithEvent);
         LocalFrameRegistry.notifyExternalChange();
-        await refreshAdminRegistry(cleanEventId);
+        if (shouldRefresh) {
+            await refreshAdminRegistry(cleanEventId);
+        }
     };
 
     const handlePublish = async (definition: FrameDefinition, fileName: string, targetEventId?: string) => {
         try {
-            await saveFrameToSelectedEvent(definition, targetEventId);
+            await saveFrameToSelectedEvent(definition, targetEventId, true);
             setFileStates((prev) =>
                 prev.map((s) => (s.file.name === fileName ? { ...s, isPublished: true } : s)),
             );
@@ -346,16 +359,26 @@ export function FrameImportPanel() {
 
     const handleDeleteFrame = async (frame: AdminFrameDefinition) => {
         if (!window.confirm(`Bạn có muốn xoá khung "${frame.name}" khỏi SQLite Registry?`)) return;
+        const bridge = getAdminBridge();
+        if (bridge?.templates?.remove) {
+            await bridge.templates.remove(selectedEventId, frame.id).catch(() => undefined);
+            LocalFrameRegistry.removeFrame(frame.id);
+            LocalFrameRegistry.notifyExternalChange();
+            await refreshAdminRegistry(selectedEventId);
+            return;
+        }
+        if (isElectronAdminRequired()) {
+            LocalFrameRegistry.removeFrame(frame.id);
+            LocalFrameRegistry.notifyExternalChange();
+            await refreshAdminRegistry(selectedEventId);
+            return;
+        }
         try {
-            const bridge = getAdminBridge();
-            if (bridge?.templates?.remove) {
-                await bridge.templates.remove(selectedEventId, frame.id).catch(() => undefined);
-            }
             await fetch(`/api/admin/frames?eventId=${encodeURIComponent(selectedEventId)}&frameId=${encodeURIComponent(frame.id)}`, {
                 method: "DELETE",
             });
         } catch (err) {
-            console.warn("Error deleting frame:", err);
+            console.warn("Error deleting frame via web API:", err);
         }
         LocalFrameRegistry.removeFrame(frame.id);
         LocalFrameRegistry.notifyExternalChange();
@@ -364,16 +387,26 @@ export function FrameImportPanel() {
 
     const handleClearSelectedEventFrames = async () => {
         if (!window.confirm("Bạn có chắc chắn muốn xoá TOÀN BỘ khung trong event đang chọn khỏi SQLite Registry?")) return;
+        const bridge = getAdminBridge();
+        if (bridge?.templates?.clear) {
+            await bridge.templates.clear(selectedEventId).catch(() => undefined);
+            LocalFrameRegistry.clear();
+            LocalFrameRegistry.notifyExternalChange();
+            await refreshAdminRegistry(selectedEventId);
+            return;
+        }
+        if (isElectronAdminRequired()) {
+            LocalFrameRegistry.clear();
+            LocalFrameRegistry.notifyExternalChange();
+            await refreshAdminRegistry(selectedEventId);
+            return;
+        }
         try {
-            const bridge = getAdminBridge();
-            if (bridge?.templates?.clear) {
-                await bridge.templates.clear(selectedEventId).catch(() => undefined);
-            }
             await fetch(`/api/admin/frames?eventId=${encodeURIComponent(selectedEventId)}`, {
                 method: "DELETE",
             });
         } catch (err) {
-            console.warn("Error clearing frames:", err);
+            console.warn("Error clearing frames via web API:", err);
         }
         LocalFrameRegistry.clear();
         LocalFrameRegistry.notifyExternalChange();
@@ -385,62 +418,78 @@ export function FrameImportPanel() {
     };
 
     const handlePublishAllApproved = async () => {
-        for (const item of fileStates) {
-            if (
-                item.result &&
-                (item.result.status === "auto-approved" || item.result.status === "needs-review") &&
-                !item.isPublished
-            ) {
-                try {
-                    const defaultName = item.file.name
-                        .replace(/\.[^/.]+$/, "")
-                        .replace(/[-_]/g, " ")
-                        .replace(/\b\w/g, (c) => c.toUpperCase());
+        if (isPublishing) return;
+        setIsPublishing(true);
+        try {
+            for (const item of fileStates) {
+                if (
+                    item.result &&
+                    (item.result.status === "auto-approved" || item.result.status === "needs-review") &&
+                    !item.isPublished
+                ) {
+                    try {
+                        const defaultName = item.file.name
+                            .replace(/\.[^/.]+$/, "")
+                            .replace(/[-_]/g, " ")
+                            .replace(/\b\w/g, (c) => c.toUpperCase());
 
-                    const photoViewportOrientation: "portrait" | "landscape" =
-                        item.result.image.width > item.result.image.height ? "landscape" : "portrait";
-                    const photoAspectRatio = photoViewportOrientation === "landscape" ? "3:2" : "2:3";
+                        const photoViewportOrientation: "portrait" | "landscape" =
+                            item.result.image.width > item.result.image.height ? "landscape" : "portrait";
+                        const photoAspectRatio = photoViewportOrientation === "landscape" ? "3:2" : "2:3";
+                        const supportedShotCounts = [1, 2, 4, 6, 8] as const;
+                        const detectedShotCount = (supportedShotCounts.find((count) => count === item.result!.slots.length) || item.result!.slots.length || 1) as 1 | 2 | 4 | 6 | 8;
+                        const isStrip = detectedShotCount === 2 || (detectedShotCount === 4 && item.result.image.height >= item.result.image.width * 2.2);
+                        const targetProduct = (isStrip ? (detectedShotCount === 2 ? "STRIP_2" : "STRIP_4") : (detectedShotCount === 1 ? "PREMIUM_POSTCARD" : detectedShotCount === 6 ? "SHEET_6" : "SHEET_4")) as "STRIP_2" | "STRIP_4" | "PREMIUM_POSTCARD" | "SHEET_4" | "SHEET_6";
+                        const outputPaper = targetProduct === "STRIP_2" || targetProduct === "STRIP_4" ? "5x15" : "10x15";
 
-                    const supportedShotCounts = [1, 2, 4, 6, 8] as const;
-                    const detectedShotCount = (supportedShotCounts.find((count) => count === item.result!.slots.length) || item.result!.slots.length || 1) as 1 | 2 | 4 | 6 | 8;
+                        const definitionSlots = item.result.slots.map((s) => ({
+                            id: s.id,
+                            index: s.order,
+                            x: s.normalizedBounds.x,
+                            y: s.normalizedBounds.y,
+                            width: s.normalizedBounds.width,
+                            height: s.normalizedBounds.height,
+                            photoViewportOrientation,
+                            shape: s.shape ?? "rect",
+                            points: s.points,
+                        }));
 
-                    const definitionSlots = item.result.slots.map((s) => ({
-                        id: s.id,
-                        index: s.order,
-                        x: s.normalizedBounds.x,
-                        y: s.normalizedBounds.y,
-                        width: s.normalizedBounds.width,
-                        height: s.normalizedBounds.height,
-                        photoViewportOrientation,
-                        shape: s.shape ?? "rect",
-                        points: s.points,
-                    }));
+                        const definition: FrameDefinition = {
+                            id: `imported-${item.result.importId}`,
+                            name: defaultName,
+                            description: "Canva imported frame overlay",
+                            kind: "png-overlay",
+                            source: "canva",
+                            assetUrl: item.objectUrl,
+                            assets: {
+                                overlay: item.objectUrl,
+                                background: "#ffffff",
+                            },
+                            shotCount: detectedShotCount,
+                            targetProduct,
+                            outputPaper,
+                            orientation: photoViewportOrientation,
+                            photoViewportOrientation,
+                            photoAspectRatio,
+                            photoFit: "contain",
+                            outputWidth: item.result.image.width,
+                            outputHeight: item.result.image.height,
+                            slots: definitionSlots,
+                            status: "published",
+                        };
 
-                    const definition: FrameDefinition = {
-                        id: `imported-${item.result.importId}`,
-                        name: defaultName,
-                        description: "Canva imported frame overlay",
-                        kind: "png-overlay",
-                        source: "canva",
-                        assetUrl: item.objectUrl,
-                        shotCount: detectedShotCount,
-                        photoViewportOrientation,
-                        photoAspectRatio,
-                        photoFit: "contain",
-                        outputWidth: item.result.image.width,
-                        outputHeight: item.result.image.height,
-                        slots: definitionSlots,
-                        status: "published",
-                    };
-
-                    await saveFrameToSelectedEvent(definition);
-                    setFileStates((prev) =>
-                        prev.map((s) => (s.file.name === item.file.name ? { ...s, isPublished: true } : s)),
-                    );
-                } catch (err) {
-                    console.warn(`Lỗi khi publish khung ${item.file.name}:`, err);
+                        await saveFrameToSelectedEvent(definition, selectedEventId, false);
+                        setFileStates((prev) =>
+                            prev.map((s) => (s.file.name === item.file.name ? { ...s, isPublished: true } : s)),
+                        );
+                    } catch (err) {
+                        console.warn(`Lỗi khi publish khung ${item.file.name}:`, err);
+                    }
                 }
             }
+            await refreshAdminRegistry(selectedEventId);
+        } finally {
+            setIsPublishing(false);
         }
     };
 
@@ -518,7 +567,14 @@ export function FrameImportPanel() {
                         {(["all", "auto-approved", "needs-review", "rejected"] as const).map((status) => (
                             <button key={status} type="button" onClick={() => setFilterStatus(status)} className={`rounded-full px-4 py-2 text-xs font-black uppercase tracking-wide ${filterStatus === status ? "bg-neutral-950 text-white" : "bg-neutral-100 text-neutral-700"}`}>{status}</button>
                         ))}
-                        <button type="button" onClick={() => void handlePublishAllApproved()} disabled={!fileStates.some((s) => s.result && s.result.status !== "rejected" && !s.isPublished)} className="ml-auto rounded-full bg-emerald-600 px-4 py-2 text-xs font-black uppercase tracking-wide text-white disabled:opacity-40">Publish approved</button>
+                        <button
+                            type="button"
+                            onClick={() => void handlePublishAllApproved()}
+                            disabled={isPublishing || !fileStates.some((s) => s.result && s.result.status !== "rejected" && !s.isPublished)}
+                            className="ml-auto rounded-full bg-emerald-600 px-4 py-2 text-xs font-black uppercase tracking-wide text-white transition hover:bg-emerald-700 disabled:opacity-40"
+                        >
+                            {isPublishing ? "Đang xuất bản..." : "Publish approved"}
+                        </button>
                         <button type="button" onClick={handleClearList} className="rounded-full bg-neutral-100 px-4 py-2 text-xs font-black uppercase tracking-wide text-neutral-700">Clear list</button>
                     </div>
 

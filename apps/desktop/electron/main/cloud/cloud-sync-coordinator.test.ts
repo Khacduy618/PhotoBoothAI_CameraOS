@@ -178,7 +178,7 @@ describe('CloudSyncCoordinator Unit & Integration Tests', () => {
     fs.writeFileSync(localFile, Buffer.from('test-content'));
 
     let attemptCount = 0;
-    vi.spyOn(coordinator, 'uploadToFirebaseStorage').mockImplementation(async () => {
+    vi.spyOn(coordinator, 'uploadToR2Storage').mockImplementation(async () => {
       attemptCount++;
       if (attemptCount < 2) {
         throw new Error('Transient 503 Service Unavailable');

@@ -410,6 +410,7 @@ export async function renderFrameComposition(
       if (signal?.aborted) {
         throw new DOMException("Composition aborted", "AbortError");
       }
+      ctx.drawImage(overlayImg, 0, 0, outputWidth, outputHeight);
     } catch (err) {
       console.warn("[renderFrameComposition] Failed to load overlay PNG:", err);
     }

@@ -1,6 +1,7 @@
 import type { Result } from '@momentai/shared-types';
 
 export * from './printer-profile';
+export * from './cp1000-color-profile';
 
 export type PrinterProvider = 'fake' | 'windows_print' | 'canon_cp1000';
 export type PrinterConnectionStatus = 'unknown' | 'ready' | 'printing' | 'offline' | 'paper_out' | 'error';

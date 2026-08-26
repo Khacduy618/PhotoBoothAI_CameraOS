@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { buildPrintMaster } from './print-master.service';
 import { generateCalibrationSheet } from './calibration-sheet.service';
+import {
+  CP1000_PRINT_PROFILE,
+  CP1000_COLOR_CORRECTION_ENABLED,
+  applyCP1000M2Profile,
+} from '@momentai/printer-contract';
 
 function createMockCanvas(w = 1800, h = 2700) {
   const drawImage = vi.fn();
@@ -15,6 +20,14 @@ function createMockCanvas(w = 1800, h = 2700) {
 
   const save = vi.fn();
   const restore = vi.fn();
+
+  const mockImageData = {
+    data: new Uint8ClampedArray(Math.min(w * h * 4, 1000)),
+    width: w,
+    height: h,
+  };
+  const getImageData = vi.fn().mockReturnValue(mockImageData);
+  const putImageData = vi.fn();
 
   const ctx = {
     fillStyle: '#ffffff',
@@ -36,6 +49,8 @@ function createMockCanvas(w = 1800, h = 2700) {
     setLineDash,
     save,
     restore,
+    getImageData,
+    putImageData,
   };
 
   const canvas = {
@@ -46,7 +61,7 @@ function createMockCanvas(w = 1800, h = 2700) {
     toBlob: (cb: (b: Blob) => void, format = 'image/jpeg') => cb(new Blob(['mock'], { type: format })),
   } as unknown as HTMLCanvasElement;
 
-  return { canvas, ctx, drawImage, fillRect, stroke, beginPath, moveTo, lineTo, setLineDash, save, restore };
+  return { canvas, ctx, drawImage, fillRect, stroke, beginPath, moveTo, lineTo, setLineDash, save, restore, getImageData, putImageData };
 }
 
 describe('buildPrintMaster & CP1000 Physical Raster', () => {
@@ -206,6 +221,59 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
     expect(setLineDash).toHaveBeenCalledWith([8, 8]);
     expect(moveTo).toHaveBeenCalledWith(900, 0);
     expect(lineTo).toHaveBeenCalledWith(900, 2700);
+  });
+
+  it('M. Calibrated M2 Profile contains exact calibrated values: R1.03, G0.96, B1.01', () => {
+    expect(CP1000_PRINT_PROFILE.red).toBe(1.03);
+    expect(CP1000_PRINT_PROFILE.green).toBe(0.96);
+    expect(CP1000_PRINT_PROFILE.blue).toBe(1.01);
+    expect(CP1000_COLOR_CORRECTION_ENABLED).toBe(true);
+  });
+
+  it('N. Applies M2 color correction to print canvas when CP1000 profile is used', async () => {
+    const { canvas, getImageData, putImageData } = createMockCanvas();
+    const { canvas: sourceCanvas } = createMockCanvas(1800, 2700);
+
+    await buildPrintMaster({
+      logicalProductImage: sourceCanvas,
+      targetProduct: 'SHEET_4',
+      targetCanvas: canvas,
+    });
+
+    // Verify getImageData and putImageData were called on the print canvas to apply M2 RGB correction
+    expect(getImageData).toHaveBeenCalledWith(0, 0, 1800, 2700);
+    expect(putImageData).toHaveBeenCalled();
+  });
+
+  it('O. applyCP1000M2Profile correctly transforms pixel values according to M2 formula', () => {
+    const testData = new Uint8ClampedArray([
+      100, 100, 100, 255, // Pixel 1: RGB 100, 100, 100
+      200, 150,  50, 255, // Pixel 2: RGB 200, 150, 50
+    ]);
+    const mockCtx = {
+      getImageData: vi.fn().mockReturnValue({ data: testData, width: 2, height: 1 }),
+      putImageData: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+
+    applyCP1000M2Profile(mockCtx, 2, 1, CP1000_PRINT_PROFILE);
+
+    // Pixel 1:
+    // R: 100 * 1.03 = 103
+    // G: 100 * 0.96 = 96
+    // B: 100 * 1.01 = 101
+    expect(testData[0]).toBe(103);
+    expect(testData[1]).toBe(96);
+    expect(testData[2]).toBe(101);
+    expect(testData[3]).toBe(255); // Alpha preserved
+
+    // Pixel 2:
+    // R: 200 * 1.03 = 206
+    // G: 150 * 0.96 = 144
+    // B: 50 * 1.01 = 51 (Math.round(50.5) = 51)
+    expect(testData[4]).toBe(206);
+    expect(testData[5]).toBe(144);
+    expect(testData[6]).toBe(51);
+    expect(testData[7]).toBe(255);
   });
 
   it('Calibration sheet generator produces exact 1800x2700 calibration raster', () => {

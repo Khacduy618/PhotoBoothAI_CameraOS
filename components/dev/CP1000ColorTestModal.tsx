@@ -6,6 +6,7 @@ import {
   CP1000_COLOR_PRESETS,
   type CP1000ColorTestResult,
 } from '@/services/calibration/cp1000-color-test.service';
+import { generateProductionPipelineTest } from '@/services/calibration/production-print-pipeline-test.service';
 import { HOI_AN_SAMPLE_PHOTOS } from '@/components/momentai-guest-flow/data/hoianSamplePhotos';
 
 interface CP1000ColorTestModalProps {
@@ -84,6 +85,60 @@ export function CP1000ColorTestModal({
   const handleDownloadPng = () => {
     if (testResult) {
       testResult.download('CP1000-magenta-calibration-v2.png', 'image/png');
+    }
+  };
+
+  const handleDownloadProdPipelineTest = async () => {
+    if (!sourceImageUrl) return;
+    setIsGenerating(true);
+    try {
+      const prodTest = await generateProductionPipelineTest(sourceImageUrl);
+      prodTest.download('CP1000-production-pipeline-test.jpg');
+      setPrintFeedback('✅ Đã tải file CP1000-production-pipeline-test.jpg (chuẩn 100% production print pipeline)!');
+    } catch (err) {
+      setPrintFeedback(`⚠️ Lỗi khi tạo test production: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handlePrintProdPipelineTest = async () => {
+    if (!sourceImageUrl) return;
+    setIsPrinting(true);
+    setPrintFeedback('Đang chuẩn bị gửi file test production sang máy in Canon CP1000...');
+
+    try {
+      const prodTest = await generateProductionPipelineTest(sourceImageUrl);
+      const testDataUrl = prodTest.dataUrl;
+
+      const momentaiApi = typeof window !== 'undefined'
+        ? (window as unknown as { momentai?: { guest?: { storage?: { createSession?: (sid: string) => Promise<unknown>; saveOutput?: (sid: string, type: string, file: unknown) => Promise<unknown> }; session?: { requestPrint?: (sid: string, copies: number) => Promise<{ ok?: boolean; error?: { message?: string; guestMessage?: string } }> } } } }).momentai?.guest
+        : undefined;
+
+      if (momentaiApi?.storage?.saveOutput && momentaiApi?.session?.requestPrint) {
+        const testSessionId = `prod_test_${Date.now()}`;
+        if (momentaiApi.storage.createSession) {
+          try {
+            await momentaiApi.storage.createSession(testSessionId);
+          } catch {}
+        }
+        await momentaiApi.storage.saveOutput(testSessionId, 'print', {
+          dataUrl: testDataUrl,
+          mimeType: 'image/jpeg',
+        });
+        const res = await momentaiApi.session.requestPrint(testSessionId, 1);
+        if (res && typeof res === 'object' && 'ok' in res && !res.ok) {
+          throw new Error(res.error?.guestMessage || res.error?.message || 'Lỗi khi gửi lệnh in');
+        }
+        setPrintFeedback('✅ Đã nạp thành công CP1000-production-pipeline-test.jpg vào Spooler Windows!');
+      } else {
+        prodTest.download('CP1000-production-pipeline-test.jpg');
+        setPrintFeedback('ℹ️ Đã tải file CP1000-production-pipeline-test.jpg về máy để in thủ công.');
+      }
+    } catch (err) {
+      setPrintFeedback(`⚠️ Lỗi khi in: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsPrinting(false);
     }
   };
 
@@ -257,6 +312,35 @@ export function CP1000ColorTestModal({
                   className="flex items-center justify-center gap-1.5 rounded-lg border border-neutral-300 bg-white py-2 text-xs font-bold text-neutral-800 hover:bg-neutral-50 active:scale-95 transition"
                 >
                   🖼️ Dùng ảnh mẫu
+                </button>
+              </div>
+            </div>
+
+            {/* Real Production Print Pipeline Verification */}
+            <div className="flex flex-col gap-2 border-t border-neutral-200 pt-3 bg-amber-50/70 p-3 rounded-xl border border-amber-200">
+              <span className="text-[11px] font-mono font-black uppercase tracking-wider text-amber-900 flex items-center justify-between">
+                <span>🎯 Test Production Pipeline Thật</span>
+                <span className="text-[9px] bg-amber-200 text-amber-950 px-1.5 py-0.5 rounded font-bold">M2 Real</span>
+              </span>
+              <p className="text-[10px] text-amber-800 leading-tight">
+                Chạy qua đúng 100% pipeline production: Ảnh Canon gốc → Crop 1 lần → M2 (R1.03/G0.96/B1.01) → Frame/Deco → Print Master 1800×2700.
+              </p>
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                <button
+                  type="button"
+                  onClick={handleDownloadProdPipelineTest}
+                  disabled={!sourceImageUrl || isGenerating}
+                  className="flex items-center justify-center gap-1 rounded-lg border border-amber-300 bg-white py-2 text-xs font-bold text-amber-950 hover:bg-amber-100 active:scale-95 disabled:opacity-50 transition shadow-sm"
+                >
+                  📥 Tải Test Prod (.jpg)
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePrintProdPipelineTest}
+                  disabled={!sourceImageUrl || isGenerating || isPrinting}
+                  className="flex items-center justify-center gap-1 rounded-lg bg-amber-600 py-2 text-xs font-bold text-white hover:bg-amber-700 active:scale-95 disabled:opacity-50 transition shadow-sm"
+                >
+                  🖨️ In Test Prod
                 </button>
               </div>
             </div>

@@ -181,6 +181,13 @@ export interface RenderFrameCompositionOptions {
   cropPolicy?: "cover-bottom-center";
   allowSampleFallback?: boolean;
   signal?: AbortSignal;
+  /**
+   * Target stream mode:
+   *  - 'digital' (default): applies studio digital enhancement `contrast(1.08) saturate(1.18) sepia(0.04)` for Large Preview, QR, and Cloud.
+   *  - 'print': for CP1000 physical printing; skips digital filter and applies calibrated M2 RGB multipliers strictly to the photo slots before frame/overlay composition.
+   */
+  streamMode?: 'digital' | 'print';
+  colorProfile?: { readonly red: number; readonly green: number; readonly blue: number };
 }
 
 export interface RenderFrameCompositionResult {
@@ -222,6 +229,8 @@ export async function renderFrameComposition(
     targetCanvas,
     allowSampleFallback = true,
     signal,
+    streamMode = 'digital',
+    colorProfile,
   } = options;
 
   if (signal?.aborted) {
@@ -321,23 +330,58 @@ export async function renderFrameComposition(
       ctx.rect(slotPx.x, slotPx.y, slotPx.width, slotPx.height);
       ctx.clip();
 
-      // Studio PhotoBooth Warm & High-Contrast Color Enhancement:
-      // +18% Saturation, +8% Contrast, subtle +4% golden-amber warmth, vibrant skin tone
-      if (ctx.filter !== undefined) {
-        ctx.filter = "contrast(1.08) saturate(1.18) sepia(0.04)";
-      }
+      if (streamMode === 'print') {
+        // CP1000 PRINT STREAM:
+        //  1. Zero digital filters (NO contrast, saturate, or sepia)
+        //  2. Direct 1-pass crop & downscale from Canon 6D original
+        //  3. Apply calibrated M2 RGB multipliers strictly to slot photo pixels
+        ctx.filter = 'none';
 
-      ctx.drawImage(
-        img,
-        crop.cropX,
-        crop.cropY,
-        crop.cropW,
-        crop.cropH,
-        slotPx.x,
-        slotPx.y,
-        slotPx.width,
-        slotPx.height,
-      );
+        ctx.drawImage(
+          img,
+          crop.cropX,
+          crop.cropY,
+          crop.cropW,
+          crop.cropH,
+          slotPx.x,
+          slotPx.y,
+          slotPx.width,
+          slotPx.height,
+        );
+
+        if (colorProfile && (colorProfile.red !== 1.0 || colorProfile.green !== 1.0 || colorProfile.blue !== 1.0)) {
+          const slotImgData = ctx.getImageData(slotPx.x, slotPx.y, slotPx.width, slotPx.height);
+          const d = slotImgData.data;
+          const { red: rMul, green: gMul, blue: bMul } = colorProfile;
+
+          for (let p = 0; p < d.length; p += 4) {
+            d[p] = Math.min(255, Math.max(0, Math.round(d[p] * rMul)));
+            d[p + 1] = Math.min(255, Math.max(0, Math.round(d[p + 1] * gMul)));
+            d[p + 2] = Math.min(255, Math.max(0, Math.round(d[p + 2] * bMul)));
+          }
+
+          ctx.putImageData(slotImgData, slotPx.x, slotPx.y);
+        }
+      } else {
+        // DIGITAL STREAM (Large Preview, QR, Cloud, Digital Master):
+        // Studio PhotoBooth Warm & High-Contrast Color Enhancement:
+        // +18% Saturation, +8% Contrast, subtle +4% golden-amber warmth, vibrant skin tone
+        if (ctx.filter !== undefined) {
+          ctx.filter = 'contrast(1.08) saturate(1.18) sepia(0.04)';
+        }
+
+        ctx.drawImage(
+          img,
+          crop.cropX,
+          crop.cropY,
+          crop.cropW,
+          crop.cropH,
+          slotPx.x,
+          slotPx.y,
+          slotPx.width,
+          slotPx.height,
+        );
+      }
 
       ctx.restore();
 
@@ -366,10 +410,15 @@ export async function renderFrameComposition(
       if (signal?.aborted) {
         throw new DOMException("Composition aborted", "AbortError");
       }
-      ctx.drawImage(overlayImg, 0, 0, outputWidth, outputHeight);
     } catch (err) {
       console.warn("[renderFrameComposition] Failed to load overlay PNG:", err);
     }
+  }
+
+  if (streamMode === 'print' && typeof console !== 'undefined' && console.log) {
+    console.log(
+      `[PRINT_COMPOSITOR_AUDIT]\nstreamMode=PRINT\nphotoFilter=NONE\nm2CorrectionApplied=${Boolean(colorProfile)}\nm2Formula=R${colorProfile?.red || 1.0} G${colorProfile?.green || 1.0} B${colorProfile?.blue || 1.0}\nframeOverlayCorrection=NONE\noutputSize=${outputWidth}x${outputHeight}`,
+    );
   }
 
   return {

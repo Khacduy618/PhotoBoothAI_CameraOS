@@ -2,6 +2,10 @@ import { FrameTemplate, PhotoItem, EventConfig, PaperSize } from '../types';
 import { isStripTemplate } from '../components/UI/frame-previews/FramePreviewCard';
 import { renderFrameComposition, loadImage } from '@/services/render/frame-compositor.service';
 import { buildPrintMaster } from '@/services/render/print-master.service';
+import {
+  CP1000_PRINT_PROFILE,
+  CP1000_COLOR_CORRECTION_ENABLED,
+} from '@momentai/printer-contract';
 
 export class CompositionEngine {
   public async renderComposition(
@@ -17,19 +21,64 @@ export class CompositionEngine {
     const isProduction = process.env.NODE_ENV === 'production' || (typeof window !== 'undefined' && (window as any).isProductionMode);
     const allowFallback = options?.allowSampleFallback ?? !isProduction;
 
-    // Unified authoritative composition engine (Shared with Large Preview)
-    const compositionResult = await renderFrameComposition({
+    // 1. Digital Master Composition (Used for Large Preview, QR Code & Cloud Download)
+    // Applies digital photo profile: contrast(1.08) saturate(1.18) sepia(0.04)
+    const digitalResult = await renderFrameComposition({
       frame,
       photos: slotPhotos,
       allowSampleFallback: allowFallback,
+      streamMode: 'digital',
     });
+    await this.applyOverlaysAndDrawings(digitalResult.canvas, frame, eventConfig, drawDataUrl);
 
-    const canvas = compositionResult.canvas;
+    // Master: Lossless PNG in RAM
+    const masterDataUrl = digitalResult.canvas.toDataURL('image/png');
+    // Share / Online Web QR: JPEG 0.94 (Lightweight & optimized for mobile view)
+    const shareDataUrl = digitalResult.canvas.toDataURL('image/jpeg', 0.94);
+
+    // 2. Dedicated Print Master Composition for Canon SELPHY CP1000:
+    //  - Photo layer: RAW crop/downscale 1 time (ZERO digital filter, ctx.filter = 'none')
+    //  - M2 Color Correction: Applied STRICTLY to photo pixels in slot (R: 1.03, G: 0.96, B: 1.01)
+    //  - Frame PNG overlay & text/drawing: Layered on top with ZERO color change
+    const isStrip = isStripTemplate(frame);
+    const targetProduct = frame.targetProduct || (isStrip ? 'STRIP_4' : 'SHEET_4');
+    const isLandscape = digitalResult.canvas.width > digitalResult.canvas.height;
+
+    const printResult = await renderFrameComposition({
+      frame,
+      photos: slotPhotos,
+      allowSampleFallback: allowFallback,
+      streamMode: 'print',
+      colorProfile: CP1000_COLOR_CORRECTION_ENABLED ? CP1000_PRINT_PROFILE : undefined,
+    });
+    await this.applyOverlaysAndDrawings(printResult.canvas, frame, eventConfig, drawDataUrl);
+
+    // 3. Arrange 10x15 physical raster layout (2-up strip duplication & safe margins)
+    const printMasterResult = await buildPrintMaster({
+      logicalProductImage: printResult.canvas,
+      targetProduct,
+      isLandscape,
+    });
+    const printDataUrl = printMasterResult.toDataURL('image/jpeg', 1.0);
+
+    return {
+      master: masterDataUrl,
+      share: shareDataUrl,
+      print: printDataUrl,
+    };
+  }
+
+  private async applyOverlaysAndDrawings(
+    canvas: HTMLCanvasElement,
+    frame: FrameTemplate,
+    eventConfig: EventConfig,
+    drawDataUrl?: string
+  ): Promise<void> {
     const ctx = canvas.getContext('2d')!;
     const overlayUrl = frame.assets?.overlay || (frame as any).assetUrl;
     const hasOverlayImage = !!overlayUrl;
 
-    // 4. Draw Branding Fallback Text ONLY if NO overlay image is present
+    // Draw Branding Fallback Text ONLY if NO overlay image is present
     if (!hasOverlayImage) {
       const branding = frame.eventBranding || {
         text: eventConfig.eventName || '',
@@ -46,7 +95,7 @@ export class CompositionEngine {
       ctx.fillStyle = frame.assets.textColor || '#1A1A1A';
 
       if (isLandscape) {
-        // Landscape (height e.g. 7392px): branding area at bottom
+        // Landscape branding area at bottom
         ctx.font = `italic ${Math.round(38 * scale)}px "Playfair Display", serif`;
         ctx.fillText(branding.text, canvas.width / 2, Math.round(1660 * (canvas.height / 1800)));
 
@@ -67,7 +116,7 @@ export class CompositionEngine {
           ctx.fillText(dateStr, canvas.width / 2, Math.round(1745 * (canvas.height / 1800)));
         }
       } else if (isStrip) {
-        // Strip (height e.g. 10944px)
+        // Strip branding area
         ctx.font = `italic ${Math.round(36 * scale)}px "Playfair Display", serif`;
         ctx.fillText(branding.text, canvas.width / 2, Math.round(2520 * scale));
 
@@ -88,7 +137,7 @@ export class CompositionEngine {
           ctx.fillText(dateStr, canvas.width / 2, Math.round(2620 * scale));
         }
       } else {
-        // Portrait Sheet (height e.g. 10944px)
+        // Portrait Sheet branding area
         ctx.font = `italic ${Math.round(52 * scale)}px "Playfair Display", serif`;
         ctx.fillText(branding.text, canvas.width / 2, Math.round(2500 * scale));
 
@@ -112,7 +161,7 @@ export class CompositionEngine {
       ctx.restore();
     }
 
-    // 5. Draw Custom Drawing & Text Layer on top
+    // Draw Custom Drawing & Text Layer on top (Layer 11)
     if (drawDataUrl) {
       try {
         const drawImg = await this.loadImage(drawDataUrl);
@@ -121,30 +170,6 @@ export class CompositionEngine {
         console.warn('Failed to draw overlay drawing layer:', err);
       }
     }
-
-    // Generate Outputs according to 10/10 Photobooth Architecture:
-    // 1. Master: Lossless PNG in RAM
-    const masterDataUrl = canvas.toDataURL('image/png');
-    // 2. Share / Online Web QR: JPEG 0.94 (Lightweight & optimized for mobile view)
-    const shareDataUrl = canvas.toDataURL('image/jpeg', 0.94);
-
-    // 3. Print Master: Direct in-memory Canvas transfer -> CP1000 Physical Raster (JPEG 1.0 / PNG)
-    const isStrip = isStripTemplate(frame);
-    const targetProduct = frame.targetProduct || (isStrip ? 'STRIP_4' : 'SHEET_4');
-    const isLandscape = canvas.width > canvas.height;
-
-    const printMasterResult = await buildPrintMaster({
-      logicalProductImage: canvas,
-      targetProduct,
-      isLandscape,
-    });
-    const printDataUrl = printMasterResult.toDataURL('image/jpeg', 1.0);
-
-    return {
-      master: masterDataUrl,
-      share: shareDataUrl,
-      print: printDataUrl,
-    };
   }
 
   private drawSlotPlaceholder(

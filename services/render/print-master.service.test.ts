@@ -230,19 +230,19 @@ describe('buildPrintMaster & CP1000 Physical Raster', () => {
     expect(CP1000_COLOR_CORRECTION_ENABLED).toBe(true);
   });
 
-  it('N. Applies M2 color correction to print canvas when CP1000 profile is used', async () => {
-    const { canvas, getImageData, putImageData } = createMockCanvas();
+  it('N. Generates exact physical raster dimensions without modifying source canvas', async () => {
+    const { canvas, drawImage } = createMockCanvas();
     const { canvas: sourceCanvas } = createMockCanvas(1800, 2700);
 
-    await buildPrintMaster({
+    const master = await buildPrintMaster({
       logicalProductImage: sourceCanvas,
       targetProduct: 'SHEET_4',
       targetCanvas: canvas,
     });
 
-    // Verify getImageData and putImageData were called on the print canvas to apply M2 RGB correction
-    expect(getImageData).toHaveBeenCalledWith(0, 0, 1800, 2700);
-    expect(putImageData).toHaveBeenCalled();
+    expect(master.width).toBe(1800);
+    expect(master.height).toBe(2700);
+    expect(drawImage).toHaveBeenCalledTimes(1);
   });
 
   it('O. applyCP1000M2Profile correctly transforms pixel values according to M2 formula', () => {

@@ -188,20 +188,6 @@ export async function buildPrintMaster(
     );
   }
 
-  // Calibrated M2 RGB Color Correction for Canon SELPHY CP1000 (PRINT STREAM ONLY)
-  // Operates purely on the independent print canvas copy; zero impact on Master Canvas / QR / Cloud.
-  if (
-    printerProfile.id === 'CANON_SELPHY_CP1000' &&
-    CP1000_COLOR_CORRECTION_ENABLED
-  ) {
-    applyCP1000M2Profile(ctx, targetW, targetH, CP1000_PRINT_PROFILE);
-    if (typeof console !== 'undefined' && console.log) {
-      console.log(
-        `[PRINT_COLOR_CORRECTION_APPLIED]\nsessionId=${sessionId}\nprofile=CP1000_M2\nred=${CP1000_PRINT_PROFILE.red}\ngreen=${CP1000_PRINT_PROFILE.green}\nblue=${CP1000_PRINT_PROFILE.blue}`,
-      );
-    }
-  }
-
   const defaultMime = printerProfile.outputMimeType || 'image/jpeg';
   const defaultQuality = printerProfile.jpegQuality || 0.95;
 

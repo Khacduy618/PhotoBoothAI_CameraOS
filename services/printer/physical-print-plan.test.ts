@@ -3,52 +3,52 @@ import { resolvePhysicalPrintPlan } from './physical-print-plan';
 import { CANON_CP1000_PROFILE } from '@momentai/printer-contract';
 
 describe('resolvePhysicalPrintPlan', () => {
-  it('A. PREMIUM_POSTCARD -> 2362x3496, 1 requested copy -> 1 sheet', () => {
+  it('A. PREMIUM_POSTCARD -> 1800x2700, 1 requested copy -> 1 sheet', () => {
     const plan = resolvePhysicalPrintPlan({
       product: 'PREMIUM_POSTCARD',
       requestedQuantity: 1,
     });
     expect(plan.productType).toBe('PREMIUM_POSTCARD');
-    expect(plan.targetWidthPx).toBe(2362);
-    expect(plan.targetHeightPx).toBe(3496);
+    expect(plan.targetWidthPx).toBe(1800);
+    expect(plan.targetHeightPx).toBe(2700);
     expect(plan.sheets).toBe(1);
     expect(plan.duplicatesPerSheet).toBe(1);
     expect(plan.physicalLayout).toBe('full-sheet');
     expect(plan.orientation).toBe('portrait');
   });
 
-  it('B. SHEET_4 -> 2362x3496, 3 requested copies -> 3 sheets', () => {
+  it('B. SHEET_4 -> 1800x2700, 3 requested copies -> 3 sheets', () => {
     const plan = resolvePhysicalPrintPlan({
       product: 'SHEET_4',
       requestedQuantity: 3,
     });
     expect(plan.productType).toBe('SHEET_4');
-    expect(plan.targetWidthPx).toBe(2362);
-    expect(plan.targetHeightPx).toBe(3496);
+    expect(plan.targetWidthPx).toBe(1800);
+    expect(plan.targetHeightPx).toBe(2700);
     expect(plan.sheets).toBe(3);
     expect(plan.duplicatesPerSheet).toBe(1);
     expect(plan.physicalLayout).toBe('full-sheet');
   });
 
-  it('C. SHEET_6 -> 2362x3496', () => {
+  it('C. SHEET_6 -> 1800x2700', () => {
     const plan = resolvePhysicalPrintPlan({
       product: 'SHEET_6',
       requestedQuantity: 1,
     });
     expect(plan.productType).toBe('SHEET_6');
-    expect(plan.targetWidthPx).toBe(2362);
-    expect(plan.targetHeightPx).toBe(3496);
+    expect(plan.targetWidthPx).toBe(1800);
+    expect(plan.targetHeightPx).toBe(2700);
     expect(plan.sheets).toBe(1);
   });
 
-  it('D. STRIP_2: requested strips=2 -> 2362x3496 image, 2 duplicates per sheet, physical copies=1', () => {
+  it('D. STRIP_2: requested strips=2 -> 1800x2700 image, 2 duplicates per sheet, physical copies=1', () => {
     const plan = resolvePhysicalPrintPlan({
       product: 'STRIP_2',
       requestedQuantity: 2,
     });
     expect(plan.productType).toBe('STRIP_2');
-    expect(plan.targetWidthPx).toBe(2362);
-    expect(plan.targetHeightPx).toBe(3496);
+    expect(plan.targetWidthPx).toBe(1800);
+    expect(plan.targetHeightPx).toBe(2700);
     expect(plan.sheets).toBe(1);
     expect(plan.duplicatesPerSheet).toBe(2);
     expect(plan.physicalLayout).toBe('two-up-vertical');
@@ -97,14 +97,14 @@ describe('resolvePhysicalPrintPlan', () => {
     ).toThrowError(/Invalid strip quantity/);
   });
 
-  it('Handles landscape sheet orientation: 3496x2362', () => {
+  it('Handles landscape sheet orientation: 2700x1800', () => {
     const plan = resolvePhysicalPrintPlan({
       product: 'PREMIUM_POSTCARD',
       requestedQuantity: 2,
       isLandscape: true,
     });
-    expect(plan.targetWidthPx).toBe(3496);
-    expect(plan.targetHeightPx).toBe(2362);
+    expect(plan.targetWidthPx).toBe(2700);
+    expect(plan.targetHeightPx).toBe(1800);
     expect(plan.orientation).toBe('landscape');
     expect(plan.sheets).toBe(2);
   });

@@ -524,6 +524,25 @@ static EdsError EDSCALLBACK handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef
         fprintf(stderr, "[CanonBridge] Object ready: %s (size %llu bytes)\n", dirInfo.szFileName, dirInfo.size);
         sendJsonLine("{\"event\":\"objectCreated\",\"fileName\":\"" + escapeJsonString(dirInfo.szFileName) + "\",\"size\":" + std::to_string(dirInfo.size) + "}");
 
+        // RESTORE LIVEVIEW IMMEDIATELY when camera notifies DirItemCreated!
+        // Exposure completed, mirror returned, JPEG ready in camera RAM buffer.
+        if (g_wasLiveViewBeforeCapture) {
+            g_wasLiveViewBeforeCapture = 0;
+            EdsUInt32 evfOn = 0;
+            if (pEdsGetPropertyData) {
+                pEdsGetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn);
+            }
+            evfOn |= kEdsEvfOutputDevice_PC;
+            EdsError errEvf = pEdsSetPropertyData ? pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn) : EDS_ERR_OK;
+            if (errEvf == EDS_ERR_OK) {
+                g_liveViewActive = 1;
+                fprintf(stderr, "[CanonBridge] Restored LiveView EVF output IMMEDIATELY upon DirItemCreated\n");
+                sendJsonLine("{\"event\":\"liveViewResumed\",\"status\":\"ok\"}");
+            } else {
+                fprintf(stderr, "[CanonBridge] Failed to restore LiveView EVF output: 0x%08X\n", errEvf);
+            }
+        }
+
         // Determine destination path
         std::string destPath;
         if (strlen(g_pendingCaptureTargetPath) > 0) {
@@ -570,16 +589,20 @@ static EdsError EDSCALLBACK handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef
         if (pEdsDownloadComplete) pEdsDownloadComplete(dirItem);
         if (pEdsRelease) pEdsRelease(stream);
 
-        // Read file data to determine JPEG dimensions
-        int width = 0, height = 0;
-        size_t fileSize = 0;
-        std::ifstream file(destPath, std::ios::binary | std::ios::ate);
+        // Read fast header bytes to determine JPEG dimensions without full 8MB heap churn
+        int width = 5472, height = 3648;
+        size_t fileSize = (size_t)dirInfo.size;
+        std::ifstream file(destPath, std::ios::binary);
         if (file.is_open()) {
-            fileSize = (size_t)file.tellg();
-            file.seekg(0, std::ios::beg);
-            std::vector<unsigned char> buffer(fileSize);
-            if (file.read((char*)buffer.data(), fileSize)) {
-                parseJpegMemoryDimensions(buffer.data(), fileSize, &width, &height);
+            std::vector<unsigned char> headerBuf(65536);
+            file.read((char*)headerBuf.data(), headerBuf.size());
+            size_t bytesRead = (size_t)file.gcount();
+            if (bytesRead > 0) {
+                int parsedW = 0, parsedH = 0;
+                if (parseJpegMemoryDimensions(headerBuf.data(), bytesRead, &parsedW, &parsedH) == 0 && parsedW > 0 && parsedH > 0) {
+                    width = parsedW;
+                    height = parsedH;
+                }
             }
             file.close();
         }
@@ -596,24 +619,6 @@ static EdsError EDSCALLBACK handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef
         sendJsonLine("{\"event\":\"downloadCompleted\",\"path\":\"" + escapeJsonString(destPath) + "\",\"size\":" +
                      std::to_string(g_downloadedFileSize) + ",\"width\":" + std::to_string(g_downloadedWidth) +
                      ",\"height\":" + std::to_string(g_downloadedHeight) + "}");
-
-        if (g_wasLiveViewBeforeCapture) {
-            g_wasLiveViewBeforeCapture = 0;
-            Sleep(30);
-            EdsUInt32 evfOn = 0;
-            if (pEdsGetPropertyData) {
-                pEdsGetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn);
-            }
-            evfOn |= kEdsEvfOutputDevice_PC;
-            EdsError errEvf = pEdsSetPropertyData ? pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn) : EDS_ERR_OK;
-            if (errEvf == EDS_ERR_OK) {
-                g_liveViewActive = 1;
-                fprintf(stderr, "[CanonBridge] Restored LiveView EVF output after capture download\n");
-                sendJsonLine("{\"event\":\"liveViewResumed\",\"status\":\"ok\"}");
-            } else {
-                fprintf(stderr, "[CanonBridge] Failed to restore LiveView EVF output: 0x%08X\n", errEvf);
-            }
-        }
     }
     return EDS_ERR_OK;
 }

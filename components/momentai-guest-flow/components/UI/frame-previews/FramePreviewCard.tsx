@@ -21,7 +21,13 @@ function buildCompositionKey(
   photos: readonly (PhotoItem | null)[],
   overlayUrl: string,
 ): string {
-  const photoKeys = photos.map((p, idx) => (p ? `${p.id || idx}:${p.dataUrl?.substring(0, 32)}` : `empty:${idx}`)).join('|');
+  const photoKeys = photos
+    .map((p, idx) =>
+      p
+        ? `${p.id || idx}_${p.width || 0}x${p.height || 0}_len${p.dataUrl?.length || 0}_${p.dataUrl?.slice(-24) || ''}`
+        : `empty:${idx}`,
+    )
+    .join('|');
   const slotKeys = (template.slots || []).map((s) => `${s.id ?? ''}:${s.x}:${s.y}:${s.width}:${s.height}`).join(';');
   return `${template.id}_${template.updatedAt || '0'}_${template.outputWidth || 1800}x${template.outputHeight || 2700}_${overlayUrl}_${slotKeys}_[${photoKeys}]_${CROP_POLICY_VERSION}`;
 }
@@ -113,7 +119,7 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
     })
       .then((result) => {
         if (requestIdRef.current !== currentRequestId || abortController.signal.aborted) return;
-        const dataUrl = result.toDataURL('image/jpeg', 0.90);
+        const dataUrl = result.toDataURL('image/jpeg', 0.95);
         compositionCache.set(cacheKey, dataUrl);
         setComposedDataUrl(dataUrl);
         setIsComposing(false);
@@ -177,6 +183,7 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
           src={composedDataUrl}
           alt={template.name}
           className="w-full h-full object-contain pointer-events-none select-none"
+          style={{ imageRendering: '-webkit-optimize-contrast' }}
         />
       ) : isComposing ? (
         <div className="w-full h-full flex items-center justify-center bg-[#F4F2EE] text-sm text-[#1A1A1A]/50 animate-pulse">

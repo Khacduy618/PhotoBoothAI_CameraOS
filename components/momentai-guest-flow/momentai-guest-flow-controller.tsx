@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AttractScreen } from './components/Guest/AttractScreen';
 import { SelectProductScreen } from './components/Guest/SelectProductScreen';
 import { AutoCaptureScreen } from './components/Guest/AutoCaptureScreen';
+import { ProcessingPhotosScreen } from './components/Guest/ProcessingPhotosScreen';
 import { SelectFrameScreen } from './components/Guest/SelectFrameScreen';
 import { DrawScreen } from './components/Guest/DrawScreen';
 import { PrintQRScreen } from './components/Guest/PrintQRScreen';
@@ -203,6 +204,7 @@ export function MomentAIGuestFlowController() {
       slotAssignments: capturedPhotos,
     };
     setCurrentSession(sessionWithPhotos);
+    setScreenState('G03B_PROCESSING_PHOTOS');
     let updatedBackend = backendSession.captureFormat
       ? backendSession
       : await api('select-format', {
@@ -446,6 +448,7 @@ export function MomentAIGuestFlowController() {
         {screenState === 'G01_START' && <AttractScreen eventConfig={EVENT_CONFIG} onStartSession={() => runNavigation(startNewSession)} readinessStatus={readiness.status} readinessReasons={readiness.reasons} />}
         {screenState === 'G02_SELECT_PRODUCT' && <SelectProductScreen defaultProductId={currentSession?.product?.id} onSelectProduct={(product) => runNavigation(() => handleSelectProduct(product))} onBackToStart={() => runNavigation(() => setScreenState('G01_START'))} />}
         {screenState === 'G03_CAPTURE' && currentSession && <AutoCaptureScreen session={currentSession} cameraSettings={cameraSettings} captureConfig={CAPTURE_CONFIG} onPhotoCaptured={handlePhotoCaptured} onCaptureCompleted={(photos) => { void handleCaptureCompleted(photos); }} />}
+        {screenState === 'G03B_PROCESSING_PHOTOS' && currentSession && <ProcessingPhotosScreen photos={currentSession.photos} />}
         {screenState === 'G04_SELECT_FRAME' && currentSession && <SelectFrameScreen session={currentSession} customTemplates={frameTemplates} onSelectFrame={(frame, photoIdx) => runNavigation(() => handleSelectFrame(frame, photoIdx))} onBackToShots={() => runNavigation(() => setScreenState('G02_SELECT_PRODUCT'))} />}
         {(screenState === 'G05_PREMIUM_CUSTOMIZE' || screenState === 'G05_DRAW') && currentSession?.selectedFrame && <DrawScreen session={currentSession} template={currentSession.selectedFrame} onConfirmDraw={(drawDataUrl) => runNavigation(() => handleConfirmDraw(drawDataUrl))} onBackToTemplate={() => runNavigation(() => setScreenState('G04_SELECT_FRAME'))} />}
         {(screenState === 'G06_RESULT' || screenState === 'G07_PRINTING' || screenState === 'G07_PRINT_QR' || screenState === 'G08_PRINT_SUCCESS') && resultSession && <PrintQRScreen session={resultSession} printerSettings={PRINTER_SETTINGS} onConfirmPrint={() => runNavigation(handleConfirmPrint)} onFinishSession={() => runNavigation(handleFinishSession)} />}

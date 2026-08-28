@@ -146,27 +146,10 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
 
     try {
       for (let shot = currentShot; shot < totalShots; shot += 1) {
-        // If not the very first shot, wait for previous shot's download & LiveView to truly resume before countdown!
+        // If not the very first shot, brief inter-shot breath window without blocking LiveView or background downloads
         if (shot > 0) {
-          setCaptureStep('saving');
-          // 1. Wait for previous shot's full-res JPEG download to finish
-          const prevSavePromise = pendingSavePromises[shot - 1];
-          if (prevSavePromise) {
-            await prevSavePromise.catch(() => null);
-          }
-
-          // 2. Mark timestamp when download finished
-          const downloadDoneTimestamp = Date.now();
-
-          // 3. Wait for the first fresh EVF frame arriving AFTER download finished
-          const waitStart = Date.now();
-          while (Date.now() - waitStart < 3000) {
-            if (lastEvfFrameTimeRef.current > downloadDoneTimestamp) {
-              break;
-            }
-            await wait(30);
-          }
-          await wait(150);
+          setCaptureStep('between');
+          await wait(200);
         }
 
         setCurrentShot(shot);

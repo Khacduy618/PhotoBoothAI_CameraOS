@@ -220,21 +220,6 @@ static EdsError handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef inRef, void
             @"size": @(dirInfo.size)
         });
 
-        // RESTORE LIVEVIEW IMMEDIATELY when camera notifies DirItemCreated!
-        // Exposure completed, mirror returned, JPEG ready in camera RAM buffer.
-        if (g_wasLiveViewBeforeCapture) {
-            g_wasLiveViewBeforeCapture = 0;
-            EdsUInt32 evfOn = kEdsEvfOutputDevice_PC;
-            EdsError errEvf = pEdsSetPropertyData ? pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn) : EDS_ERR_OK;
-            if (errEvf == EDS_ERR_OK) {
-                g_liveViewActive = 1;
-                fprintf(stderr, "[CanonBridge] Restored LiveView EVF output IMMEDIATELY upon DirItemCreated\n");
-                sendJsonEvent(@{ @"event": @"liveViewResumed", @"status": @"ok" });
-            } else {
-                fprintf(stderr, "[CanonBridge] Failed to restore LiveView EVF output: 0x%08X\n", errEvf);
-            }
-        }
-
         // Determine destination path
         NSString *destPath = nil;
         if (strlen(g_pendingCaptureTargetPath) > 0) {
@@ -580,8 +565,17 @@ static void processCommand(NSDictionary *cmd) {
         g_capturePending = 1;
         g_captureCompleted = 0;
 
+        BOOL isLastShot = [cmd[@"isLastShot"] boolValue];
         sendJsonEvent(@{ @"event": @"captureStarted", @"shotIndex": cmd[@"shotIndex"] ?: @1 });
-        g_wasLiveViewBeforeCapture = g_liveViewActive;
+        g_wasLiveViewBeforeCapture = isLastShot ? 0 : g_liveViewActive;
+        if (isLastShot) {
+            EdsUInt32 evfOff = 0;
+            if (pEdsSetPropertyData) {
+                pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOff), &evfOff);
+            }
+            g_liveViewActive = 0;
+            fprintf(stderr, "[CanonBridge] Last shot requested: EVF resumption disabled.\n");
+        }
         // Direct Single-Exposure Shutter Trigger from LiveView (eliminates double mirror slap)
         EdsError err = pEdsSendCommand(g_camera, kEdsCameraCommand_TakePicture, 0);
         NSString *usedCmd = @"TakePicture";

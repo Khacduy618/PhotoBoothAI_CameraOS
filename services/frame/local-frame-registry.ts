@@ -29,14 +29,20 @@ function normalizeFrameDefinition(definition: FrameDefinition): FrameDefinition 
     const targetProduct = definition.targetProduct || (isStrip ? (definition.shotCount === 2 ? "STRIP_2" : "STRIP_4") : (definition.shotCount === 1 ? "PREMIUM_POSTCARD" : definition.shotCount === 6 ? "SHEET_6" : "SHEET_4"));
     const outputPaper = definition.outputPaper || (isStrip ? "5x15" : "10x15");
 
-    const height = definition.outputHeight > 0 ? definition.outputHeight : 2700;
-    const width = definition.outputWidth > 0 && (!isStrip || definition.outputWidth <= height * 0.45)
-        ? definition.outputWidth
-        : (isStrip ? Math.round(height / 3) : 1800);
+    const origH = definition.outputHeight > 0 ? definition.outputHeight : 2700;
+    const origW = definition.outputWidth > 0 ? definition.outputWidth : (isStrip ? 900 : 1800);
+
+    const isLowRes = origH < 1800 || origW < 600;
+    const height = isLowRes ? 2700 : origH;
+    const width = isLowRes
+        ? (isStrip ? 900 : (definition.orientation === "landscape" ? 2700 : 1800))
+        : (origW > 0 && (!isStrip || origW <= height * 0.45)
+            ? origW
+            : (isStrip ? Math.round(height / 3) : 1800));
     const orientation = isStrip ? "portrait" : (definition.orientation || (width > height ? "landscape" : "portrait"));
 
     const normalizedSlots: FrameDefinitionSlot[] = (definition.slots || []).map((slot, index) => {
-        const unitBounds = normalizeSlotToUnit(slot, width, height);
+        const unitBounds = normalizeSlotToUnit(slot, origW, origH);
         return {
             ...slot,
             id: slot.id || `slot_${index + 1}`,

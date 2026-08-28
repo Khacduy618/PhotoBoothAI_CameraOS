@@ -1070,6 +1070,7 @@ function registerSkeletonIpc() {
   ipcMain.handle('cameraos:camera:capture', async (_event, context) => safeGuest(async () => {
     const sessionId = typeof context?.sessionId === 'string' ? context.sessionId : 'unknown_session';
     const shotIndex = Number.isFinite(Number(context?.shotIndex)) ? Number(context.shotIndex) : 1;
+    const isLastShot = Boolean(context?.isLastShot);
     const correlationId = typeof context?.correlationId === 'string' ? context.correlationId : `canon_${Date.now()}_${shotIndex}`;
 
     activeCaptureSessionId = sessionId;
@@ -1086,6 +1087,7 @@ function registerSkeletonIpc() {
         shotIndex,
         targetPath,
         correlationId,
+        isLastShot,
       });
 
       const fileBuffer = fs.readFileSync(result.path);

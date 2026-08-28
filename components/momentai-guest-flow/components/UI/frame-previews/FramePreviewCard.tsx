@@ -66,11 +66,14 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
     session?.product?.id === 'STRIP_4' ||
     session?.product?.id === 'STRIP_2';
   const isStrip = isStripSession || isStripTemplate(template);
-  const height = template.outputHeight || 2700;
-  const width = isStrip && (template.outputWidth || 1800) >= height * 0.45
-    ? Math.round(height / 3)
-    : template.outputWidth || (isStrip ? 900 : 1800);
-  const isLandscape = !isStrip && (template.orientation === 'landscape' || width > height);
+  const isLowResDimensions = !template.outputHeight || template.outputHeight < 1800 || !template.outputWidth || template.outputWidth < 600;
+  const isLandscape = !isStrip && (template.orientation === 'landscape' || (template.outputWidth && template.outputHeight ? template.outputWidth > template.outputHeight : false));
+  const height: number = isLowResDimensions ? 2700 : (template.outputHeight || 2700);
+  const width: number = isLowResDimensions
+    ? (isStrip ? 900 : (isLandscape ? 2700 : 1800))
+    : (isStrip && (template.outputWidth || 1800) >= height * 0.45
+      ? Math.round(height / 3)
+      : template.outputWidth || (isStrip ? 900 : 1800));
   const overlayUrl = template.assets?.overlay || ((template as unknown) as { assetUrl?: string }).assetUrl || '';
 
   const isThumbnailMode = mode === 'thumbnail' || className.includes('max-h-full');
@@ -111,7 +114,7 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
     const allowSampleFallback = !isProduction;
 
     renderFrameComposition({
-      frame: template,
+      frame: { ...template, outputWidth: width, outputHeight: height },
       photos: photosList,
       overlayUrl,
       allowSampleFallback,

@@ -524,25 +524,6 @@ static EdsError EDSCALLBACK handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef
         fprintf(stderr, "[CanonBridge] Object ready: %s (size %llu bytes)\n", dirInfo.szFileName, dirInfo.size);
         sendJsonLine("{\"event\":\"objectCreated\",\"fileName\":\"" + escapeJsonString(dirInfo.szFileName) + "\",\"size\":" + std::to_string(dirInfo.size) + "}");
 
-        // RESTORE LIVEVIEW IMMEDIATELY when camera notifies DirItemCreated!
-        // Exposure completed, mirror returned, JPEG ready in camera RAM buffer.
-        if (g_wasLiveViewBeforeCapture) {
-            g_wasLiveViewBeforeCapture = 0;
-            EdsUInt32 evfOn = 0;
-            if (pEdsGetPropertyData) {
-                pEdsGetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn);
-            }
-            evfOn |= kEdsEvfOutputDevice_PC;
-            EdsError errEvf = pEdsSetPropertyData ? pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn) : EDS_ERR_OK;
-            if (errEvf == EDS_ERR_OK) {
-                g_liveViewActive = 1;
-                fprintf(stderr, "[CanonBridge] Restored LiveView EVF output IMMEDIATELY upon DirItemCreated\n");
-                sendJsonLine("{\"event\":\"liveViewResumed\",\"status\":\"ok\"}");
-            } else {
-                fprintf(stderr, "[CanonBridge] Failed to restore LiveView EVF output: 0x%08X\n", errEvf);
-            }
-        }
-
         // Determine destination path
         std::string destPath;
         if (strlen(g_pendingCaptureTargetPath) > 0) {
@@ -619,6 +600,24 @@ static EdsError EDSCALLBACK handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef
         sendJsonLine("{\"event\":\"downloadCompleted\",\"path\":\"" + escapeJsonString(destPath) + "\",\"size\":" +
                      std::to_string(g_downloadedFileSize) + ",\"width\":" + std::to_string(g_downloadedWidth) +
                      ",\"height\":" + std::to_string(g_downloadedHeight) + "}");
+
+        if (g_wasLiveViewBeforeCapture) {
+            g_wasLiveViewBeforeCapture = 0;
+            Sleep(30);
+            EdsUInt32 evfOn = 0;
+            if (pEdsGetPropertyData) {
+                pEdsGetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn);
+            }
+            evfOn |= kEdsEvfOutputDevice_PC;
+            EdsError errEvf = pEdsSetPropertyData ? pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn) : EDS_ERR_OK;
+            if (errEvf == EDS_ERR_OK) {
+                g_liveViewActive = 1;
+                fprintf(stderr, "[CanonBridge] Restored LiveView EVF output after capture download\n");
+                sendJsonLine("{\"event\":\"liveViewResumed\",\"status\":\"ok\"}");
+            } else {
+                fprintf(stderr, "[CanonBridge] Failed to restore LiveView EVF output: 0x%08X\n", errEvf);
+            }
+        }
     }
     return EDS_ERR_OK;
 }
@@ -874,8 +873,17 @@ static void processCommandJson(const std::string& line) {
         g_capturePending = 1;
         g_captureCompleted = 0;
 
+        bool isLastShot = (line.find("\"isLastShot\":true") != std::string::npos) || (line.find("\"isLastShot\": true") != std::string::npos);
         sendJsonLine("{\"event\":\"captureStarted\",\"shotIndex\":" + std::to_string(shotIndex) + "}");
-        g_wasLiveViewBeforeCapture = g_liveViewActive.load();
+        g_wasLiveViewBeforeCapture = isLastShot ? 0 : g_liveViewActive.load();
+        if (isLastShot) {
+            EdsUInt32 evfOff = 0;
+            if (pEdsSetPropertyData) {
+                pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOff), &evfOff);
+            }
+            g_liveViewActive = 0;
+            fprintf(stderr, "[CanonBridge] Last shot requested: EVF resumption disabled.\n");
+        }
 
         // Direct Single-Exposure Shutter Trigger from LiveView (eliminates double mirror slap)
         EdsError err = pEdsSendCommand ? pEdsSendCommand(g_camera, kEdsCameraCommand_TakePicture, 0) : 0xFFFFFFFF;

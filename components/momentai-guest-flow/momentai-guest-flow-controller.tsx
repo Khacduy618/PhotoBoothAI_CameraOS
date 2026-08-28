@@ -527,13 +527,17 @@ export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefin
   const layoutType = canonicalLayoutType(targetProduct);
 
   // ── Slot normalization (Canonical 0..1 range) ───────────────────────────
-  const outH = definition.outputHeight || 2700;
-  const outW = isStrip && (definition.outputWidth || 1800) >= outH * 0.45
-    ? Math.round(outH / 3)
+  const origH = definition.outputHeight || 2700;
+  const origW = isStrip && (definition.outputWidth || 1800) >= origH * 0.45
+    ? Math.round(origH / 3)
     : (definition.outputWidth || (isStrip ? 900 : 1800));
 
+  const isLowRes = origH < 1800 || origW < 600;
+  const outH = isLowRes ? 2700 : origH;
+  const outW = isLowRes ? (isStrip ? 900 : 1800) : origW;
+
   const rawNormSlots = (definition.slots || []).map((slot, index) => {
-    const unit = normalizeSlotToUnit(slot, outW, outH);
+    const unit = normalizeSlotToUnit(slot, origW, origH);
     return {
       id: slot.id || index + 1,
       x: unit.x,

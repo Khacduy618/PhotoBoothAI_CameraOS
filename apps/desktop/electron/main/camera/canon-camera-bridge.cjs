@@ -440,7 +440,7 @@ class CanonCameraBridgeManager extends EventEmitter {
     }
   }
 
-  async capture({ sessionId, shotIndex, targetPath, timeoutMs = 15000 }) {
+  async capture({ sessionId, shotIndex, targetPath, isLastShot = false, timeoutMs = 15000 }) {
     if (!this.process || (this.state !== 'READY' && this.state !== 'LIVEVIEW')) {
       throw new Error(`Cannot capture: Canon bridge state is ${this.state}`);
     }
@@ -470,9 +470,11 @@ class CanonCameraBridgeManager extends EventEmitter {
 
       this.sendCommand({
         command: 'capture',
+        action: 'capture',
         sessionId,
         shotIndex,
         targetPath,
+        isLastShot: Boolean(isLastShot),
       }).catch((err) => {
         clearTimeout(timer);
         this.currentPendingCapture = null;

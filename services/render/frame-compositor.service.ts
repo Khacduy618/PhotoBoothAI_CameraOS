@@ -255,9 +255,12 @@ export async function renderFrameComposition(
   const defaultW = isStrip ? 900 : isLandscape ? 2700 : 1800;
   const defaultH = isStrip ? 2700 : isLandscape ? 1800 : 2700;
 
-  const rawWidth = frame.outputWidth || defaultW;
-  const outputHeight = frame.outputHeight || defaultH;
-  const outputWidth = isStrip && rawWidth >= outputHeight * 0.45 ? Math.round(outputHeight / 3) : rawWidth;
+  // Enforce canonical high-resolution print master dimensions.
+  // Never allow small preview/mockup dimensions (e.g. 142x419) to downsample customer photos.
+  const isLowResDimensions = !frame.outputHeight || frame.outputHeight < 1800 || !frame.outputWidth || frame.outputWidth < 600;
+  const outputHeight: number = isLowResDimensions ? defaultH : (frame.outputHeight || defaultH);
+  const rawWidth: number = isLowResDimensions ? defaultW : (frame.outputWidth || defaultW);
+  const outputWidth: number = isStrip && rawWidth >= outputHeight * 0.45 ? Math.round(outputHeight / 3) : rawWidth;
 
   const slots = frame.slots || [];
 

@@ -210,7 +210,7 @@ export const SelectProductScreen: React.FC<SelectProductScreenProps> = ({
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="text-4xl sm:text-5xl lg:text-6xl font-serif tracking-tight text-[#1A1A1A] mb-1"
+          className="text-4xl sm:text-5xl lg:text-6xl font-serif tracking-normal text-[#1A1A1A] mb-1"
         >
           CHỌN LOẠI ẢNH BẠN MUỐN IN
         </motion.h2>

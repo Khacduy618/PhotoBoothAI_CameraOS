@@ -51,11 +51,11 @@ interface StampItem {
 }
 
 const FONT_OPTIONS = [
-  { id: 'serif', label: 'Serif Cổ Điển', value: 'italic 36px "Playfair Display", serif' },
-  { id: 'sans', label: 'Modern Hiện Đại', value: 'bold 32px "Plus Jakarta Sans", sans-serif' },
+  { id: 'serif', label: 'Serif Cổ Điển', value: 'italic 36px "Playfair Display", "Times New Roman", serif' },
+  { id: 'sans', label: 'Modern Hiện Đại', value: 'bold 32px "Plus Jakarta Sans", "Inter", Arial, sans-serif' },
   { id: 'mono', label: 'Vintage Mono', value: 'bold 28px "Courier New", monospace' },
-  { id: 'cursive', label: 'Bút Ký Nghệ Thuật', value: 'bold 42px "Caveat", "Dancing Script", cursive' },
-  { id: 'handwriting', label: 'Nét Vẽ Tay', value: 'bold 36px "Pacifico", cursive' },
+  { id: 'cursive', label: 'Bút Ký Nghệ Thuật', value: 'bold 42px "Caveat", "Dancing Script", "Segoe Script", cursive' },
+  { id: 'handwriting', label: 'Nét Vẽ Tay', value: 'bold 36px "Pacifico", "Segoe UI", cursive' },
 ];
 
 const PASTEL_COLORS = [
@@ -558,7 +558,7 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
     const selectedTextObj = textItems.find((item) => item.id === selectedTextId);
     const currentVal = selectedTextObj ? selectedTextObj.text : pendingText;
 
-    const nextVal = applyModernTelex(currentVal, key);
+    const nextVal = applyModernTelex(currentVal, key).normalize('NFC');
 
     if (selectedTextObj) {
       handleUpdateText(selectedTextObj.id, nextVal);
@@ -585,7 +585,7 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
         const cleanFamily = fontSpec
           .replace(/italic|bold|normal/g, '')
           .replace(/\d+px/g, '')
-          .trim() || '"Plus Jakarta Sans", sans-serif';
+          .trim() || '"Plus Jakarta Sans", "Inter", Arial, sans-serif';
 
         const prefix = stylePrefix ? `${stylePrefix} ` : '';
         return `${prefix}${targetPx}px ${cleanFamily}`;
@@ -1217,7 +1217,7 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
                     const cleanFamily = item.fontFamily
                       ?.replace(/italic|bold|normal/g, '')
                       .replace(/\d+px/g, '')
-                      .trim() || '"Plus Jakarta Sans", sans-serif';
+                      .trim() || '"Plus Jakarta Sans", "Inter", Arial, sans-serif';
 
                     return (
                       <div
@@ -1257,7 +1257,7 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
                             fontStyle: isItalic ? 'italic' : 'normal',
                             fontWeight: isBold ? 'bold' : 'normal',
                             fontSize: `${item.fontSize || 32}px`,
-                            lineHeight: 1,
+                            lineHeight: 1.25,
                           }}
                         >
                           {item.text}

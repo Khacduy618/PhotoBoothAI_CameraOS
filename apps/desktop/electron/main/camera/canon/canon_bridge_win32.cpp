@@ -873,17 +873,8 @@ static void processCommandJson(const std::string& line) {
         g_capturePending = 1;
         g_captureCompleted = 0;
 
-        bool isLastShot = (line.find("\"isLastShot\":true") != std::string::npos) || (line.find("\"isLastShot\": true") != std::string::npos);
         sendJsonLine("{\"event\":\"captureStarted\",\"shotIndex\":" + std::to_string(shotIndex) + "}");
-        g_wasLiveViewBeforeCapture = isLastShot ? 0 : g_liveViewActive.load();
-        if (isLastShot) {
-            EdsUInt32 evfOff = 0;
-            if (pEdsSetPropertyData) {
-                pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOff), &evfOff);
-            }
-            g_liveViewActive = 0;
-            fprintf(stderr, "[CanonBridge] Last shot requested: EVF resumption disabled.\n");
-        }
+        g_wasLiveViewBeforeCapture = g_liveViewActive.load();
 
         // Direct Single-Exposure Shutter Trigger from LiveView (eliminates double mirror slap)
         EdsError err = pEdsSendCommand ? pEdsSendCommand(g_camera, kEdsCameraCommand_TakePicture, 0) : 0xFFFFFFFF;

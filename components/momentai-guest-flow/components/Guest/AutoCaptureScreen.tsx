@@ -61,7 +61,15 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
       return () => clearInterval(interval);
     }
   }, []);
+
+  useEffect(() => {
+    if (cameraSettings.mode === 'canon') {
+      getDesktopCameraBridge()?.startLiveView({ sessionId: session.sessionId }).catch(() => null);
+    }
+  }, [cameraSettings.mode, session.sessionId]);
+
   const [canonEvfReady, setCanonEvfReady] = useState<boolean>(false);
+  const [lastShotFrozenUrl, setLastShotFrozenUrl] = useState<string | null>(null);
   const [webcamReady, setWebcamReady] = useState<boolean>(cameraSettings.mode === 'webcam');
   const previewReady = cameraSettings.mode === 'canon' ? canonEvfReady : webcamReady;
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -137,7 +145,7 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
   const [captureErrorMessage, setCaptureErrorMessage] = useState<string | null>(null);
 
   const triggerCaptureSequence = async (_source: 'button' | 'gesture') => {
-    if (isCapturingRef.current || captureStep !== 'ready') return;
+    if (isCapturingRef.current || captureStep !== 'ready' || !previewReady) return;
     isCapturingRef.current = true;
     setCaptureErrorMessage(null);
 
@@ -272,6 +280,9 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
         // Trigger full-res Canon capture & disk persistence in background (non-blocking)
         const currentShotIndex = shot;
         const isLastShot = shot === totalShots - 1;
+        if (isLastShot && instantDataUrl) {
+          setLastShotFrozenUrl(instantDataUrl);
+        }
         const savePromise = (async () => {
           let originalDataUrl: string;
           try {
@@ -306,6 +317,7 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
             newPhoto.dataUrl = originalDataUrl;
             newPhoto.width = 5472;
             newPhoto.height = 3648;
+            setCapturedPool((prev) => prev.map((p, i) => (i === currentShotIndex ? { ...p, dataUrl: originalDataUrl } : p)));
           }
         })();
         pendingSavePromises.push(savePromise);
@@ -377,8 +389,15 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
       <div className="w-full max-w-[98%] mx-auto flex-1 grid grid-cols-1 lg:grid-cols-20 gap-5 items-stretch overflow-hidden my-auto py-2">
         {/* Left Viewport Camera Live (85% width) */}
         <div className="lg:col-span-17 relative w-full h-[76vh] xl:h-[80vh] bg-[#1A1A1A] shadow-2xl overflow-hidden flex items-center justify-center rounded-xl border border-[#1A1A1A]/20">
-          <canvas ref={canvasRef} className={`w-full h-full object-cover ${canonEvfReady ? 'block' : 'hidden'}`} />
-          {!canonEvfReady && ((cameraSettings.mode === 'canon' || cameraService.getSettings().mode === 'canon') ? (
+          <canvas ref={canvasRef} className={`w-full h-full object-cover ${canonEvfReady && !lastShotFrozenUrl ? 'block' : 'hidden'}`} />
+          {lastShotFrozenUrl && (
+            <img
+              src={lastShotFrozenUrl}
+              alt="Final Shot Preview"
+              className="w-full h-full object-cover select-none pointer-events-none"
+            />
+          )}
+          {!canonEvfReady && !lastShotFrozenUrl && ((cameraSettings.mode === 'canon' || cameraService.getSettings().mode === 'canon') ? (
             <div className="w-full h-full relative bg-[#1A1A1A] text-[#FDFCFB] flex flex-col items-center justify-center gap-3 select-none">
               <Camera className="w-16 h-16 text-[#E6C687] animate-pulse" />
               <span className="font-mono text-sm font-bold tracking-wider text-[#E6C687]/90">
@@ -509,7 +528,7 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
       <div className="w-full max-w-[98%] mx-auto pt-2 border-t border-[#1A1A1A]/10 flex items-center justify-center">
         <button
           type="button"
-          disabled={captureStep !== 'ready'}
+          disabled={captureStep !== 'ready' || !previewReady}
           onClick={() => void triggerCaptureSequence('button')}
           className="h-14 min-w-80 rounded-full bg-[#1A1A1A] px-12 text-sm sm:text-base font-bold uppercase tracking-[0.25em] text-[#FDFCFB] shadow-2xl transition hover:bg-[#333333] border border-white/20 disabled:cursor-not-allowed disabled:bg-[#D8D4CC] disabled:text-[#8C8880] cursor-pointer flex items-center justify-center gap-3"
         >

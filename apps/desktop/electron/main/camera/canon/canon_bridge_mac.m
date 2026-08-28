@@ -565,17 +565,8 @@ static void processCommand(NSDictionary *cmd) {
         g_capturePending = 1;
         g_captureCompleted = 0;
 
-        BOOL isLastShot = [cmd[@"isLastShot"] boolValue];
         sendJsonEvent(@{ @"event": @"captureStarted", @"shotIndex": cmd[@"shotIndex"] ?: @1 });
-        g_wasLiveViewBeforeCapture = isLastShot ? 0 : g_liveViewActive;
-        if (isLastShot) {
-            EdsUInt32 evfOff = 0;
-            if (pEdsSetPropertyData) {
-                pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOff), &evfOff);
-            }
-            g_liveViewActive = 0;
-            fprintf(stderr, "[CanonBridge] Last shot requested: EVF resumption disabled.\n");
-        }
+        g_wasLiveViewBeforeCapture = g_liveViewActive;
         // Direct Single-Exposure Shutter Trigger from LiveView (eliminates double mirror slap)
         EdsError err = pEdsSendCommand(g_camera, kEdsCameraCommand_TakePicture, 0);
         NSString *usedCmd = @"TakePicture";

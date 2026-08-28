@@ -27,9 +27,9 @@ function buildCompositionKey(
 }
 
 export const isStripTemplate = (template: FrameTemplate): boolean => {
+  if (template.layout?.type === '1x2' || template.layout?.type === '1x4') return true;
   const tp = (template as { targetProduct?: string }).targetProduct;
   if (tp) return isStripProduct(tp as CanonicalProduct);
-  if (template.layout?.type === '1x2' || template.layout?.type === '1x4') return true;
   if (template.layout?.type === '2x2' || template.layout?.type === '2x3' || template.layout?.type === '1x1') return false;
   if (template.renderMode === 'double-strip' || template.preferredPaper === '2x6-double') return true;
   return false;
@@ -53,12 +53,18 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
   className = '',
   mode = 'default',
 }) => {
-  const isStrip = isStripTemplate(template);
+  const isStripSession =
+    session?.product?.outputType === 'STRIP_5X15' ||
+    session?.product?.group === 'Photo Strip' ||
+    session?.product?.id?.startsWith('STRIP') ||
+    session?.product?.id === 'STRIP_4' ||
+    session?.product?.id === 'STRIP_2';
+  const isStrip = isStripSession || isStripTemplate(template);
   const height = template.outputHeight || 2700;
-  const width = isStrip && (template.outputWidth || 1800) >= height * 0.5
+  const width = isStrip && (template.outputWidth || 1800) >= height * 0.45
     ? Math.round(height / 3)
     : template.outputWidth || (isStrip ? 900 : 1800);
-  const isLandscape = template.orientation === 'landscape' || (!isStrip && width > height);
+  const isLandscape = !isStrip && (template.orientation === 'landscape' || width > height);
   const overlayUrl = template.assets?.overlay || ((template as unknown) as { assetUrl?: string }).assetUrl || '';
 
   const isThumbnailMode = mode === 'thumbnail' || className.includes('max-h-full');

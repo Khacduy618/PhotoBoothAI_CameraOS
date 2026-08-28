@@ -525,7 +525,7 @@ export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefin
 
   // ── Slot normalization (Canonical 0..1 range) ───────────────────────────
   const outH = definition.outputHeight || 2700;
-  const outW = isStrip && (definition.outputWidth || 1800) >= outH * 0.5
+  const outW = isStrip && (definition.outputWidth || 1800) >= outH * 0.45
     ? Math.round(outH / 3)
     : (definition.outputWidth || (isStrip ? 900 : 1800));
 
@@ -542,11 +542,11 @@ export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefin
 
   // ── Orientation ──────────────────────────────────────────────────────────
   const isLandscape =
-    definition.orientation === 'landscape' ||
-    definition.photoViewportOrientation === 'landscape' ||
-    (definition.outputWidth && definition.outputHeight
-      ? definition.outputWidth > definition.outputHeight
-      : false);
+    !isStrip &&
+    (definition.orientation === 'landscape' ||
+      (definition.outputWidth && definition.outputHeight
+        ? definition.outputWidth > definition.outputHeight
+        : false));
 
   // Detect corrupted or dummy full-canvas slots (e.g. {x:0, y:0, w:1, h:1})
   const isFullCanvasSlot = rawNormSlots.length === 1 && rawNormSlots[0].width >= 0.95 && rawNormSlots[0].height >= 0.95 && (rawNormSlots[0].x <= 0.02 && rawNormSlots[0].y <= 0.02);

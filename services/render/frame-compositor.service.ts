@@ -237,8 +237,16 @@ export async function renderFrameComposition(
     throw new DOMException("Composition aborted", "AbortError");
   }
 
-  const isLandscape = frame.orientation === "landscape" || (frame.outputWidth && frame.outputHeight ? frame.outputWidth > frame.outputHeight : false);
-  const isStrip = (frame as { targetProduct?: string }).targetProduct === "STRIP_2" || (frame as { targetProduct?: string }).targetProduct === "STRIP_4" || (frame as { preferredPaper?: string }).preferredPaper === "2x6-double" || (frame.slots && frame.slots.length === 2) || (frame.slots && frame.slots.length === 4 && (!frame.outputWidth || !frame.outputHeight || frame.outputHeight >= frame.outputWidth * 2));
+  const isStrip =
+    (frame as { targetProduct?: string }).targetProduct === "STRIP_2" ||
+    (frame as { targetProduct?: string }).targetProduct === "STRIP_4" ||
+    (frame as { preferredPaper?: string }).preferredPaper === "2x6-double" ||
+    frame.layout?.type === "1x2" ||
+    frame.layout?.type === "1x4" ||
+    (frame.slots && frame.slots.length === 2) ||
+    (frame.slots && frame.slots.length === 4 && (!frame.outputWidth || !frame.outputHeight || frame.outputHeight >= frame.outputWidth * 1.8));
+
+  const isLandscape = !isStrip && (frame.orientation === "landscape" || (frame.outputWidth && frame.outputHeight ? frame.outputWidth > frame.outputHeight : false));
 
   // Authoritative photobooth canvas resolution for Canon CP1000 (10x15 cm @ 450 DPI):
   //  - Portrait (Sheet 4, Sheet 6, Premium Postcard): 1800 x 2700 px (2:3 ratio)
@@ -247,8 +255,9 @@ export async function renderFrameComposition(
   const defaultW = isStrip ? 900 : isLandscape ? 2700 : 1800;
   const defaultH = isStrip ? 2700 : isLandscape ? 1800 : 2700;
 
-  const outputWidth = frame.outputWidth || defaultW;
+  const rawWidth = frame.outputWidth || defaultW;
   const outputHeight = frame.outputHeight || defaultH;
+  const outputWidth = isStrip && rawWidth >= outputHeight * 0.45 ? Math.round(outputHeight / 3) : rawWidth;
 
   const slots = frame.slots || [];
 

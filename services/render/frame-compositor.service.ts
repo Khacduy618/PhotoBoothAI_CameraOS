@@ -256,11 +256,30 @@ export async function renderFrameComposition(
   const defaultH = isStrip ? 2700 : isLandscape ? 1800 : 2700;
 
   // Enforce canonical high-resolution print master dimensions.
-  // Never allow small preview/mockup dimensions (e.g. 142x419) to downsample customer photos.
-  const isLowResDimensions = !frame.outputHeight || frame.outputHeight < 1800 || !frame.outputWidth || frame.outputWidth < 600;
-  const outputHeight: number = isLowResDimensions ? defaultH : (frame.outputHeight || defaultH);
-  const rawWidth: number = isLowResDimensions ? defaultW : (frame.outputWidth || defaultW);
-  const outputWidth: number = isStrip && rawWidth >= outputHeight * 0.45 ? Math.round(outputHeight / 3) : rawWidth;
+  // 1. Never allow small preview/mockup dimensions (e.g. 142x419) to downsample customer photos.
+  // 2. Never allow massive dimensions (>2700 on long edge) to crash GPU hardware / exceed D3D11 limits.
+  const rawH = frame.outputHeight || defaultH;
+  const rawW = frame.outputWidth || defaultW;
+
+  let outputWidth: number;
+  let outputHeight: number;
+
+  if (rawH < 1800 || rawW < 600) {
+    // Low-res imported mockup: enforce canonical
+    outputWidth = defaultW;
+    outputHeight = defaultH;
+  } else if (rawW > 2700 || rawH > 2700) {
+    // Oversized template: scale down proportionally so max edge is exactly 2700
+    const scale = 2700 / Math.max(rawW, rawH);
+    outputWidth = Math.round(rawW * scale);
+    outputHeight = Math.round(rawH * scale);
+    if (isStrip && outputWidth >= outputHeight * 0.45) {
+      outputWidth = Math.round(outputHeight / 3);
+    }
+  } else {
+    outputHeight = rawH;
+    outputWidth = isStrip && rawW >= rawH * 0.45 ? Math.round(rawH / 3) : rawW;
+  }
 
   const slots = frame.slots || [];
 

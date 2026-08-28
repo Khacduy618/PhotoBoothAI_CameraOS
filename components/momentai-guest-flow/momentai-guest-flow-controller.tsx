@@ -533,8 +533,24 @@ export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefin
     : (definition.outputWidth || (isStrip ? 900 : 1800));
 
   const isLowRes = origH < 1800 || origW < 600;
-  const outH = isLowRes ? 2700 : origH;
-  const outW = isLowRes ? (isStrip ? 900 : 1800) : origW;
+  const isOverSized = origH > 2700 || origW > 2700;
+  let outH: number;
+  let outW: number;
+
+  if (isLowRes) {
+    outH = 2700;
+    outW = isStrip ? 900 : (definition.orientation === 'landscape' ? 2700 : 1800);
+  } else if (isOverSized) {
+    const scale = 2700 / Math.max(origW, origH);
+    outW = Math.round(origW * scale);
+    outH = Math.round(origH * scale);
+    if (isStrip && outW >= outH * 0.45) {
+      outW = Math.round(outH / 3);
+    }
+  } else {
+    outH = origH;
+    outW = origW;
+  }
 
   const rawNormSlots = (definition.slots || []).map((slot, index) => {
     const unit = normalizeSlotToUnit(slot, origW, origH);

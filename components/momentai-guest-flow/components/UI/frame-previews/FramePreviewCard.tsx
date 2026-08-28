@@ -66,14 +66,30 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
     session?.product?.id === 'STRIP_4' ||
     session?.product?.id === 'STRIP_2';
   const isStrip = isStripSession || isStripTemplate(template);
-  const isLowResDimensions = !template.outputHeight || template.outputHeight < 1800 || !template.outputWidth || template.outputWidth < 600;
-  const isLandscape = !isStrip && (template.orientation === 'landscape' || (template.outputWidth && template.outputHeight ? template.outputWidth > template.outputHeight : false));
-  const height: number = isLowResDimensions ? 2700 : (template.outputHeight || 2700);
-  const width: number = isLowResDimensions
-    ? (isStrip ? 900 : (isLandscape ? 2700 : 1800))
-    : (isStrip && (template.outputWidth || 1800) >= height * 0.45
-      ? Math.round(height / 3)
-      : template.outputWidth || (isStrip ? 900 : 1800));
+  const rawW = template.outputWidth || (isStrip ? 900 : 1800);
+  const rawH = template.outputHeight || 2700;
+  const isLandscape = !isStrip && (template.orientation === 'landscape' || rawW > rawH);
+
+  const defaultW = isStrip ? 900 : isLandscape ? 2700 : 1800;
+  const defaultH = isStrip ? 2700 : isLandscape ? 1800 : 2700;
+
+  let width: number;
+  let height: number;
+
+  if (rawH < 1800 || rawW < 600) {
+    width = defaultW;
+    height = defaultH;
+  } else if (rawW > 2700 || rawH > 2700) {
+    const scale = 2700 / Math.max(rawW, rawH);
+    width = Math.round(rawW * scale);
+    height = Math.round(rawH * scale);
+    if (isStrip && width >= height * 0.45) {
+      width = Math.round(height / 3);
+    }
+  } else {
+    height = rawH;
+    width = isStrip && rawW >= rawH * 0.45 ? Math.round(rawH / 3) : rawW;
+  }
   const overlayUrl = template.assets?.overlay || ((template as unknown) as { assetUrl?: string }).assetUrl || '';
 
   const isThumbnailMode = mode === 'thumbnail' || className.includes('max-h-full');

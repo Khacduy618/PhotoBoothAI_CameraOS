@@ -12,6 +12,30 @@ export const ProcessingPhotosScreen: React.FC<ProcessingPhotosScreenProps> = ({
   photos = [],
   statusMessage = 'Đang đồng bộ ảnh chất lượng cao vào các mẫu khung hình...',
 }) => {
+  const count = photos.length;
+  const isSixPhotos = count >= 6;
+  const isFourPhotos = count === 4;
+
+  const containerMaxWidth = isFourPhotos
+    ? 'max-w-5xl'
+    : isSixPhotos
+      ? 'max-w-4xl'
+      : count === 1
+        ? 'max-w-md'
+        : 'max-w-2xl';
+
+  const layoutClass = isSixPhotos
+    ? 'grid grid-cols-3 gap-3.5 sm:gap-4 p-4 sm:p-5 w-full bg-[#F4F2EE] border border-[#1A1A1A]/10 rounded-2xl shadow-sm'
+    : isFourPhotos
+      ? 'grid grid-cols-4 gap-3 sm:gap-4 p-4 sm:p-5 w-full bg-[#F4F2EE] border border-[#1A1A1A]/10 rounded-2xl shadow-sm'
+      : 'flex flex-row items-center justify-center gap-4 sm:gap-6 p-4 sm:p-5 w-full bg-[#F4F2EE] border border-[#1A1A1A]/10 rounded-2xl shadow-sm';
+
+  const cardWidthClass = isSixPhotos || isFourPhotos
+    ? 'w-full'
+    : count === 1
+      ? 'w-64 sm:w-72'
+      : 'w-48 sm:w-56';
+
   return (
     <div className="w-full h-screen flex flex-col justify-between items-center px-4 py-8 sm:px-8 sm:py-12 bg-[#FDFCFB] text-[#1A1A1A] select-none overflow-hidden relative">
       {/* Subtle Background Glow */}
@@ -43,10 +67,10 @@ export const ProcessingPhotosScreen: React.FC<ProcessingPhotosScreenProps> = ({
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5, delay: 0.1 }}
-        className="w-full max-w-3xl mx-auto flex flex-col items-center justify-center gap-6 my-auto"
+        className={`w-full ${containerMaxWidth} mx-auto flex flex-col items-center justify-center gap-6 my-auto`}
       >
         {/* Photo Grid / Strip */}
-        <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 p-4 bg-[#F4F2EE] border border-[#1A1A1A]/10 rounded-2xl shadow-sm">
+        <div className={layoutClass}>
           {photos.length > 0 ? (
             photos.map((photo, index) => (
               <motion.div
@@ -54,7 +78,7 @@ export const ProcessingPhotosScreen: React.FC<ProcessingPhotosScreenProps> = ({
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.35, delay: 0.15 + index * 0.08 }}
-                className="relative aspect-[3/2] w-36 sm:w-44 bg-white rounded-lg overflow-hidden border border-[#1A1A1A]/15 shadow-md flex-shrink-0"
+                className={`relative aspect-[3/2] ${cardWidthClass} bg-white rounded-lg overflow-hidden border border-[#1A1A1A]/15 shadow-md flex-shrink-0`}
               >
                 {photo.dataUrl ? (
                   <img

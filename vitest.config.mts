@@ -11,6 +11,7 @@ export default defineConfig({
         passWithNoTests: true,
         testTimeout: 15000,
         hookTimeout: 15000,
+        pool: "forks",
         exclude: [
             "**/node_modules/**",
             "**/dist/**",

@@ -32,10 +32,10 @@ export function WindowMiniAdminShell() {
     if (platformBridge?.getInfo) {
       platformBridge.getInfo()
         .then((info) => setIsDev(Boolean(info?.isDev)))
-        .catch(() => setIsDev(process.env.NODE_ENV !== 'production'));
+        .catch(() => setIsDev(typeof process !== 'undefined' ? process.env?.NODE_ENV !== 'production' : true));
     } else {
       // Web / Next.js fallback: use NODE_ENV
-      setIsDev(process.env.NODE_ENV !== 'production');
+      setIsDev(typeof process !== 'undefined' ? process.env?.NODE_ENV !== 'production' : true);
     }
   }, []);
 

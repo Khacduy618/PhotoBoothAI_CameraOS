@@ -21,6 +21,7 @@
     "start": "next start",
     "lint": "eslint app apps components hooks packages services types utils --quiet",
     "test": "vitest run",
+    "rebuild:sqlite": "scripts\\rebuild-sqlite-win64.bat",
     "typecheck": "tsc --noEmit",
     "ci:repo": "node scripts/ci/check-repo-clean.mjs",
     "ci:architecture": "node scripts/ci/check-architecture.mjs",

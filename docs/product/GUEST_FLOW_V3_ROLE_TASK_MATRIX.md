@@ -4,11 +4,16 @@ Status: Active role ownership matrix for Guest Flow V3, updated for Production B
 
 ## PM decisions applied
 
-- Production target: Windows 10 x64 booth PC / Mini PC form factor.
-- V1 Share/QR: `LOCAL_NETWORK_URL` preferred with explicit unavailable/disabled fallback; cloud provider deferred unless approved.
-- V1 Print: `GUEST_CONFIRM` durable print queue.
+- Production target: Windows 10 x64 booth PC / Mini PC form factor packaged as a Windows `.exe` Electron kiosk app.
+- Production storage root: `%LOCALAPPDATA%` under an app-owned MomentAI Photobooth directory.
+- V1 kiosk/startup: fullscreen guest kiosk, hidden/passcode-gated Admin access and Windows startup/auto-launch support.
+- V1 Share/QR: `CLOUD_LANDING_PAGE` through the approved Vercel + Neon + R2 stack, with `LOCAL_NETWORK_URL` fallback/dev/offline mode when configured and reachable.
+- QR token TTL: 10 minutes from share/landing creation; cleanup eligibility defaults to 30 minutes with print/share recovery guards.
+- V1 Print: `GUEST_CONFIRM` durable FIFO print queue; printer slowness queues jobs, print failure stops queue with no auto retry and requires Admin manual reprint/resume.
+- V1 hardware: Canon EOS 6D and Canon SELPHY CP1000 are the only certified production targets; adapters remain extensible for later PM-approved hardware.
 - V1 Retake: deferred from Guest UI; later admin-configurable policy only.
 - Canon Command Shadow Mode: after fake/device capture loop and before physical Canon spike; never hardware PASS evidence.
+- Touch/kiosk UX: scrollable guest/operator views must support natural touch drag scrolling.
 
 ## Role rules
 
@@ -17,7 +22,7 @@ Status: Active role ownership matrix for Guest Flow V3, updated for Production B
 | PM | scope, priority, deletion approval, product configuration decisions, final acceptance |
 | BA | guest flow clarity, copy, business rules, acceptance criteria |
 | Architect | boundaries, state machine, Electron main/preload/renderer split, service/adapters, hardware lifecycle, readiness gates |
-| Backend | SessionController, Electron main services, system health, storage, capture, composition, local share/QR, print queue |
+| Backend | SessionController, Electron main services, system health, storage, capture, composition, cloud/local share/QR, print queue |
 | Frontend | guest screens, Electron renderer UI, hidden admin/operator UI, kiosk UI, preview, customization, result UI |
 | QA | risk-based software/browser/hardware/network tests |
 | Reviewer | correctness, media safety, preview performance, security, maintainability |
@@ -35,7 +40,7 @@ Status: Active role ownership matrix for Guest Flow V3, updated for Production B
 | Event configuration | Backend + BA + PM | Owns enabled formats, timeout, print/share policy and V1 retake disabled policy |
 | Camera adapter | Backend + Hardware QA | Fake/device first, Canon EDSDK only with real hardware evidence |
 | Canon Command Shadow Mode | Backend + Architect | Development diagnostics only; never Canon PASS evidence |
-| Local Share/QR | Backend + Frontend + QA | Tokenized local endpoint plus result/fallback UI; phone scan PASS requires named phone and reachable network |
+| Cloud/Local Share/QR | Backend + Frontend + QA | Tokenized Vercel/Neon/R2 cloud landing path plus local fallback/result UI; cloud QR PASS requires named phone and deployed provider retrieval evidence; local QR PASS requires named phone and reachable network |
 | Printer adapter | Backend + Hardware QA | Fake printer first, Windows Print/CP1000 only with real hardware evidence |
 | Evidence gates | QA + Verifier | Hardware/network PASS requires named target device/environment evidence |
 
@@ -57,11 +62,12 @@ Status: Active role ownership matrix for Guest Flow V3, updated for Production B
 | V3-009 Assignment engine | Backend | QA, Reviewer | shot-to-slot assignment | deterministic mapping | no reorder scope creep | unit evidence |
 | V3-010 Conditional customization | Frontend | Backend, BA, QA, Reviewer | CustomizeScreen, text/draw data, separate model | text limits, drawing strokes, skip behavior, no retake UI | performance/accessibility, derivative-only customization | component/manual evidence |
 | V3-011 Composition engine | Backend | Frontend, Architect, QA, Reviewer | master/share/print derivatives, atomic output persistence | output separation, failure fallback, render order | media safety, not UI screenshot for print master | unit/integration/manual evidence |
-| V3-012 Local Share/QR delivery | Backend + Frontend | QA, Reviewer, Verifier | ShareService LOCAL_NETWORK_URL boundary, tokenized QR route, fallback UI | QR payload, local network retrieval, unavailable fallback, no local path exposure | privacy, no arbitrary file serving, no localhost-only QR | local QR evidence; phone scan PASS only with named phone + reachable network |
-| V3-013 Guest-confirmed print queue | Backend | Frontend, Hardware QA, Reviewer, Verifier | PrintPolicy GUEST_CONFIRM, durable PrintJob, duplicate prevention, print status UI | duplicate print taps, printer unavailable, job idempotency | print cannot block QR or delete media; no false Printed success | fake PARTIAL; CP1000 PASS only with hardware |
+| V3-012 Cloud/local Share/QR delivery | Backend + Frontend | QA, Reviewer, Verifier | ShareService CLOUD_LANDING_PAGE boundary, Vercel/Neon/R2 tokenized QR route, local fallback, 10-minute TTL, 30-minute cleanup guard | QR payload, cloud retrieval, token expiry, unavailable fallback, no path/secret exposure | privacy, token expiry, R2/key secrecy, no arbitrary file serving for local fallback | cloud QR evidence; PASS only with named phone + deployed Vercel/Neon/R2 retrieval; local QR PASS only with named phone + reachable network |
+| V3-013 Guest-confirmed print queue | Backend | Frontend, Hardware QA, Reviewer, Verifier | PrintPolicy GUEST_CONFIRM, durable FIFO PrintJob, duplicate prevention, stop-on-fail/no-auto-retry, print status UI | duplicate print taps, printer busy backlog, printer unavailable/failure, job idempotency, cleanup protection | print cannot block QR or delete media; queue failure requires Admin action; no false Printed success | fake PARTIAL; CP1000 PASS only with hardware |
 | V3-014 Result, timeout and reset | Frontend + Backend | QA, Reviewer | ResultScreen, QR/fallback, print action/status, Done, timeout, reset | timeout/reset flow, completing persists jobs | camera not disconnected, durable jobs/media preserved | browser/manual evidence |
-| Milestone 8A Admin operations/maintenance minimum | Frontend + Backend | Architect, QA, Hardware QA, Reviewer | readiness dashboard, diagnostics, maintenance lock, failed job visibility | blocked/degraded reasons, device lock behavior | operator clarity, diagnostics cannot corrupt active guest operations | admin/manual evidence |
-| Milestone 8H Windows CP1000 physical printer spike | Backend + Hardware QA | Frontend, Reviewer, Verifier | CP1000 Windows Print System submission evidence | real printer status, offline/failure, duplicate prevention | no overclaim of physical completion | printer PASS/PARTIAL/FAIL evidence |
+| Milestone 8A Admin operations/maintenance minimum | Frontend + Backend | Architect, QA, Hardware QA, Reviewer | readiness dashboard, diagnostics, maintenance lock, failed job visibility, print reprint/resume, cloud/share status | blocked/degraded reasons, device lock behavior, print queue recovery | operator clarity, diagnostics cannot corrupt active guest operations | admin/manual evidence |
+| Milestone 8B Windows `.exe` kiosk startup/runtime | Delivery lead + Backend + Frontend | Architect, QA, Hardware QA, Reviewer, Verifier | Windows `.exe` package, icon/app identity, fullscreen kiosk, startup, `%LOCALAPPDATA%`, packaged IPC | packaged smoke, no dev server, startup, kiosk, storage path, touch scroll | release safety, no dev/runtime path leakage, admin escape, no auto-update overclaim | Windows/package/kiosk PASS/PARTIAL/FAIL evidence |
+| Milestone 8H Windows CP1000 physical printer spike | Backend + Hardware QA | Frontend, Reviewer, Verifier | CP1000 Windows Print System submission evidence | real printer status, offline/failure, duplicate prevention, queue stop/reprint/resume | no overclaim of physical completion | printer PASS/PARTIAL/FAIL evidence |
 | V3-015 Evidence/release gates | Verifier | QA, Reviewer, PM | final evidence package | complete checklist | evidence honesty | PASS/PARTIAL/FAIL mapping |
 
 ## Frontend design requirement

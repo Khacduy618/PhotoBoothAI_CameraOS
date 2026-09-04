@@ -11,6 +11,10 @@ export function registerWindowMiniAdminIpcHandlers(ipcMain: IpcMainLike) {
   ipcMain.handle(WINDOWMINI_IPC_CHANNELS.adminVerify, (_event, token) => windowMiniAdminMainService.auth.verify(String(token || '')));
   ipcMain.handle(WINDOWMINI_IPC_CHANNELS.adminEventsList, () => windowMiniAdminMainService.events.list());
   ipcMain.handle(WINDOWMINI_IPC_CHANNELS.adminEventsCreate, (_event, name) => windowMiniAdminMainService.events.create(String(name || '')));
+  ipcMain.handle(WINDOWMINI_IPC_CHANNELS.adminEventsGetActive, () => windowMiniAdminMainService.events.getActive?.());
+  ipcMain.handle(WINDOWMINI_IPC_CHANNELS.adminEventsSetActive, (_event, eventId) => windowMiniAdminMainService.events.setActive?.(String(eventId || '')));
+  ipcMain.handle(WINDOWMINI_IPC_CHANNELS.adminEventsArchive, (_event, eventId) => windowMiniAdminMainService.events.archive?.(String(eventId || '')));
+  ipcMain.handle(WINDOWMINI_IPC_CHANNELS.adminEventsRename, (_event, eventId, name) => windowMiniAdminMainService.events.rename?.(String(eventId || ''), String(name || '')));
   ipcMain.handle(WINDOWMINI_IPC_CHANNELS.adminTemplatesList, (_event, eventId) => windowMiniAdminMainService.templates.list(typeof eventId === 'string' ? eventId : undefined));
   ipcMain.handle(WINDOWMINI_IPC_CHANNELS.adminTemplatesPublish, (_event, templateId, eventId) => windowMiniAdminMainService.templates.publish(String(templateId || ''), typeof eventId === 'string' ? eventId : undefined));
   ipcMain.handle(WINDOWMINI_IPC_CHANNELS.adminTemplatesArchive, (_event, templateId, eventId) => windowMiniAdminMainService.templates.archive(String(templateId || ''), typeof eventId === 'string' ? eventId : undefined));
@@ -30,6 +34,10 @@ export function registerWindowMiniAdminIpcHandlers(ipcMain: IpcMainLike) {
       WINDOWMINI_IPC_CHANNELS.adminVerify,
       WINDOWMINI_IPC_CHANNELS.adminEventsList,
       WINDOWMINI_IPC_CHANNELS.adminEventsCreate,
+      WINDOWMINI_IPC_CHANNELS.adminEventsGetActive,
+      WINDOWMINI_IPC_CHANNELS.adminEventsSetActive,
+      WINDOWMINI_IPC_CHANNELS.adminEventsArchive,
+      WINDOWMINI_IPC_CHANNELS.adminEventsRename,
       WINDOWMINI_IPC_CHANNELS.adminTemplatesList,
       WINDOWMINI_IPC_CHANNELS.adminTemplatesPublish,
       WINDOWMINI_IPC_CHANNELS.adminTemplatesArchive,

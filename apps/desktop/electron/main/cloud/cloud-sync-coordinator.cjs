@@ -21,6 +21,7 @@ class CloudSyncCoordinator {
   constructor(options = {}) {
     this.db = null;
     this.sessionMediaPaths = null;
+    this.mediaManager = null;
     this.writeSystemLog = options.writeSystemLog || ((level, event, msg, details) => {
       console.log(`[${level.toUpperCase()}] [${event}] ${msg}`, details || '');
     });
@@ -74,9 +75,10 @@ class CloudSyncCoordinator {
     this.landingBaseUrl = rawBaseUrl.replace(/\/+$/, '');
   }
 
-  init(db, sessionMediaPaths) {
+  init(db, sessionMediaPaths, mediaManager = null) {
     this.db = db;
     this.sessionMediaPaths = sessionMediaPaths;
+    this.mediaManager = mediaManager;
 
     if (this.db) {
       try {
@@ -102,14 +104,8 @@ class CloudSyncCoordinator {
             updated_at TEXT NOT NULL
           );
         `);
-
-        // Load existing token mappings into memory
-        const rows = this.db.prepare('SELECT session_id, public_token FROM public_session_tokens').all();
-        for (const row of rows) {
-          this.tokenMap.set(row.session_id, row.public_token);
-        }
-      } catch (err) {
-        console.warn('[CloudSyncCoordinator] DB init error:', err.message);
+      } catch (e) {
+        console.error('[CloudSyncCoordinator] Table migration failed:', e.message);
       }
     }
   }
@@ -119,17 +115,17 @@ class CloudSyncCoordinator {
    * 128 bits = 16 bytes = 32 hexadecimal characters.
    */
   getPublicToken(sessionId) {
-    if (!sessionId) return '';
+    if (!sessionId) return null;
     if (this.tokenMap.has(sessionId)) {
       return this.tokenMap.get(sessionId);
     }
 
     if (this.db) {
       try {
-        const existing = this.db.prepare('SELECT public_token FROM public_session_tokens WHERE session_id = ?').get(sessionId);
-        if (existing?.public_token) {
-          this.tokenMap.set(sessionId, existing.public_token);
-          return existing.public_token;
+        const row = this.db.prepare('SELECT public_token FROM public_session_tokens WHERE session_id = ?').get(sessionId);
+        if (row && row.public_token) {
+          this.tokenMap.set(sessionId, row.public_token);
+          return row.public_token;
         }
       } catch {}
     }
@@ -140,14 +136,25 @@ class CloudSyncCoordinator {
 
     if (this.db) {
       try {
-        const now = new Date().toISOString();
-        this.db.prepare('INSERT OR IGNORE INTO public_session_tokens (session_id, public_token, created_at) VALUES (?, ?, ?)').run(sessionId, token, now);
-      } catch (err) {
-        console.warn('[CloudSyncCoordinator] Token insert error:', err.message);
+        this.db.prepare(`
+          INSERT OR REPLACE INTO public_session_tokens (session_id, public_token, created_at)
+          VALUES (?, ?, ?)
+        `).run(sessionId, token, new Date().toISOString());
+      } catch (e) {
+        console.error('[CloudSyncCoordinator] Error saving public token:', e.message);
       }
     }
 
     return token;
+  }
+
+  /**
+   * Authoritative QR / Landing URL Builder with safe slash normalization.
+   */
+  buildLandingUrl(publicToken) {
+    if (!publicToken) return '';
+    const cleanBase = String(this.landingBaseUrl || '').replace(/\/+$/, '');
+    return `${cleanBase}/s/${publicToken}`;
   }
 
   /**
@@ -159,69 +166,86 @@ class CloudSyncCoordinator {
   }
 
   /**
-   * Authoritative QR / Landing URL Builder with safe slash normalization.
-   */
-  buildLandingUrl(publicToken) {
-    if (!publicToken) return '';
-    return `${this.landingBaseUrl}/s/${publicToken}`;
-  }
-
-  /**
    * Initializes or returns the cloud session metadata.
    * Idempotent: multiple calls return the identical cloud session and token.
    */
-  initSession(sessionId, metadata = {}) {
+  initSession(sessionId, meta = {}) {
     const publicToken = this.getPublicToken(sessionId);
-    const landingUrl = this.getLandingUrl(sessionId);
+    const landingUrl = this.buildLandingUrl(publicToken);
     const now = new Date().toISOString();
 
     let state = this.sessions.get(sessionId);
     if (!state) {
       state = {
         sessionId,
+        localSessionId: sessionId,
         publicToken,
         landingUrl,
         status: 'CREATED',
         phaseAStatus: 'IDLE',
         phaseBStatus: 'IDLE',
-        productType: metadata.productType || metadata.product?.id || 'classic_4_shot',
-        requiredShots: metadata.requiredShots || metadata.captureCount || 4,
+        photosUploaded: 0,
+        clipsUploaded: 0,
+        finalImageUploaded: 0,
+        finalVideoUploaded: 0,
+        requiredShots: meta.requiredShots || meta.captureCount || 4,
+        productType: meta.productType || meta.product?.id || 'classic_4_shot',
+        boothName: meta.boothName || 'TIỆM ẢNH DI SẢN • MOMENTAI',
         photos: [],
         clips: [],
         finalImage: null,
         finalVideo: null,
+        lastError: null,
         createdAt: now,
         updatedAt: now,
       };
+
       this.sessions.set(sessionId, state);
-
-      if (this.db) {
-        try {
-          this.db.prepare(`
-            INSERT INTO cloud_sync_sessions (
-              session_id, public_token, status, phase_a_status, phase_b_status, payload_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at
-          `).run(sessionId, publicToken, 'CREATED', 'IDLE', 'IDLE', JSON.stringify(state), now, now);
-        } catch {}
-      }
-
-      this.logStructured('info', 'CLOUD_SESSION_CREATED', `Cloud session created for ${sessionId}`, {
-        sessionId,
-        publicToken,
-        landingUrl,
-      });
-
-      // Synchronize initial document to Firestore in background
+      this.persistLocalState(state);
       void this.syncFirestoreDoc(state);
     }
 
     return {
       sessionId,
+      localSessionId: sessionId,
       publicToken,
       landingUrl,
       status: state.status,
+      ...state,
     };
+  }
+
+  persistLocalState(state) {
+    if (!this.db || !state) return;
+    try {
+      this.db.prepare(`
+        INSERT OR REPLACE INTO cloud_sync_sessions (
+          session_id, public_token, status, phase_a_status, phase_b_status,
+          photos_uploaded, clips_uploaded, final_image_uploaded, final_video_uploaded,
+          last_error, payload_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        state.localSessionId,
+        state.publicToken,
+        state.status || 'IDLE',
+        state.phaseAStatus || 'IDLE',
+        state.phaseBStatus || 'IDLE',
+        state.photosUploaded || 0,
+        state.clipsUploaded || 0,
+        state.finalImageUploaded || 0,
+        state.finalVideoUploaded || 0,
+        state.lastError || null,
+        JSON.stringify(state),
+        state.createdAt || new Date().toISOString(),
+        state.updatedAt || new Date().toISOString()
+      );
+    } catch (e) {
+      console.error('[CloudSyncCoordinator] Error persisting state to SQLite:', e.message);
+    }
+  }
+
+  logStructured(level, event, msg, details) {
+    this.writeSystemLog(level, `CLOUD:${event}`, msg, details);
   }
 
   /**
@@ -229,21 +253,22 @@ class CloudSyncCoordinator {
    * Called when guest completes physical shooting and enters frame selection.
    * NON-BLOCKING: returns immediately while upload proceeds asynchronously in background.
    */
-  triggerPhaseAUpload(sessionId) {
-    if (!sessionId) return Promise.resolve(null);
+  async triggerPhaseAUpload(sessionId) {
+    if (!sessionId) return { ok: false, error: 'sessionId is required' };
+
     if (this.inFlightPhaseA.has(sessionId)) {
       return this.inFlightPhaseA.get(sessionId);
     }
 
-    const task = this.executePhaseAUpload(sessionId).finally(() => {
+    const promise = this._executePhaseAUpload(sessionId).finally(() => {
       this.inFlightPhaseA.delete(sessionId);
     });
 
-    this.inFlightPhaseA.set(sessionId, task);
-    return task;
+    this.inFlightPhaseA.set(sessionId, promise);
+    return promise;
   }
 
-  async executePhaseAUpload(sessionId) {
+  async _executePhaseAUpload(sessionId) {
     const state = this.sessions.get(sessionId) || this.initSession(sessionId);
     const publicToken = state.publicToken;
 
@@ -270,13 +295,12 @@ class CloudSyncCoordinator {
 
     try {
       const photosDir = this.sessionMediaPaths ? this.sessionMediaPaths.photosDir(sessionId) : null;
-      const clipsDir = this.sessionMediaPaths ? this.sessionMediaPaths.clipsDir(sessionId) : null;
 
       const requiredShots = state.requiredShots || 4;
       const photosList = [];
       const clipsList = [];
 
-      // 1. Upload Photos
+      // 1. Upload Raw Photos (RAW_PHOTO)
       for (let i = 1; i <= requiredShots; i++) {
         const photoFilename = `shot_${String(i).padStart(2, '0')}.jpg`;
         const localPhotoPath = photosDir ? path.join(photosDir, photoFilename) : null;
@@ -284,7 +308,7 @@ class CloudSyncCoordinator {
         if (localPhotoPath && fs.existsSync(localPhotoPath)) {
           const remotePath = `sessions/${publicToken}/photos/${photoFilename}`;
           try {
-            const uploadRes = await this.uploadFileWithRetry(localPhotoPath, remotePath, 'image/jpeg', 3, publicToken, 'ORIGINAL_PHOTO');
+            const uploadRes = await this.uploadFileWithRetry(localPhotoPath, remotePath, 'image/jpeg', 3, publicToken, 'RAW_PHOTO');
             photosUploaded++;
             photosList.push({
               shotIndex: i,
@@ -299,31 +323,40 @@ class CloudSyncCoordinator {
         }
       }
 
-      // 2. Upload Clips
-      for (let i = 1; i <= requiredShots; i++) {
-        const clipFilename = `shot_${String(i).padStart(2, '0')}.mp4`;
-        const localClipPath = clipsDir ? path.join(clipsDir, clipFilename) : null;
-
-        if (localClipPath && fs.existsSync(localClipPath)) {
-          const remotePath = `sessions/${publicToken}/clips/${clipFilename}`;
+      // 2. Compose and Upload Single Session Timelapse Video (RAW_CLIP)
+      // Note: We DO NOT upload raw individual clips separately.
+      let timelapsePath = this.sessionMediaPaths ? this.sessionMediaPaths.timelapseVideo(sessionId) : null;
+      if (!timelapsePath || !fs.existsSync(timelapsePath)) {
+        if (this.mediaManager?.composeSessionTimelapse) {
           try {
-            const uploadRes = await this.uploadFileWithRetry(localClipPath, remotePath, 'video/mp4', 3, publicToken, 'ORIGINAL_CLIP');
-            clipsUploaded++;
-            clipsList.push({
-              shotIndex: i,
-              filename: clipFilename,
-              remotePath,
-              url: uploadRes.downloadUrl,
-              size: uploadRes.size,
-            });
-          } catch (err) {
-            errors.push(`Clip ${i}: ${err.message}`);
+            await this.mediaManager.composeSessionTimelapse(sessionId, requiredShots);
+          } catch (e) {
+            console.warn('[CloudSyncCoordinator] Auto-timelapse composition error:', e.message);
           }
+        }
+      }
+
+      if (timelapsePath && fs.existsSync(timelapsePath) && fs.statSync(timelapsePath).size > 0) {
+        const timelapseFilename = 'timelapse-video.mp4';
+        const remotePath = `sessions/${publicToken}/clips/${timelapseFilename}`;
+        try {
+          const uploadRes = await this.uploadFileWithRetry(timelapsePath, remotePath, 'video/mp4', 3, publicToken, 'RAW_CLIP');
+          clipsUploaded++;
+          clipsList.push({
+            filename: timelapseFilename,
+            remotePath,
+            url: uploadRes.downloadUrl,
+            size: uploadRes.size,
+          });
+        } catch (err) {
+          errors.push(`Timelapse video: ${err.message}`);
         }
       }
 
       state.photos = photosList;
       state.clips = clipsList;
+      state.photosUploaded = photosUploaded;
+      state.clipsUploaded = clipsUploaded;
       state.phaseAStatus = errors.length === 0 ? 'COMPLETED' : 'PARTIAL';
       state.status = errors.length === 0 ? 'ORIGINALS_READY' : 'PARTIAL';
       state.updatedAt = new Date().toISOString();

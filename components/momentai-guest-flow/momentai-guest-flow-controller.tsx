@@ -134,9 +134,7 @@ export function MomentAIGuestFlowController() {
     if (navigationLockedRef.current) return;
     navigationLockedRef.current = true;
     void Promise.resolve(action()).finally(() => {
-      window.setTimeout(() => {
-        navigationLockedRef.current = false;
-      }, 900);
+      navigationLockedRef.current = false;
     });
   };
 
@@ -419,10 +417,11 @@ export function MomentAIGuestFlowController() {
     try {
       await api('request-print', { sessionId: backendSession.sessionId, copies: printCopies });
       setCurrentSession((prev) => prev ? { ...prev, printStatus: 'queued' } : prev);
-      setScreenState('G08_DONE');
     } catch {
       setCurrentSession((prev) => prev ? { ...prev, printStatus: 'failed' } : prev);
     }
+    // Always navigate to done screen — guest is directed to pick up print at the tray
+    setScreenState('G08_DONE');
   };
 
   const handleFinishSession = async () => {

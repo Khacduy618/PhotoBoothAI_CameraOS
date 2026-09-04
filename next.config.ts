@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(__dirname),
   },
+  webpack: (config) => {
+    config.output.hashFunction = "sha256";
+    return config;
+  },
 };
 
 export default nextConfig;

@@ -43,6 +43,7 @@ class PrintQueueManager {
   constructor(options = {}) {
     this.queue = [];
     this.isProcessing = false;
+    this.isPaused = false;
     this.ensureStorageDb = options.ensureStorageDb || (() => null);
     this.storageRoot = options.storageRoot || process.cwd();
     this.sessionMediaPaths = options.sessionMediaPaths || null;
@@ -79,7 +80,28 @@ class PrintQueueManager {
           height_px INTEGER,
           content_hash TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS printer_consumables (
+          id TEXT PRIMARY KEY,
+          total_capacity INTEGER NOT NULL DEFAULT 18,
+          sheets_printed INTEGER NOT NULL DEFAULT 0,
+          sheets_remaining INTEGER NOT NULL DEFAULT 18,
+          is_paused INTEGER NOT NULL DEFAULT 0,
+          last_reset_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
       `);
+
+      const consumable = db.prepare("SELECT * FROM printer_consumables WHERE id = 'default'").get();
+      if (!consumable) {
+        const now = nowIso();
+        db.prepare(`
+          INSERT INTO printer_consumables (id, total_capacity, sheets_printed, sheets_remaining, is_paused, last_reset_at, updated_at)
+          VALUES ('default', 18, 0, 18, 0, ?, ?)
+        `).run(now, now);
+      } else {
+        this.isPaused = Boolean(consumable.is_paused);
+      }
 
       // 2. Non-destructive migration for existing databases
       const existingColumns = db.prepare('PRAGMA table_info(print_jobs)').all().map((c) => c.name);
@@ -118,10 +140,147 @@ class PrintQueueManager {
         this.writeSystemLog('info', 'PRINT:QUEUE', `Recovered ${this.queue.length} pending queued print job(s) from SQLite.`, {
           pendingCount: this.queue.length,
         });
-        void this.processNext();
+        if (!this.isPaused) {
+          void this.processNext();
+        }
       }
     } catch (err) {
       console.warn('[PrintQueueManager] Init error:', err);
+    }
+  }
+
+  getConsumables() {
+    try {
+      const db = this.ensureStorageDb();
+      if (!db) return { totalCapacity: 18, sheetsPrinted: 0, sheetsRemaining: 18, isLowPaper: false, isPaused: this.isPaused };
+      const row = db.prepare("SELECT * FROM printer_consumables WHERE id = 'default'").get();
+      if (!row) return { totalCapacity: 18, sheetsPrinted: 0, sheetsRemaining: 18, isLowPaper: false, isPaused: this.isPaused };
+      return {
+        totalCapacity: row.total_capacity,
+        sheetsPrinted: row.sheets_printed,
+        sheetsRemaining: row.sheets_remaining,
+        isLowPaper: row.sheets_remaining <= 3,
+        isPaused: Boolean(row.is_paused),
+        lastResetAt: row.last_reset_at,
+      };
+    } catch {
+      return { totalCapacity: 18, sheetsPrinted: 0, sheetsRemaining: 18, isLowPaper: false, isPaused: this.isPaused };
+    }
+  }
+
+  resetConsumables(capacity = 18) {
+    try {
+      const db = this.ensureStorageDb();
+      if (!db) return false;
+      const now = nowIso();
+      const cap = Number(capacity) || 18;
+      db.prepare(`
+        INSERT OR REPLACE INTO printer_consumables (id, total_capacity, sheets_printed, sheets_remaining, is_paused, last_reset_at, updated_at)
+        VALUES ('default', ?, 0, ?, ?, ?, ?)
+      `).run(cap, cap, this.isPaused ? 1 : 0, now, now);
+      this.writeSystemLog('info', 'PRINT:CONSUMABLE', `Paper tray reset to full capacity (${cap} sheets).`, { capacity: cap });
+      return true;
+    } catch (e) {
+      console.warn('[PrintQueueManager] Reset consumables error:', e);
+      return false;
+    }
+  }
+
+  pauseQueue() {
+    this.isPaused = true;
+    try {
+      const db = this.ensureStorageDb();
+      if (db) {
+        db.prepare("UPDATE printer_consumables SET is_paused = 1, updated_at = ? WHERE id = 'default'").run(nowIso());
+      }
+    } catch {}
+    this.writeSystemLog('warn', 'PRINT:QUEUE', 'Print queue PAUSED by operator.');
+    return true;
+  }
+
+  resumeQueue() {
+    this.isPaused = false;
+    try {
+      const db = this.ensureStorageDb();
+      if (db) {
+        db.prepare("UPDATE printer_consumables SET is_paused = 0, updated_at = ? WHERE id = 'default'").run(nowIso());
+      }
+    } catch {}
+    this.writeSystemLog('info', 'PRINT:QUEUE', 'Print queue RESUMED by operator.');
+    void this.processNext();
+    return true;
+  }
+
+  retryJob(jobId) {
+    try {
+      const db = this.ensureStorageDb();
+      if (!db) return { ok: false, error: 'DB not ready' };
+      const row = db.prepare('SELECT * FROM print_jobs WHERE id = ?').get(jobId);
+      if (!row) return { ok: false, error: 'Job not found' };
+      const now = nowIso();
+      db.prepare("UPDATE print_jobs SET status = 'QUEUED', attempt_count = 0, last_error = null, updated_at = ? WHERE id = ?").run(now, jobId);
+      if (!this.queue.includes(jobId)) {
+        this.queue.push(jobId);
+      }
+      this.writeSystemLog('info', 'PRINT:QUEUE', `Job ${jobId} re-enqueued for retry.`, { jobId });
+      if (!this.isPaused) {
+        void this.processNext();
+      }
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+
+  cancelJob(jobId) {
+    try {
+      const db = this.ensureStorageDb();
+      if (!db) return { ok: false, error: 'DB not ready' };
+      const now = nowIso();
+      db.prepare("UPDATE print_jobs SET status = 'CANCELLED', updated_at = ? WHERE id = ?").run(now, jobId);
+      this.queue = this.queue.filter((id) => id !== jobId);
+      this.writeSystemLog('warn', 'PRINT:QUEUE', `Job ${jobId} CANCELLED.`, { jobId });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+
+  getQueueStatus() {
+    try {
+      const db = this.ensureStorageDb();
+      const consumables = this.getConsumables();
+      if (!db) {
+        return {
+          queueLength: this.queue.length,
+          isProcessing: this.isProcessing,
+          isPaused: this.isPaused,
+          activeJob: null,
+          recentJobs: [],
+          consumables,
+        };
+      }
+
+      const activeJob = db.prepare("SELECT * FROM print_jobs WHERE status = 'PRINTING' ORDER BY started_at DESC LIMIT 1").get() || null;
+      const recentJobs = db.prepare("SELECT * FROM print_jobs ORDER BY created_at DESC LIMIT 15").all() || [];
+
+      return {
+        queueLength: this.queue.length,
+        isProcessing: this.isProcessing,
+        isPaused: this.isPaused,
+        activeJob,
+        recentJobs,
+        consumables,
+      };
+    } catch (e) {
+      return {
+        queueLength: this.queue.length,
+        isProcessing: this.isProcessing,
+        isPaused: this.isPaused,
+        activeJob: null,
+        recentJobs: [],
+        consumables: this.getConsumables(),
+      };
     }
   }
 
@@ -259,7 +418,7 @@ class PrintQueueManager {
   }
 
   async processNext() {
-    if (this.isProcessing || this.queue.length === 0) return;
+    if (this.isProcessing || this.isPaused || this.queue.length === 0) return;
     this.isProcessing = true;
 
     const jobId = this.queue.shift();
@@ -303,6 +462,20 @@ class PrintQueueManager {
         const completedNow = nowIso();
         db.prepare("UPDATE print_jobs SET status = 'COMPLETED', completed_at = ?, updated_at = ? WHERE id = ?").run(completedNow, completedNow, jobId);
 
+        // Update Consumables (sheets printed & remaining)
+        try {
+          const copies = Number(jobRow.copies) || 1;
+          db.prepare(`
+            UPDATE printer_consumables
+            SET sheets_printed = sheets_printed + ?,
+                sheets_remaining = MAX(0, sheets_remaining - ?),
+                updated_at = ?
+            WHERE id = 'default'
+          `).run(copies, copies, completedNow);
+        } catch (e) {
+          console.warn('[PrintQueueManager] Consumable update error:', e.message);
+        }
+
         if (memSession) {
           memSession.printStatus = 'COMPLETED';
           if (memSession.printJob) {
@@ -332,7 +505,9 @@ class PrintQueueManager {
           });
           setTimeout(() => {
             this.queue.push(jobId);
-            void this.processNext();
+            if (!this.isPaused) {
+              void this.processNext();
+            }
           }, 2000);
         } else {
           db.prepare("UPDATE print_jobs SET status = 'FAILED', attempt_count = ?, last_error = ?, updated_at = ? WHERE id = ?").run(nextAttempts, errMsg, errNow, jobId);
@@ -352,7 +527,9 @@ class PrintQueueManager {
       console.warn('[PrintQueueManager] Worker execution error:', err);
     } finally {
       this.isProcessing = false;
-      setTimeout(() => void this.processNext(), 100);
+      if (!this.isPaused) {
+        setTimeout(() => void this.processNext(), 100);
+      }
     }
   }
 }

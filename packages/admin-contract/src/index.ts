@@ -5,6 +5,10 @@ export interface AdminEventSummary {
   eventId: string;
   name: string;
   status: 'active' | 'archived';
+  isActive?: boolean;
+  frameCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface AdminTemplateSummary {
@@ -38,6 +42,10 @@ export interface AdminApiContract {
   events: {
     list(): Promise<Result<AdminEventSummary[]>>;
     create(name: string): Promise<Result<AdminEventSummary>>;
+    getActive?(): Promise<Result<string>>;
+    setActive?(eventId: string): Promise<Result<void>>;
+    archive?(eventId: string): Promise<Result<void>>;
+    rename?(eventId: string, name: string): Promise<Result<AdminEventSummary>>;
   };
   templates: {
     list(eventId?: string): Promise<Result<AdminTemplateSummary[]>>;

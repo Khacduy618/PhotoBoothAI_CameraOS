@@ -21,14 +21,22 @@
 const path = require('path');
 const fs = require('fs');
 
+const PRODUCTION_APP_DATA_DIR = path.join('MomentAI', 'Photobooth');
+
+function resolveMomentAIStorageRoot(env = process.env, platform = process.platform) {
+  if (env.MOMENTAI_STORAGE_DIR) {
+    return path.resolve(env.MOMENTAI_STORAGE_DIR);
+  }
+  if (platform === 'win32' && env.LOCALAPPDATA) {
+    return path.join(env.LOCALAPPDATA, PRODUCTION_APP_DATA_DIR);
+  }
+  const projectRoot = path.resolve(__dirname, '../../../../..');
+  return path.join(projectRoot, 'artifacts', 'windowmini-storage');
+}
+
 class SessionMediaPaths {
   constructor(storageRootDir) {
-    const projectRoot = path.resolve(__dirname, '../../../../..');
-    this.storageRootDir = path.resolve(
-      storageRootDir ||
-      process.env.MOMENTAI_STORAGE_DIR ||
-      path.join(projectRoot, 'artifacts', 'windowmini-storage')
-    );
+    this.storageRootDir = path.resolve(storageRootDir || resolveMomentAIStorageRoot());
   }
 
   storageRoot() {
@@ -68,6 +76,10 @@ class SessionMediaPaths {
   clip(sessionId, shotIndex, ext = '.mp4') {
     const idx = Number.isFinite(Number(shotIndex)) ? Number(shotIndex) : 1;
     return path.join(this.clipsDir(sessionId), `shot_${String(idx).padStart(2, '0')}${ext}`);
+  }
+
+  timelapseVideo(sessionId) {
+    return path.join(this.clipsDir(sessionId), 'timelapse-video.mp4');
   }
 
   finalImage(sessionId) {
@@ -114,4 +126,4 @@ class SessionMediaPaths {
   }
 }
 
-module.exports = { SessionMediaPaths };
+module.exports = { SessionMediaPaths, resolveMomentAIStorageRoot };

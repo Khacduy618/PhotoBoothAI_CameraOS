@@ -5,7 +5,7 @@ import path from 'node:path';
  * CI Architecture Invariant Verification
  * Verifies core project ownership boundaries and invariants:
  * 1. Next.js Guest /booth route MUST NOT exist (localhost:3000/booth = 404).
- * 2. Next.js Admin Web exists in app/
+ * 2. Next.js API routes exist in app/api/ (UI pages optional — app/ is API-only layer)
  * 3. Electron Guest Booth exists in apps/desktop/
  * 4. Canonical guest flow components exist in components/momentai-guest-flow/
  */
@@ -32,9 +32,10 @@ function checkArchitecture() {
   // Invariant 1: localhost:3000/booth MUST NOT exist
   assertPathDoesNotExist('app/booth', 'Next.js Guest /booth route (must be 404 on Admin Web)');
 
-  // Invariant 2: Admin Web entrypoints
-  assertPathExists('app/layout.tsx', 'Admin Web layout');
-  assertPathExists('app/page.tsx', 'Admin Web root page');
+  // Invariant 2: Admin Web API routes (UI pages are optional — app/ is an API-only layer)
+  assertPathExists('app/api/momentai-guest-session/route.ts', 'Guest session API route');
+  assertPathExists('app/api/admin/frames/route.ts', 'Admin frames API route');
+  assertPathExists('app/s/[sessionId]/route.ts', 'Session share API route');
 
   // Invariant 3: Electron Desktop Booth entrypoints
   assertPathExists('apps/desktop/electron/main/main.cjs', 'Electron Main process');

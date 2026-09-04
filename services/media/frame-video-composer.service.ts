@@ -142,7 +142,7 @@ export class FrameVideoComposer {
         } else if (fs.existsSync(overlayUrl)) {
           overlayFilePath = path.resolve(overlayUrl);
         } else if (overlayUrl.startsWith('/')) {
-          const publicPath = path.join(process.cwd(), 'public', overlayUrl);
+          const publicPath = path.join(/*turbopackIgnore: true*/ process.cwd(), 'public', overlayUrl);
           if (fs.existsSync(publicPath)) {
             overlayFilePath = publicPath;
           }

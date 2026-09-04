@@ -97,17 +97,28 @@ function mapTemplateSummaryToFrameDefinition(summary: unknown): AdminFrameDefini
     };
 }
 
-export function FrameImportPanel() {
+export interface FrameImportPanelProps {
+    initialEventId?: string;
+    onEventChange?: (eventId: string) => void;
+}
+
+export function FrameImportPanel({ initialEventId, onEventChange }: FrameImportPanelProps = {}) {
     const [fileStates, setFileStates] = useState<ImageFileState[]>([]);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [filterStatus, setFilterStatus] = useState<"all" | "auto-approved" | "needs-review" | "rejected">("all");
     const [activeTab, setActiveTab] = useState<"import" | "registry">("import");
     const [allDefinitions, setAllDefinitions] = useState<readonly AdminFrameDefinition[]>([]);
     const [events, setEvents] = useState<readonly AdminEventRecord[]>([]);
-    const [selectedEventId, setSelectedEventId] = useState("event_hoi_an_heritage");
+    const [selectedEventId, setSelectedEventId] = useState(initialEventId || "event_hoi_an_heritage");
     const [newEventName, setNewEventName] = useState("");
     const [registryFilter, setRegistryFilter] = useState<"all" | "published" | "private">("all");
     const [isPublishing, setIsPublishing] = useState(false);
+
+    useEffect(() => {
+        if (initialEventId && initialEventId !== selectedEventId) {
+            setSelectedEventId(initialEventId);
+        }
+    }, [initialEventId]);
 
     const refreshAdminRegistry = async (eventId = selectedEventId) => {
         const bridge = getAdminBridge();
@@ -165,6 +176,7 @@ export function FrameImportPanel() {
 
     useEffect(() => {
         void refreshAdminRegistry(selectedEventId);
+        onEventChange?.(selectedEventId);
     }, [selectedEventId]);
 
     const selectedEvent = events.find((event) => event.eventId === selectedEventId);

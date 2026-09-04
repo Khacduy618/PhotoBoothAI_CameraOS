@@ -1,8 +1,8 @@
 # MomentAI Guest Flow V3 — Tóm tắt tiếng Việt
 
 Status: Tài liệu tóm tắt flow màn hình, data và backend/system cho Guest Flow V3, cập nhật theo Production Brief v3.1 và quyết định PM.
-Source architecture: `docs/architecture/MomentAI_Guest_Internal_System_Design.md` và `docs/MomentAI_CameraOS_Production_Brief_v3.1.md`.
-Target V1: Windows 10 x64 booth PC / Mini PC form factor + Electron + Vite React renderer. Admin/operator nằm trong Electron và ẩn với guest. macOS chỉ là development path với Device/Fake adapter; React Native, iPad app và macOS production runtime không thuộc phạm vi V1.
+Source architecture: `docs/architecture/MomentAI_Guest_Internal_System_Design.md`. Các quyết định production được ghi trực tiếp trong tài liệu này và bộ Guest Flow V3 docs.
+Target V1: Windows 10 x64 booth PC / Mini PC form factor + Electron packaged as Windows `.exe` + Vite React renderer. App production lưu data trong `%LOCALAPPDATA%`, mở fullscreen kiosk, hỗ trợ startup/auto-launch sau Windows login, và Admin/operator nằm trong Electron, ẩn/passcode-gated với guest. Share production dùng cloud landing page Vercel + Neon + R2 với local QR fallback/dev/offline. macOS chỉ là development path với Device/Fake adapter; React Native, iPad app và macOS production runtime không thuộc phạm vi V1.
 
 ## 1. Flow màn hình guest
 
@@ -13,7 +13,7 @@ START / SHOWCASE
 → CHỌN TEMPLATE / KHUNG MẪU
 → CUSTOMIZE, nếu template cho phép type/draw
 → RENDER THÀNH PHẨM
-→ MÀN KẾT THÚC: ẢNH FINAL + LOCAL QR/FALLBACK + GUEST-CONFIRMED PRINT
+→ MÀN KẾT THÚC: ẢNH FINAL + CLOUD QR/LOCAL FALLBACK + GUEST-CONFIRMED QUEUED PRINT
 → DONE hoặc TIMEOUT 120 GIÂY
 → RESET GUEST SESSION
 → START
@@ -58,7 +58,7 @@ Backend/system lúc idle:
 - Health gate tính `READY` / `DEGRADED` / `BLOCKED`;
 - Camera service dùng active adapter phù hợp: Fake / Device / Canon;
 - Printer service có thể READY, DEGRADED hoặc DISABLED theo event print policy;
-- Local QR/share có thể AVAILABLE hoặc UNAVAILABLE theo network reachability;
+- Cloud QR/share có thể AVAILABLE hoặc UNAVAILABLE theo Vercel/Neon/R2 upload/retrieval; Local QR fallback có thể AVAILABLE hoặc UNAVAILABLE theo network reachability;
 - Chưa có guest session active.
 
 Khi bấm Start:
@@ -288,18 +288,18 @@ Composition tạo 3 output:
 | Output | File ví dụ | Dùng cho |
 |---|---|---|
 | Master | `final-master.png` | archive, re-render, reprint |
-| Share | `final-share.jpg` | Local QR, gallery, hoặc cloud nếu PM duyệt provider sau |
+| Share | `final-share.jpg` | Cloud QR landing page Vercel/Neon/R2 hoặc Local QR fallback/dev/offline |
 | Print | `final-print.jpg` | printer |
 
-## 10. Màn 06 — Result + Local QR/Fallback + Guest-confirmed Print
+## 10. Màn 06 — Result + Cloud QR/Local Fallback + Guest-confirmed Queued Print
 
 Đây là màn kết thúc.
 
 Guest thấy:
 
 - ảnh final;
-- Local QR để tải ảnh khi điện thoại có thể truy cập booth local network endpoint;
-- fallback rõ ràng khi QR local không khả dụng;
+- Cloud QR để tải ảnh qua landing page Vercel/Neon/R2 khi cloud share thành công;
+- Local QR fallback/dev/offline hoặc fallback rõ ràng khi QR không khả dụng;
 - trạng thái in;
 - nút Print khi event bật `GUEST_CONFIRM`;
 - countdown 120 giây;
@@ -309,12 +309,13 @@ Sau khi composition xong, hệ thống chuẩn bị share output:
 
 ```text
 final-share.jpg
-→ LocalShareService tạo tokenized local network URL
+→ CloudShareService upload R2 + tạo Neon token/share record
+→ Vercel landing page URL có token
 → QR Generator
-→ QRCodeCard hoặc QR unavailable fallback
+→ QRCodeCard hoặc QR unavailable/local fallback
 ```
 
-Local QR chỉ hợp lệ khi URL không phải `localhost`, không expose local absolute path và điện thoại guest truy cập được cùng network/booth hotspot.
+QR token hết hạn sau 10 phút kể từ lúc tạo landing/share record. App restart không làm mất token chưa hết hạn. Cloud/local QR không được expose local absolute path, raw R2 key hoặc QR secret. Local QR fallback chỉ hợp lệ khi URL không phải `localhost` và điện thoại guest truy cập được cùng network/booth hotspot.
 
 Khi guest xác nhận in:
 
@@ -322,20 +323,22 @@ Khi guest xác nhận in:
 final-print.jpg
 → PrintService
 → tạo durable PrintJob với idempotency key
-→ PrintQueue
+→ durable FIFO PrintQueue
 → FakePrinterAdapter hoặc WindowsPrintAdapter khi CP1000 khả dụng
 → nếu production hardware: Windows Print System
 → Canon SELPHY CP1000
 ```
 
-V1 dùng `PrintPolicy=GUEST_CONFIRM`. Guest được bấm xác nhận in nhưng không chọn máy in, giấy, layout hoặc print profile.
+V1 dùng `PrintPolicy=GUEST_CONFIRM`. Guest được bấm xác nhận in nhưng không chọn máy in, giấy, layout, số bản hoặc print profile. Printer chậm/busy thì job sau xếp hàng; guest reset không xoá hoặc dừng print job.
 
 Nếu print lỗi:
 
 - QR vẫn hiển thị;
 - ảnh vẫn được giữ;
-- print status báo lỗi/retry;
-- không xoá session media.
+- print status báo lỗi cho guest/operator;
+- queue dừng, không auto retry;
+- Admin reprint/resume thủ công;
+- không xoá session media, print output hoặc durable job record.
 
 ## 11. Timeout và reset
 
@@ -407,9 +410,9 @@ Guest Start
 → AssignmentEngine map shot vào slot
 → Customize nếu template cho phép
 → CompositionEngine render master/share/print
-→ LocalShareService tạo tokenized local QR nếu network reachable
+→ CloudShareService tạo Vercel/Neon/R2 QR hoặc LocalShareService fallback nếu configured/reachable
 → QR Generator tạo QR hoặc fallback
-→ PrintService enqueue print khi guest xác nhận in
+→ PrintService enqueue durable FIFO print job khi guest xác nhận in
 → ResultScreen
 → Done/Timeout
 → SessionController.complete()
@@ -447,11 +450,13 @@ Guest Start
 - Giữ originals.
 - Cho retry composition hoặc reset an toàn.
 
-### Local QR/share lỗi
+### Cloud/local QR/share lỗi
 
-- Báo QR unavailable/fallback nếu điện thoại không truy cập được booth endpoint.
+- Báo QR unavailable/fallback nếu cloud upload/retrieval lỗi hoặc điện thoại không truy cập được local fallback endpoint.
+- QR token hết hạn sau 10 phút và expired page không được expose media.
+- Cleanup eligible sau 30 phút nhưng không xoá dependency của print/share recovery.
 - Giữ ảnh và outputs.
-- Không expose local absolute path, `localhost`-only URL hoặc QR secret.
+- Không expose local absolute path, raw R2 key, `localhost`-only URL hoặc QR secret.
 
 ### Print lỗi
 
@@ -465,10 +470,12 @@ Target mới:
 
 - Camera: Canon EOS 6D;
 - Host: Windows 10 x64 booth PC;
-- Desktop shell: Electron;
+- Desktop shell: Electron packaged as Windows `.exe`;
 - Renderer: Vite React + TypeScript;
-- Admin/operator: nằm trong Electron, ẩn với guest;
+- Admin/operator: nằm trong Electron, ẩn/passcode-gated với guest;
+- Production data: `%LOCALAPPDATA%` app-owned MomentAI Photobooth directory;
+- Kiosk: fullscreen guest mode + startup/auto-launch sau Windows login;
 - Camera integration: Canon EDSDK qua USB;
 - Printer: Canon SELPHY CP1000 qua Windows Print System.
 
-PASS hardware chỉ được claim khi có bằng chứng real device cụ thể trên target Windows 10 x64 booth PC. Local QR PASS cần bằng chứng scan từ điện thoại thật trên cùng network reachable. Nếu chỉ test bằng fake adapter/mock/dev browser/shadow mode thì phải ghi PARTIAL hoặc Not tested.
+PASS hardware/runtime chỉ được claim khi có bằng chứng real device cụ thể trên target Windows 10 x64 booth PC. Cloud QR PASS cần bằng chứng scan từ điện thoại thật qua deployed Vercel/Neon/R2 path; Local QR PASS cần bằng chứng scan từ điện thoại thật trên cùng network reachable. Nếu chỉ test bằng fake adapter/mock/dev browser/shadow mode thì phải ghi PARTIAL hoặc Not tested.

@@ -48,7 +48,8 @@ export const DoneScreen: React.FC<DoneScreenProps> = ({
         </h2>
 
         <p className="text-sm sm:text-base opacity-70 font-sans mb-8 leading-relaxed max-w-sm">
-          Ảnh của bạn đang được xuất bản tại máy in. Vui lòng nhận ảnh tại khay ra của thiết bị.
+          Cảm ơn bạn đã trải nghiệm PhotoBoothAI. Ảnh số đã được lưu và có thể tải về qua mã QR.
+          {' '}Nếu đã xác nhận in, vui lòng nhận ảnh tại khay ra của máy in.
         </p>
 
         <div className="inline-flex items-center gap-3 px-5 py-2.5 bg-[#F4F2EE] border border-[#1A1A1A]/15 text-[10px] font-mono font-bold uppercase tracking-widest text-[#1A1A1A]">

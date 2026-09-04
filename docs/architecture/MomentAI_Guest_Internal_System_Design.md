@@ -1,15 +1,18 @@
 # MomentAI CameraOS — Guest Flow & Internal System Design
 ## Source of Truth for Product, UI/UX, Frontend, Camera Core, Backend & Printing
 
-**Version:** 1.2-production-brief-v3.1  
-**Target Camera:** Canon EOS 6D  
-**Host:** Windows 10 x64 booth PC / Mini PC form factor  
-**Desktop shell:** Electron  
-**Renderer:** Vite React + TypeScript  
-**Admin:** Electron operator/admin surface, hidden from guest  
-**Printer:** Canon SELPHY CP1000 via Windows Print System  
-**Application:** MomentAI Photobooth  
-**Platform:** MomentAI CameraOS  
+**Version:** 1.2-production-brief-v3.1
+**Target Camera:** Canon EOS 6D
+**Host:** Windows 10 x64 booth PC / Mini PC form factor
+**Desktop shell:** Electron packaged as a Windows `.exe` app
+**Renderer:** Vite React + TypeScript
+**Admin:** Electron operator/admin surface, hidden from guest and passcode-gated
+**Printer:** Canon SELPHY CP1000 via Windows Print System
+**Production data root:** `%LOCALAPPDATA%` app-owned MomentAI Photobooth directory
+**Share/QR:** Vercel landing page + Neon token metadata + R2 final-share storage, with local QR fallback/dev/offline mode
+**Kiosk:** Fullscreen Electron guest kiosk with Windows startup/auto-launch support
+**Application:** MomentAI Photobooth
+**Platform:** MomentAI CameraOS
 
 ---
 
@@ -55,10 +58,10 @@ CUSTOMIZE
         ↓
 FINAL COMPOSITION
         ↓
-RESULT + LOCAL QR/FALLBACK + GUEST-CONFIRMED PRINT
+RESULT + CLOUD QR/LOCAL FALLBACK + GUEST-CONFIRMED QUEUED PRINT
         │
-        ├── Digital Output via LocalShareService
-        └── Optional PrintJob after guest confirmation
+        ├── Digital Output via CloudShareService (Vercel + Neon + R2) or LocalShareService fallback
+        └── Durable FIFO PrintJob after guest confirmation
         ↓
 DONE hoặc TIMEOUT 2 PHÚT
         ↓
@@ -87,6 +90,20 @@ Event
 +
 Print Profile
 ```
+
+## 2.1 Production runtime decisions applied
+
+- V1 production app is a Windows `.exe` Electron kiosk running on the Windows 10 x64 booth PC / Mini PC.
+- Production mutable data lives under `%LOCALAPPDATA%` in an app-owned MomentAI Photobooth directory.
+- Guest runtime launches fullscreen/kiosk with no visible toolbar/taskbar/chrome; Admin remains hidden and passcode-gated.
+- Windows startup/auto-launch after login is required for booth operation.
+- Auto-update is not `git pull main`; V1 uses manual release package updates unless PM approves a separate signed update channel.
+- V1 production share mode is `CLOUD_LANDING_PAGE` using Vercel landing page, Neon token metadata and R2 final-share media storage; `LOCAL_NETWORK_URL` remains fallback/dev/offline mode when configured and reachable.
+- QR/share token TTL is 10 minutes from share/landing creation; durable unexpired tokens survive app restart.
+- Cleanup eligibility defaults to 30 minutes for local/cloud session data but must preserve active sessions, active share uploads and queued/printing/failed/review print jobs/files.
+- V1 print remains `GUEST_CONFIRM`: the guest presses Print to create one durable print job. Confirmed jobs are FIFO queued; printer slowness queues later jobs, and failure stops the queue with no automatic retry until Admin manual reprint/resume.
+- V1 certified production hardware is Canon EOS 6D camera and Canon SELPHY CP1000 printer only; adapter boundaries remain extensible for future PM-approved hardware.
+- Scrollable guest/operator surfaces must support natural touch drag scrolling, not scrollbar-only interaction.
 
 ---
 
@@ -220,8 +237,8 @@ CaptureManager TemplateService CompositionEngine
  ├── DeviceCameraAdapter
  └── CanonAdapter → CanonCameraBridge → Canon EDSDK → Canon EOS 6D
 
-                      Share ──→ LocalShareService ──→ Local QR/Fallback
-                      Print ──→ Guest Confirm ──→ Print Queue ──→ Printer
+                      Share ──→ CloudShareService ──→ Cloud QR / Local fallback
+                      Print ──→ Guest Confirm ──→ Durable FIFO Print Queue ──→ Printer
 ```
 
 ---
@@ -1166,9 +1183,9 @@ final-share.jpg
 
 Dùng cho:
 
-- Local QR
-- gallery/local retrieval
-- cloud only if PM later approves a provider
+- Cloud QR landing page through the approved Vercel + Neon + R2 provider stack
+- Local QR fallback/dev/offline retrieval when configured and reachable
+- gallery/local retrieval when PM approves the operator surface
 - social only in a later approved phase
 
 ## Print
@@ -1223,43 +1240,55 @@ Paper Currently Loaded
 
 ---
 
-# 26. Screen 06 — RESULT + LOCAL QR/FALLBACK + GUEST-CONFIRMED PRINT
+# 26. Screen 06 — RESULT + CLOUD QR/LOCAL FALLBACK + GUEST-CONFIRMED QUEUED PRINT
 
 Khi composition hoàn tất:
 
 ```text
 Composition Complete
         │
-        ├──────────────────────┐
-        │                      │
-        ▼                      ▼
- LocalShareService      PrintService
-        │                      │
-        ▼                      ▼
- Local QR/Fallback      Wait for guest confirmation
+        ├──────────────────────────────┐
+        │                              │
+        ▼                              ▼
+ CloudShareService / Local fallback    PrintService
+        │                              │
+        ▼                              ▼
+ Cloud QR / Local fallback             Wait for guest confirmation
 ```
 
-Local QR/fallback được chuẩn bị trên Result screen. Print job chỉ được tạo khi V1 `PrintPolicy=GUEST_CONFIRM` và guest xác nhận in.
+Cloud QR/local fallback được chuẩn bị trên Result screen. Print job chỉ được tạo khi V1 `PrintPolicy=GUEST_CONFIRM` và guest xác nhận in. Job đã xác nhận đi qua durable FIFO PrintQueue, không bị xoá khi guest reset.
 
 ---
 
-# 27. Local QR / Digital flow
+# 27. Cloud/local QR / Digital flow
 
 ```text
 final-share.jpg
       ↓
-LocalShareService
+CloudShareService
       ↓
-Tokenized local network endpoint
+Upload final-share media to R2
       ↓
-Session Download URL reachable from guest phone
+Create Neon token/share record
+      ↓
+Tokenized Vercel landing page URL
       ↓
 QR Generator
       ↓
-QRCodeCard or QR unavailable fallback
+QRCodeCard or QR unavailable/local fallback
 ```
 
-Ví dụ local network URL:
+Ví dụ cloud landing URL:
+
+```json
+{
+  "qr": {
+    "url": "https://momentai.example/s/abc123-redacted"
+  }
+}
+```
+
+Local fallback URL, khi configured/reachable:
 
 ```json
 {
@@ -1269,7 +1298,7 @@ Ví dụ local network URL:
 }
 ```
 
-Local QR phải dùng endpoint reachable từ điện thoại guest trên cùng network/booth hotspot. QR không được là `localhost`-only, không expose local absolute path và không log QR secret/token. Cloud URL provider deferred trừ khi PM approve riêng.
+Cloud QR phải dùng tokenized Vercel landing page backed by Neon/R2. Token hết hạn sau 10 phút từ lúc tạo share/landing record và app restart không làm mất token chưa hết hạn. QR không được expose local absolute path, raw R2 key, bucket internals hoặc QR secret/token trong log. Local QR fallback phải dùng endpoint reachable từ điện thoại guest trên cùng network/booth hotspot, không được là `localhost`-only và không được serve arbitrary file/directory listing.
 
 ---
 
@@ -1331,7 +1360,7 @@ Guest thấy:
 ```text
 Final Photo
 
-Local QR hoặc QR unavailable fallback
+Cloud QR, local fallback hoặc QR unavailable fallback
 
 "Quét để tải ảnh" hoặc "QR chưa khả dụng"
 
@@ -1555,14 +1584,14 @@ Disconnect Camera
     Master   Share   Print
               │      │
               ▼      ▼
-      Local QR/Fallback  Print available after guest confirmation
+      Cloud QR/Local Fallback  Print available after guest confirmation
               │      │
               ▼      ▼
 ┌───────────────────────────┐
 │    FINAL RESULT SCREEN    │
 │                           │
 │ Final Image               │
-│ Local QR / Fallback       │
+│ Cloud QR / Local Fallback │
 │ Print Confirm + Status    │
 │ 2-minute Timeout          │
 └─────────────┬─────────────┘
@@ -1714,8 +1743,8 @@ final-master.png
 final-share.jpg
 final-print.jpg
  ↓
-share.jpg → Local QR/Fallback
-print.jpg → Print available after guest confirmation
+share.jpg → Cloud QR/Local Fallback
+print.jpg → Guest-confirmed durable FIFO print queue
  ↓
 Result Screen
  ↓
@@ -1877,8 +1906,8 @@ Một session chỉ được coi là hoàn thành khi:
 - Final composition render thành công.
 - Share output đã tạo.
 - Print output đã tạo.
-- Local QR đã tạo hoặc có fallback.
-- Print job đã được enqueue nếu V1 `GUEST_CONFIRM` print được bật và guest xác nhận in.
+- Cloud QR đã tạo hoặc có local/unavailable fallback.
+- Print job durable FIFO đã được enqueue nếu V1 `GUEST_CONFIRM` print được bật và guest xác nhận in.
 - Session state = `COMPLETED`.
 - Guest UI được reset.
 - Camera vẫn ở trạng thái READY cho Guest tiếp theo.
@@ -1902,7 +1931,7 @@ TYPE / DRAW NẾU TEMPLATE CHO PHÉP
 ↓
 FINAL COMPOSITION
 ↓
-RESULT + LOCAL QR/FALLBACK + OPTIONAL GUEST-CONFIRMED PRINT
+RESULT + CLOUD QR/LOCAL FALLBACK + GUEST-CONFIRMED QUEUED PRINT
 ↓
 DONE / 2-MINUTE TIMEOUT
 ↓

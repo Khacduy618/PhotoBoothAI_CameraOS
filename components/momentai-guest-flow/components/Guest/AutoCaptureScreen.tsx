@@ -17,7 +17,12 @@ interface AutoCaptureScreenProps {
 type CaptureStep = 'ready' | 'countdown' | 'capturing' | 'saving' | 'between' | 'complete';
 
 interface WindowMiniCameraBridge {
-  capture(context: { sessionId: string; shotIndex: number; correlationId: string }): Promise<unknown>;
+  capture(context: { sessionId: string; shotIndex: number; correlationId?: string; isLastShot?: boolean }): Promise<unknown>;
+  startLiveView?(context?: { sessionId?: string }): Promise<unknown>;
+  stopLiveView?(context?: { sessionId?: string }): Promise<unknown>;
+  status?(): Promise<unknown>;
+  autofocus?(context?: unknown): Promise<unknown>;
+  onEvfFrame?(callback: (frame: { dataUrl: string; width?: number; height?: number; seq?: number }) => void): () => void;
 }
 
 interface WindowMiniMediaBridge {
@@ -64,7 +69,7 @@ export const AutoCaptureScreen: React.FC<AutoCaptureScreenProps> = ({
 
   useEffect(() => {
     if (cameraSettings.mode === 'canon') {
-      getDesktopCameraBridge()?.startLiveView({ sessionId: session.sessionId }).catch(() => null);
+      getDesktopCameraBridge()?.startLiveView?.({ sessionId: session.sessionId });
     }
   }, [cameraSettings.mode, session.sessionId]);
 

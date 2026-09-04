@@ -65,4 +65,32 @@ describe("LocalFrameRegistry", () => {
         LocalFrameRegistry.registerFrame(sampleDefinition);
         expect(notifiedCount).toBe(2);
     });
+
+    it("normalizes a 4-shot photostrip definition to STRIP_4 portrait orientation and constrained width", () => {
+        const stripDef: FrameDefinition = {
+            id: "strip-imported-test",
+            name: "Stars Strip",
+            kind: "png-overlay",
+            source: "canva",
+            assetUrl: "data:image/png;base64,test",
+            shotCount: 4,
+            outputWidth: 142,
+            outputHeight: 419,
+            photoViewportOrientation: "landscape",
+            orientation: "landscape",
+            slots: [
+                { id: "slot-1", index: 0, x: 0.05, y: 0.02, width: 0.90, height: 0.20 },
+                { id: "slot-2", index: 1, x: 0.05, y: 0.24, width: 0.90, height: 0.20 },
+                { id: "slot-3", index: 2, x: 0.05, y: 0.46, width: 0.90, height: 0.20 },
+                { id: "slot-4", index: 3, x: 0.05, y: 0.68, width: 0.90, height: 0.20 },
+            ],
+        };
+
+        LocalFrameRegistry.registerFrame(stripDef);
+        const [saved] = LocalFrameRegistry.getPublishedDefinitions();
+
+        expect(saved.targetProduct).toBe("STRIP_4");
+        expect(saved.orientation).toBe("portrait");
+        expect(saved.outputPaper).toBe("5x15");
+    });
 });

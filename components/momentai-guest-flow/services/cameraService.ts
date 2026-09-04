@@ -154,7 +154,7 @@ export class CameraService {
     }
   }
 
-  public async capturePhoto(shotIndex: number, sessionId?: string): Promise<string> {
+  public async capturePhoto(shotIndex: number, sessionId?: string, isLastShot: boolean = false): Promise<string> {
     this.playShutterSound();
 
     if (typeof window !== 'undefined' && (window as unknown as { momentai?: { guest?: { camera?: { capture: (ctx: unknown) => Promise<{ ok?: boolean; value?: { provider?: string; photo?: { dataUrl?: string; width?: number; height?: number; size?: number } }; provider?: string; photo?: { dataUrl?: string; width?: number; height?: number; size?: number } }> } } } }).momentai?.guest?.camera?.capture) {
@@ -162,6 +162,7 @@ export class CameraService {
         const raw = await (window as unknown as { momentai: { guest: { camera: { capture: (ctx: unknown) => Promise<any> } } } }).momentai.guest.camera.capture({
           sessionId: sessionId || 'desktop_session',
           shotIndex: shotIndex + 1,
+          isLastShot: Boolean(isLastShot),
           correlationId: `capture_${Date.now()}_${shotIndex + 1}`,
         });
         const res = (raw && typeof raw === 'object' && 'value' in raw) ? raw.value : raw;

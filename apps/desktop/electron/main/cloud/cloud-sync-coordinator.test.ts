@@ -75,19 +75,21 @@ describe('CloudSyncCoordinator Unit & Integration Tests', () => {
     const c1 = sessionMediaPaths.clip(sessionId, 1);
     const c2 = sessionMediaPaths.clip(sessionId, 2);
 
+    const timelapse = sessionMediaPaths.timelapseVideo(sessionId);
     fs.writeFileSync(p1, Buffer.from('fake-photo-1-jpeg-data'));
     fs.writeFileSync(p2, Buffer.from('fake-photo-2-jpeg-data'));
     fs.writeFileSync(c1, Buffer.from('fake-clip-1-mp4-data'));
     fs.writeFileSync(c2, Buffer.from('fake-clip-2-mp4-data'));
+    fs.writeFileSync(timelapse, Buffer.from('fake-timelapse-mp4-data'));
 
     const result = await coordinator.triggerPhaseAUpload(sessionId);
 
     expect(result.ok).toBe(true);
     expect(result.state.status).toBe('ORIGINALS_READY');
     expect(result.state.photos).toHaveLength(2);
-    expect(result.state.clips).toHaveLength(2);
+    expect(result.state.clips).toHaveLength(1);
     expect(result.state.photos[0].remotePath).toContain(`/photos/shot_01.jpg`);
-    expect(result.state.clips[0].remotePath).toContain(`/clips/shot_01.mp4`);
+    expect(result.state.clips[0].remotePath).toContain(`/clips/timelapse-video.mp4`);
   });
 
   it('Phase B triggers READY only when BOTH final image and final video exist and composition succeeded', async () => {

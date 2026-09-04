@@ -172,12 +172,11 @@ async function probeVideo(videoPath) {
   return { duration, width, height, codec, fps, size };
 }
 
-const { SessionMediaPaths } = require('../storage/session-media-paths.cjs');
+const { SessionMediaPaths, resolveMomentAIStorageRoot } = require('../storage/session-media-paths.cjs');
 
 class DesktopMediaManager {
   constructor(options = {}) {
-    const projectRoot = path.resolve(__dirname, '../../../../..');
-    this.storageRootDir = path.resolve(options.storageRootDir || process.env.MOMENTAI_STORAGE_DIR || path.join(projectRoot, 'artifacts', 'windowmini-storage'));
+    this.storageRootDir = path.resolve(options.storageRootDir || resolveMomentAIStorageRoot(options.env, options.platform));
     this.sessionMediaPaths = new SessionMediaPaths(this.storageRootDir);
     this.activeSessionId = null;
     this.activeCaptureSessionId = null;
@@ -908,6 +907,71 @@ class DesktopMediaManager {
         codec: probe.codec || 'h264',
         fps: probe.fps || 25,
       };
+    } finally {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {}
+    }
+  }
+
+  async composeSessionTimelapse(sessionId, requiredShots = 4) {
+    const clips = [];
+    for (let i = 1; i <= requiredShots; i++) {
+      const clipPath = this.sessionMediaPaths.clip(sessionId, i);
+      if (fs.existsSync(clipPath) && fs.statSync(clipPath).size > 1000) {
+        clips.push(clipPath);
+      }
+    }
+
+    if (clips.length === 0) {
+      return null;
+    }
+
+    const outputPath = this.sessionMediaPaths.timelapseVideo(sessionId);
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+
+    if (clips.length === 1) {
+      fs.copyFileSync(clips[0], outputPath);
+      return { outputPath, clipsCount: 1 };
+    }
+
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'momentai-timelapse-'));
+    try {
+      const inputArgs = [];
+      const filterSegments = [];
+      for (let i = 0; i < clips.length; i++) {
+        inputArgs.push('-i', path.resolve(clips[i]));
+        filterSegments.push(`[${i}:v]scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,setsar=1[v${i}]`);
+      }
+      const concatInputs = clips.map((_, i) => `[v${i}]`).join('');
+      const filterComplex = `${filterSegments.join('; ')}; ${concatInputs}concat=n=${clips.length}:v=1:a=0[outv]`;
+
+      const tempOut = path.join(tempDir, 'temp-timelapse.mp4');
+      const ffmpegArgs = [
+        '-y',
+        ...inputArgs,
+        '-filter_complex', filterComplex,
+        '-map', '[outv]',
+        '-c:v', 'libx264',
+        '-pix_fmt', 'yuv420p',
+        '-preset', 'veryfast',
+        '-crf', '23',
+        '-movflags', '+faststart',
+        tempOut,
+      ];
+
+      await runFfmpeg(ffmpegArgs);
+      if (fs.existsSync(tempOut) && fs.statSync(tempOut).size > 1000) {
+        fs.copyFileSync(tempOut, outputPath);
+        return { outputPath, clipsCount: clips.length };
+      }
+      return null;
+    } catch (err) {
+      console.warn(`[DesktopMediaManager] Timelapse composition failed for session ${sessionId}:`, err.message);
+      if (clips[0] && !fs.existsSync(outputPath)) {
+        fs.copyFileSync(clips[0], outputPath);
+      }
+      return { outputPath, clipsCount: clips.length, fallback: true };
     } finally {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });

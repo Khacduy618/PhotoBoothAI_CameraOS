@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AttractScreen } from './components/Guest/AttractScreen';
 import { SelectProductScreen } from './components/Guest/SelectProductScreen';
 import { AutoCaptureScreen } from './components/Guest/AutoCaptureScreen';
+import { ProcessingPhotosScreen } from './components/Guest/ProcessingPhotosScreen';
 import { SelectFrameScreen } from './components/Guest/SelectFrameScreen';
 import { DrawScreen } from './components/Guest/DrawScreen';
 import { PrintQRScreen } from './components/Guest/PrintQRScreen';
@@ -133,9 +134,7 @@ export function MomentAIGuestFlowController() {
     if (navigationLockedRef.current) return;
     navigationLockedRef.current = true;
     void Promise.resolve(action()).finally(() => {
-      window.setTimeout(() => {
-        navigationLockedRef.current = false;
-      }, 900);
+      navigationLockedRef.current = false;
     });
   };
 
@@ -203,6 +202,7 @@ export function MomentAIGuestFlowController() {
       slotAssignments: capturedPhotos,
     };
     setCurrentSession(sessionWithPhotos);
+    setScreenState('G03B_PROCESSING_PHOTOS');
     let updatedBackend = backendSession.captureFormat
       ? backendSession
       : await api('select-format', {
@@ -417,10 +417,11 @@ export function MomentAIGuestFlowController() {
     try {
       await api('request-print', { sessionId: backendSession.sessionId, copies: printCopies });
       setCurrentSession((prev) => prev ? { ...prev, printStatus: 'queued' } : prev);
-      setScreenState('G08_DONE');
     } catch {
       setCurrentSession((prev) => prev ? { ...prev, printStatus: 'failed' } : prev);
     }
+    // Always navigate to done screen — guest is directed to pick up print at the tray
+    setScreenState('G08_DONE');
   };
 
   const handleFinishSession = async () => {
@@ -446,6 +447,7 @@ export function MomentAIGuestFlowController() {
         {screenState === 'G01_START' && <AttractScreen eventConfig={EVENT_CONFIG} onStartSession={() => runNavigation(startNewSession)} readinessStatus={readiness.status} readinessReasons={readiness.reasons} />}
         {screenState === 'G02_SELECT_PRODUCT' && <SelectProductScreen defaultProductId={currentSession?.product?.id} onSelectProduct={(product) => runNavigation(() => handleSelectProduct(product))} onBackToStart={() => runNavigation(() => setScreenState('G01_START'))} />}
         {screenState === 'G03_CAPTURE' && currentSession && <AutoCaptureScreen session={currentSession} cameraSettings={cameraSettings} captureConfig={CAPTURE_CONFIG} onPhotoCaptured={handlePhotoCaptured} onCaptureCompleted={(photos) => { void handleCaptureCompleted(photos); }} />}
+        {screenState === 'G03B_PROCESSING_PHOTOS' && currentSession && <ProcessingPhotosScreen photos={currentSession.photos} />}
         {screenState === 'G04_SELECT_FRAME' && currentSession && <SelectFrameScreen session={currentSession} customTemplates={frameTemplates} onSelectFrame={(frame, photoIdx) => runNavigation(() => handleSelectFrame(frame, photoIdx))} onBackToShots={() => runNavigation(() => setScreenState('G02_SELECT_PRODUCT'))} />}
         {(screenState === 'G05_PREMIUM_CUSTOMIZE' || screenState === 'G05_DRAW') && currentSession?.selectedFrame && <DrawScreen session={currentSession} template={currentSession.selectedFrame} onConfirmDraw={(drawDataUrl) => runNavigation(() => handleConfirmDraw(drawDataUrl))} onBackToTemplate={() => runNavigation(() => setScreenState('G04_SELECT_FRAME'))} />}
         {(screenState === 'G06_RESULT' || screenState === 'G07_PRINTING' || screenState === 'G07_PRINT_QR' || screenState === 'G08_PRINT_SUCCESS') && resultSession && <PrintQRScreen session={resultSession} printerSettings={PRINTER_SETTINGS} onConfirmPrint={() => runNavigation(handleConfirmPrint)} onFinishSession={() => runNavigation(handleFinishSession)} />}
@@ -524,13 +526,33 @@ export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefin
   const layoutType = canonicalLayoutType(targetProduct);
 
   // ── Slot normalization (Canonical 0..1 range) ───────────────────────────
-  const outH = definition.outputHeight || 2700;
-  const outW = isStrip && (definition.outputWidth || 1800) >= outH * 0.5
-    ? Math.round(outH / 3)
+  const origH = definition.outputHeight || 2700;
+  const origW = isStrip && (definition.outputWidth || 1800) >= origH * 0.45
+    ? Math.round(origH / 3)
     : (definition.outputWidth || (isStrip ? 900 : 1800));
 
+  const isLowRes = origH < 1800 || origW < 600;
+  const isOverSized = origH > 2700 || origW > 2700;
+  let outH: number;
+  let outW: number;
+
+  if (isLowRes) {
+    outH = 2700;
+    outW = isStrip ? 900 : (definition.orientation === 'landscape' ? 2700 : 1800);
+  } else if (isOverSized) {
+    const scale = 2700 / Math.max(origW, origH);
+    outW = Math.round(origW * scale);
+    outH = Math.round(origH * scale);
+    if (isStrip && outW >= outH * 0.45) {
+      outW = Math.round(outH / 3);
+    }
+  } else {
+    outH = origH;
+    outW = origW;
+  }
+
   const rawNormSlots = (definition.slots || []).map((slot, index) => {
-    const unit = normalizeSlotToUnit(slot, outW, outH);
+    const unit = normalizeSlotToUnit(slot, origW, origH);
     return {
       id: slot.id || index + 1,
       x: unit.x,
@@ -542,11 +564,11 @@ export function mapImportedFrameDefinitionToFrameTemplate(definition: FrameDefin
 
   // ── Orientation ──────────────────────────────────────────────────────────
   const isLandscape =
-    definition.orientation === 'landscape' ||
-    definition.photoViewportOrientation === 'landscape' ||
-    (definition.outputWidth && definition.outputHeight
-      ? definition.outputWidth > definition.outputHeight
-      : false);
+    !isStrip &&
+    (definition.orientation === 'landscape' ||
+      (definition.outputWidth && definition.outputHeight
+        ? definition.outputWidth > definition.outputHeight
+        : false));
 
   // Detect corrupted or dummy full-canvas slots (e.g. {x:0, y:0, w:1, h:1})
   const isFullCanvasSlot = rawNormSlots.length === 1 && rawNormSlots[0].width >= 0.95 && rawNormSlots[0].height >= 0.95 && (rawNormSlots[0].x <= 0.02 && rawNormSlots[0].y <= 0.02);

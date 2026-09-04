@@ -35,17 +35,27 @@ export async function generateProductionPipelineTest(
   const sampleFrame: FrameTemplate = options?.frame || {
     id: 'prod-test-frame',
     name: 'Production Print Pipeline Test Frame',
+    thumbnail: '',
+    category: '1 PHOTO',
+    targetProduct: 'PREMIUM_POSTCARD',
+    shotCount: 1,
     orientation: 'portrait',
-    aspectRatio: '2:3',
     outputWidth: 1800,
     outputHeight: 2700,
+    preferredPaper: '4x6',
+    supportedPapers: ['4x6'],
+    renderMode: 'standard',
+    layout: {
+      type: '1x1',
+      slotCount: 1,
+    },
     slots: [
       {
         id: 'slot-1',
-        x: 90,
-        y: 90,
-        width: 1620,
-        height: 2420,
+        x: 0.05,
+        y: 0.05,
+        width: 0.9,
+        height: 0.9,
       },
     ],
     assets: {
@@ -55,8 +65,9 @@ export async function generateProductionPipelineTest(
 
   const photoItem: PhotoItem = {
     id: 'prod-test-photo-1',
+    index: 0,
     dataUrl: photoUrl,
-    timestamp: Date.now(),
+    timestamp: new Date().toISOString(),
     width: 5472,
     height: 3648,
   };

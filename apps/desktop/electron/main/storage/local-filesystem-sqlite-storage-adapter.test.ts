@@ -1,10 +1,20 @@
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { LocalFilesystemSQLiteStorageAdapter } from './local-filesystem-sqlite-storage-adapter';
+import { LocalFilesystemSQLiteStorageAdapter, resolveMomentAIStorageRoot } from './local-filesystem-sqlite-storage-adapter';
+
+const require = createRequire(import.meta.url);
+const { SessionMediaPaths, resolveMomentAIStorageRoot: resolveCjsStorageRoot } = require('./session-media-paths.cjs') as {
+  SessionMediaPaths: new (storageRootDir?: string) => { getStorageRoot(): string };
+  resolveMomentAIStorageRoot: (env?: NodeJS.ProcessEnv, platform?: NodeJS.Platform) => string;
+};
+const { DesktopMediaManager } = require('../media/desktop-media-manager.cjs') as {
+  DesktopMediaManager: new (options?: { storageRootDir?: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform }) => { storageRootDir: string };
+};
 
 const tempRoots: string[] = [];
 const adapters: LocalFilesystemSQLiteStorageAdapter[] = [];
@@ -32,6 +42,46 @@ afterEach(() => {
       // Windows safe cleanup
     }
   }
+});
+
+describe('resolveMomentAIStorageRoot', () => {
+  it('uses an explicit MOMENTAI_STORAGE_DIR override first', () => {
+    const env = { MOMENTAI_STORAGE_DIR: 'C:/MomentAIOverride', LOCALAPPDATA: 'C:/Users/booth/AppData/Local' } as unknown as NodeJS.ProcessEnv;
+    const root = resolveMomentAIStorageRoot(env, 'win32');
+
+    expect(root).toBe(path.resolve('C:/MomentAIOverride'));
+  });
+
+  it('uses %LOCALAPPDATA% on Windows when no override is set', () => {
+    const env = { LOCALAPPDATA: 'C:/Users/booth/AppData/Local' } as unknown as NodeJS.ProcessEnv;
+    const root = resolveMomentAIStorageRoot(env, 'win32');
+
+    expect(root).toBe(path.join('C:/Users/booth/AppData/Local', 'MomentAI', 'Photobooth'));
+  });
+
+  it('keeps non-Windows development storage under artifacts', () => {
+    const root = resolveMomentAIStorageRoot({} as NodeJS.ProcessEnv, 'darwin');
+
+    expect(root).toBe(path.join(process.cwd(), 'artifacts', 'windowmini-storage'));
+  });
+});
+
+describe('CommonJS storage root consumers', () => {
+  it('uses the same %LOCALAPPDATA% production root for SessionMediaPaths', () => {
+    const env = { LOCALAPPDATA: 'C:/Users/booth/AppData/Local' } as unknown as NodeJS.ProcessEnv;
+    const root = resolveCjsStorageRoot(env, 'win32');
+    const paths = new SessionMediaPaths(root);
+
+    expect(root).toBe(path.join('C:/Users/booth/AppData/Local', 'MomentAI', 'Photobooth'));
+    expect(paths.getStorageRoot()).toBe(path.resolve(root));
+  });
+
+  it('routes DesktopMediaManager through the canonical storage resolver', () => {
+    const env = { LOCALAPPDATA: 'C:/Users/booth/AppData/Local' } as unknown as NodeJS.ProcessEnv;
+    const manager = new DesktopMediaManager({ env, platform: 'win32' });
+
+    expect(manager.storageRootDir).toBe(path.resolve(path.join('C:/Users/booth/AppData/Local', 'MomentAI', 'Photobooth')));
+  });
 });
 
 describe('LocalFilesystemSQLiteStorageAdapter', () => {

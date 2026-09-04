@@ -9,6 +9,23 @@ const { desktopMediaManager } = require('./media/desktop-media-manager.cjs');
 const { SessionMediaPaths } = require('./storage/session-media-paths.cjs');
 const { cloudSyncCoordinator } = require('./cloud/cloud-sync-coordinator.cjs');
 
+// 1. Single Instance Lock (Prevents duplicate instances colliding on USB devices)
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  console.warn('[ELECTRON_BOOT] Another instance is already running. Quitting duplicate instance.');
+  app.quit();
+  process.exit(0);
+} else {
+  app.on('second-instance', () => {
+    const windows = BrowserWindow.getAllWindows();
+    if (windows.length > 0) {
+      const mainWin = windows[0];
+      if (mainWin.isMinimized()) mainWin.restore();
+      mainWin.focus();
+    }
+  });
+}
+
 const canonRuntime = new CanonRuntimeClient();
 let sessionMediaPaths = null;
 
@@ -47,11 +64,20 @@ const isDev = !app.isPackaged;
 const rendererUrl =
   process.env.WINDOWMINI_RENDERER_URL || 'http://localhost:5173';
 
+const isKiosk = process.env.MOMENTAI_KIOSK_MODE === 'true' || process.argv.includes('--kiosk');
+
 const projectRoot = path.resolve(__dirname, '../../../..');
-const logDir = process.env.MOMENTAI_LOG_DIR || path.join(projectRoot, 'artifacts', 'logs');
+const defaultStorageRoot = app.isPackaged
+  ? path.join(app.getPath('userData'), 'storage')
+  : path.join(projectRoot, 'artifacts', 'windowmini-storage');
+const defaultLogDir = app.isPackaged
+  ? path.join(app.getPath('userData'), 'logs')
+  : path.join(projectRoot, 'artifacts', 'logs');
+
+const logDir = process.env.MOMENTAI_LOG_DIR || defaultLogDir;
 const systemLogFile = path.join(logDir, 'momentai-cameraos.log');
 const canonShadowLogFile = path.join(logDir, 'canon-shadow.log');
-const storageRoot = path.resolve(process.env.MOMENTAI_STORAGE_DIR || path.join(projectRoot, 'artifacts', 'windowmini-storage'));
+const storageRoot = path.resolve(process.env.MOMENTAI_STORAGE_DIR || defaultStorageRoot);
 sessionMediaPaths = new SessionMediaPaths(storageRoot);
 desktopMediaManager.setStorageRootDir(storageRoot);
 const storageDbFile = path.join(storageRoot, 'cameraos-storage.sqlite');
@@ -96,15 +122,18 @@ function createWindow(mode = 'guest') {
   console.log(`[DISPLAY_AUDIT] SECONDARY_DISPLAY = ${JSON.stringify(secondaryDisplay?.bounds || null)}`);
   console.log(`[DISPLAY_AUDIT] ELECTRON_DISPLAY = ${targetDisplay.id === primaryDisplay.id ? 'PRIMARY' : 'SECONDARY'}`);
   console.log(`[DISPLAY_AUDIT] ELECTRON_WINDOW_BOUNDS = ${JSON.stringify({ x, y, width, height })}`);
+  console.log(`[DISPLAY_AUDIT] KIOSK_MODE_ENABLED = ${isKiosk ? 'YES' : 'NO'}`);
 
   const win = new BrowserWindow({
     x,
     y,
     width,
     height,
-    frame: true,
+    frame: !isKiosk,
+    kiosk: isKiosk,
+    fullscreen: isKiosk,
     fullscreenable: true,
-    autoHideMenuBar: isGuest,
+    autoHideMenuBar: true,
     show: false,
     backgroundColor: isGuest ? '#FDFCFB' : '#111111',
     webPreferences: {
@@ -113,6 +142,34 @@ function createWindow(mode = 'guest') {
       nodeIntegration: false,
       sandbox: false,
     },
+  });
+
+  // Hotkey Escape Hatch for Operators (Ctrl+Shift+A for Admin, Ctrl+Shift+Q for Quit, F11 for Fullscreen)
+  win.webContents.on('before-input-event', (event, input) => {
+    const isControlOrMeta = input.control || input.meta;
+    const isShift = input.shift;
+
+    if (isControlOrMeta && isShift && input.key.toLowerCase() === 'a') {
+      event.preventDefault();
+      const currentUrl = win.webContents.getURL();
+      if (currentUrl.includes('#/admin')) {
+        const targetGuest = isDev ? `${rendererUrl}/#/guest` : `${url.pathToFileURL(path.join(__dirname, '../../renderer/dist/index.html')).toString()}#/guest`;
+        void win.loadURL(targetGuest);
+      } else {
+        const targetAdmin = isDev ? `${rendererUrl}/#/admin` : `${url.pathToFileURL(path.join(__dirname, '../../renderer/dist/index.html')).toString()}#/admin`;
+        void win.loadURL(targetAdmin);
+      }
+    } else if (isControlOrMeta && isShift && input.key.toLowerCase() === 'q') {
+      event.preventDefault();
+      console.log('[OPERATOR_ESCAPE] Emergency app quit triggered by operator hotkey.');
+      app.quit();
+    } else if (input.key === 'F11' && input.type === 'keyDown') {
+      event.preventDefault();
+      win.setFullScreen(!win.isFullScreen());
+    } else if (isControlOrMeta && isShift && input.key.toLowerCase() === 'r') {
+      event.preventDefault();
+      win.reload();
+    }
   });
 
   const target = isDev
@@ -915,6 +972,8 @@ function registerSkeletonIpc() {
   ipcMain.handle('cameraos:admin:auth:unlock', (_event, passcode) => String(passcode || '') === (process.env.MOMENTAI_ADMIN_PASSCODE || '0000') ? ok({ token: `admin_${Date.now()}`, expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString() }) : unavailable('ADMIN_PASSCODE_INVALID'));
   ipcMain.handle('cameraos:admin:auth:lock', () => ok(undefined));
   ipcMain.handle('cameraos:admin:auth:verify', () => ok(undefined));
+  // Platform info: exposes isDev to renderer safely via IPC
+  ipcMain.handle('cameraos:platform:info', () => ({ isDev, version: app.getVersion() }));
   ipcMain.handle('cameraos:admin:events:list', () => ok(Array.from(adminEvents.values())));
   ipcMain.handle('cameraos:admin:events:create', (_event, name) => {
     const eventName = String(name || 'Event');
@@ -932,6 +991,12 @@ function registerSkeletonIpc() {
   ipcMain.handle('cameraos:admin:health:snapshot', () => ok({ camera: 'unknown', printer: 'unknown', storage: 'ready', network: 'unknown', hardwareStatus: 'not-tested' }));
   ipcMain.handle('cameraos:admin:cleanup:summary', () => ok({ config: { enabled: true, retentionMinutes: 10, cleanupIntervalSeconds: 60, mode: 'audit_minimal', deferWhilePrintActive: true, printCleanupGraceMinutes: 30 }, pending: 0, eligible: 0, deleted: 0, failed: 0 }));
   ipcMain.handle('cameraos:admin:cleanup:run-now', () => ok([]));
+  ipcMain.handle('cameraos:admin:printer:get-status', () => safeGuest(() => printQueue.getQueueStatus()));
+  ipcMain.handle('cameraos:admin:printer:reset-paper', (_event, capacity) => safeGuest(() => printQueue.resetConsumables(capacity)));
+  ipcMain.handle('cameraos:admin:printer:pause-queue', () => safeGuest(() => printQueue.pauseQueue()));
+  ipcMain.handle('cameraos:admin:printer:resume-queue', () => safeGuest(() => printQueue.resumeQueue()));
+  ipcMain.handle('cameraos:admin:printer:retry-job', (_event, jobId) => safeGuest(() => printQueue.retryJob(jobId)));
+  ipcMain.handle('cameraos:admin:printer:cancel-job', (_event, jobId) => safeGuest(() => printQueue.cancelJob(jobId)));
   ipcMain.handle('cameraos:admin:logs:tail', (_event, limit) => safeGuest(() => {
     const maxLines = Math.max(1, Math.min(Number(limit) || 50, 500));
     if (!fs.existsSync(systemLogFile)) {
@@ -1070,6 +1135,7 @@ function registerSkeletonIpc() {
   ipcMain.handle('cameraos:camera:capture', async (_event, context) => safeGuest(async () => {
     const sessionId = typeof context?.sessionId === 'string' ? context.sessionId : 'unknown_session';
     const shotIndex = Number.isFinite(Number(context?.shotIndex)) ? Number(context.shotIndex) : 1;
+    const isLastShot = Boolean(context?.isLastShot);
     const correlationId = typeof context?.correlationId === 'string' ? context.correlationId : `canon_${Date.now()}_${shotIndex}`;
 
     activeCaptureSessionId = sessionId;
@@ -1086,6 +1152,7 @@ function registerSkeletonIpc() {
         shotIndex,
         targetPath,
         correlationId,
+        isLastShot,
       });
 
       const fileBuffer = fs.readFileSync(result.path);
@@ -1329,6 +1396,37 @@ function registerSkeletonIpc() {
     }
     return touch({ ...session, printJob: enqueueResult.value }, session.status);
   }));
+  // Returns the real-time print job status for a session (used by renderer polling)
+  ipcMain.handle('cameraos:printer:status', (_event, sessionId) => safeGuest(() => {
+    if (!sessionId) {
+      return { connected: false, status: 'UNKNOWN', jobStatus: null };
+    }
+    const session = sessions.get(String(sessionId));
+    const jobId = session?.printJob?.id;
+    let jobStatus = null;
+    if (jobId) {
+      try {
+        const db = ensureStorageDb();
+        const row = db.prepare('SELECT status, last_error, attempt_count, completed_at FROM print_jobs WHERE id = ?').get(jobId);
+        if (row) {
+          jobStatus = {
+            jobId,
+            status: String(row.status || 'UNKNOWN').toUpperCase(),
+            lastError: row.last_error || null,
+            attemptCount: row.attempt_count || 0,
+            completedAt: row.completed_at || null,
+          };
+        }
+      } catch {
+        // Ignore DB errors
+      }
+    }
+    return {
+      connected: true,
+      status: jobStatus?.status || 'UNKNOWN',
+      jobStatus,
+    };
+  }));
   ipcMain.handle('cameraos:media:clip-recorder:start-shot', (_event, sessionId, shotIndex, countdownStartedAt) => safeGuest(() => {
     activeCaptureSessionId = sessionId;
     activeCaptureShotIndex = Number(shotIndex) + 1;
@@ -1511,8 +1609,8 @@ app.whenReady().then(async () => {
   registerSkeletonIpc();
   printQueue.init();
   ensureStorageDb();
-  cloudSyncCoordinator.init(storageDb, sessionMediaPaths);
   desktopMediaManager.init(storageDb);
+  cloudSyncCoordinator.init(storageDb, sessionMediaPaths, desktopMediaManager);
   desktopMediaManager.onJobCompleted((job) => {
     const session = sessions.get(job.sessionId);
     if (session && job.jobType === 'FRAME_VIDEO_COMPOSE') {

@@ -52,7 +52,7 @@ export class ShotClipRecorderService {
     config?: Partial<ShotClipTimingConfig>;
     encoder?: VideoEncoderService;
   }) {
-    this.storageRootDir = options?.storageRootDir || path.resolve(process.env.MOMENTAI_STORAGE_DIR || path.join(process.cwd(), 'artifacts', 'windowmini-storage'));
+    this.storageRootDir = options?.storageRootDir || path.resolve(process.env.MOMENTAI_STORAGE_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), 'artifacts', 'windowmini-storage'));
     this.config = { ...DEFAULT_SHOT_CLIP_TIMING_CONFIG, ...options?.config };
     this.encoder = options?.encoder || videoEncoderService;
   }

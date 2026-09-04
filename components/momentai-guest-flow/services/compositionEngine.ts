@@ -96,11 +96,11 @@ export class CompositionEngine {
 
       if (isLandscape) {
         // Landscape branding area at bottom
-        ctx.font = `italic ${Math.round(38 * scale)}px "Playfair Display", serif`;
+        ctx.font = `italic ${Math.round(38 * scale)}px "Playfair Display", "Times New Roman", serif`;
         ctx.fillText(branding.text, canvas.width / 2, Math.round(1660 * (canvas.height / 1800)));
 
         if (branding.subtext) {
-          ctx.font = `${Math.round(22 * scale)}px "Plus Jakarta Sans", sans-serif`;
+          ctx.font = `${Math.round(22 * scale)}px "Plus Jakarta Sans", "Inter", Arial, sans-serif`;
           ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}cc` : '#4b5563';
           ctx.fillText(branding.subtext, canvas.width / 2, Math.round(1705 * (canvas.height / 1800)));
         }
@@ -117,11 +117,11 @@ export class CompositionEngine {
         }
       } else if (isStrip) {
         // Strip branding area
-        ctx.font = `italic ${Math.round(36 * scale)}px "Playfair Display", serif`;
+        ctx.font = `italic ${Math.round(36 * scale)}px "Playfair Display", "Times New Roman", serif`;
         ctx.fillText(branding.text, canvas.width / 2, Math.round(2520 * scale));
 
         if (branding.subtext) {
-          ctx.font = `${Math.round(22 * scale)}px "Plus Jakarta Sans", sans-serif`;
+          ctx.font = `${Math.round(22 * scale)}px "Plus Jakarta Sans", "Inter", Arial, sans-serif`;
           ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}cc` : '#4b5563';
           ctx.fillText(branding.subtext, canvas.width / 2, Math.round(2570 * scale));
         }
@@ -138,11 +138,11 @@ export class CompositionEngine {
         }
       } else {
         // Portrait Sheet branding area
-        ctx.font = `italic ${Math.round(52 * scale)}px "Playfair Display", serif`;
+        ctx.font = `italic ${Math.round(52 * scale)}px "Playfair Display", "Times New Roman", serif`;
         ctx.fillText(branding.text, canvas.width / 2, Math.round(2500 * scale));
 
         if (branding.subtext) {
-          ctx.font = `${Math.round(30 * scale)}px "Plus Jakarta Sans", sans-serif`;
+          ctx.font = `${Math.round(30 * scale)}px "Plus Jakarta Sans", "Inter", Arial, sans-serif`;
           ctx.fillStyle = frame.assets.textColor ? `${frame.assets.textColor}cc` : '#4b5563';
           ctx.fillText(branding.subtext, canvas.width / 2, Math.round(2570 * scale));
         }

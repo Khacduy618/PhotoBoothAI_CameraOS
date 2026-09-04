@@ -1,4 +1,3 @@
-import { getLayoutGeometry } from "@/services/layout/layout-engine";
 import type {
     BoothCountdownSeconds,
     BoothLayoutConfig,
@@ -69,15 +68,7 @@ export function resolveBoothLayoutConfig(
     layoutId: string,
 ): BoothLayoutConfig {
     const resolvedLayoutId = legacyLayoutAliases[layoutId] ?? layoutId;
-    const staticConfig = boothLayoutConfigs.find((layout) => layout.id === resolvedLayoutId) ?? boothLayoutConfigs[0];
-    const geometry = getLayoutGeometry(staticConfig.id);
-    return {
-        ...staticConfig,
-        columns: geometry.columns,
-        rows: geometry.rows,
-        outputWidth: geometry.outputWidth,
-        outputHeight: geometry.outputHeight,
-    };
+    return boothLayoutConfigs.find((layout) => layout.id === resolvedLayoutId) ?? boothLayoutConfigs[0];
 }
 
 export function isBoothLayoutId(

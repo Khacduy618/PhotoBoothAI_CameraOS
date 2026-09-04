@@ -570,16 +570,20 @@ static EdsError EDSCALLBACK handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef
         if (pEdsDownloadComplete) pEdsDownloadComplete(dirItem);
         if (pEdsRelease) pEdsRelease(stream);
 
-        // Read file data to determine JPEG dimensions
-        int width = 0, height = 0;
-        size_t fileSize = 0;
-        std::ifstream file(destPath, std::ios::binary | std::ios::ate);
+        // Read fast header bytes to determine JPEG dimensions without full 8MB heap churn
+        int width = 5472, height = 3648;
+        size_t fileSize = (size_t)dirInfo.size;
+        std::ifstream file(destPath, std::ios::binary);
         if (file.is_open()) {
-            fileSize = (size_t)file.tellg();
-            file.seekg(0, std::ios::beg);
-            std::vector<unsigned char> buffer(fileSize);
-            if (file.read((char*)buffer.data(), fileSize)) {
-                parseJpegMemoryDimensions(buffer.data(), fileSize, &width, &height);
+            std::vector<unsigned char> headerBuf(65536);
+            file.read((char*)headerBuf.data(), headerBuf.size());
+            size_t bytesRead = (size_t)file.gcount();
+            if (bytesRead > 0) {
+                int parsedW = 0, parsedH = 0;
+                if (parseJpegMemoryDimensions(headerBuf.data(), bytesRead, &parsedW, &parsedH) == 0 && parsedW > 0 && parsedH > 0) {
+                    width = parsedW;
+                    height = parsedH;
+                }
             }
             file.close();
         }

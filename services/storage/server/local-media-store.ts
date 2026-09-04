@@ -44,7 +44,7 @@ const SESSION_TTL_MS = 10 * 60 * 1000;
 const ALLOWED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 function getDataRoot(): string {
-    return path.resolve(process.cwd(), process.env[DATA_DIR_ENV] || DEFAULT_DATA_DIR);
+    return path.resolve(/*turbopackIgnore: true*/ process.cwd(), process.env[DATA_DIR_ENV] || DEFAULT_DATA_DIR);
 }
 
 function assertSafeSegment(value: string, label: string): string {

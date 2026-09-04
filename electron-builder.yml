@@ -1,0 +1,55 @@
+appId: com.momentai.photobooth
+productName: MomentAI PhotoBooth CameraOS
+copyright: Copyright © 2026 MomentAI
+
+directories:
+  output: dist-electron
+  buildResources: build
+
+files:
+  - "apps/desktop/electron/**/*"
+  - "apps/desktop/camera-runtime/**/*"
+  - "apps/desktop/renderer/dist/**/*"
+  - "public/**/*"
+  - "package.json"
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+  - "!**/node_modules/*.d.ts"
+  - "!**/node_modules/.bin"
+
+extraResources:
+  - from: "apps/desktop/camera-runtime/bin"
+    to: "bin"
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: MomentAI PhotoBooth
+  runAfterFinish: true
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  category: public.app-category.photography
+
+asarUnpack:
+  - "**/*.node"
+  - "**/better-sqlite3/**/*"
+  - "**/apps/desktop/camera-runtime/bin/**/*"

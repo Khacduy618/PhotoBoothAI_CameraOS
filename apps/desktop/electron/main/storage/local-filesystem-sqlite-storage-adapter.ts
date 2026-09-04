@@ -10,8 +10,19 @@ interface LocalFilesystemSQLiteStorageAdapterOptions {
   now?: () => string;
 }
 
-const DEFAULT_ROOT_DIR = path.join(process.cwd(), 'artifacts', 'windowmini-storage');
+const DEV_ROOT_DIR = path.join(process.cwd(), 'artifacts', 'windowmini-storage');
+const PRODUCTION_APP_DATA_DIR = path.join('MomentAI', 'Photobooth');
 const SQLITE_FILE = 'cameraos-storage.sqlite';
+
+export function resolveMomentAIStorageRoot(env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string {
+  if (env.MOMENTAI_STORAGE_DIR) {
+    return path.resolve(env.MOMENTAI_STORAGE_DIR);
+  }
+  if (platform === 'win32' && env.LOCALAPPDATA) {
+    return path.join(env.LOCALAPPDATA, PRODUCTION_APP_DATA_DIR);
+  }
+  return DEV_ROOT_DIR;
+}
 
 export class LocalFilesystemSQLiteStorageAdapter implements StorageAdapter {
   private db: Database | null = null;
@@ -19,7 +30,7 @@ export class LocalFilesystemSQLiteStorageAdapter implements StorageAdapter {
   private readonly now: () => string;
 
   constructor(options: LocalFilesystemSQLiteStorageAdapterOptions = {}) {
-    this.rootDir = path.resolve(options.rootDir || process.env.MOMENTAI_STORAGE_DIR || DEFAULT_ROOT_DIR);
+    this.rootDir = path.resolve(options.rootDir || resolveMomentAIStorageRoot());
     this.now = options.now ?? (() => new Date().toISOString());
   }
 

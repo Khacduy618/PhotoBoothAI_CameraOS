@@ -53,16 +53,16 @@ export function resolveTargetProduct(frame: ResolvableFrame): CanonicalProduct |
     if (frame.outputPaper === '5x15') return 'STRIP_4';
     if (frame.outputPaper === '10x15') return 'SHEET_4';
 
+    // Priority 3: layout.type (if layout is explicit 1x4, it's a strip regardless of canvas)
+    if (frame.layout?.type === '1x4') return 'STRIP_4';
+    if (frame.layout?.type === '2x2') return 'SHEET_4';
+
     const w = frame.outputWidth;
     const h = frame.outputHeight;
     if (w && h && w > 0) {
-      // Strip 5x15: ratio~3.0. Sheet 10x15: ratio~1.5. Threshold 2.5 has large margin.
-      return (h / w) >= 2.5 ? 'STRIP_4' : 'SHEET_4';
+      // Strip 5x15: ratio~3.0. Sheet 10x15: ratio~1.5. Threshold 1.8 separates 10x15 (1.5) from photostrips (>=1.8)
+      return (h / w) >= 1.8 ? 'STRIP_4' : 'SHEET_4';
     }
-
-    // Priority 3: layout.type legacy migration
-    if (frame.layout?.type === '1x4') return 'STRIP_4';
-    if (frame.layout?.type === '2x2') return 'SHEET_4';
   }
 
   return null;

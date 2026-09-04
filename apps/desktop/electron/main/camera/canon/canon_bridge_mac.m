@@ -252,13 +252,17 @@ static EdsError handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef inRef, void
         pEdsRelease(stream);
 
         // Parse downloaded image dimensions
-        int width = 0, height = 0;
-        NSData *fileData = [NSData dataWithContentsOfFile:destPath];
-        if (fileData) {
-            parseJpegMemoryDimensions([fileData bytes], [fileData length], &width, &height);
+        int width = 5472, height = 3648;
+        NSData *fileData = [NSData dataWithContentsOfFile:destPath options:NSDataReadingMappedIfSafe error:nil];
+        if (fileData && [fileData length] > 4) {
+            int parsedW = 0, parsedH = 0;
+            if (parseJpegMemoryDimensions([fileData bytes], MIN((size_t)[fileData length], (size_t)65536), &parsedW, &parsedH) == 0 && parsedW > 0 && parsedH > 0) {
+                width = parsedW;
+                height = parsedH;
+            }
         }
 
-        g_downloadedFileSize = (unsigned long)[fileData length];
+        g_downloadedFileSize = (unsigned long)(fileData ? [fileData length] : (NSUInteger)dirInfo.size);
         g_downloadedWidth = width > 0 ? width : 5472;
         g_downloadedHeight = height > 0 ? height : 3648;
         g_captureCompleted = 1;
@@ -274,20 +278,6 @@ static EdsError handleObjectEvent(EdsObjectEvent inEvent, EdsBaseRef inRef, void
             @"width": @(g_downloadedWidth),
             @"height": @(g_downloadedHeight)
         });
-
-        if (g_wasLiveViewBeforeCapture) {
-            g_wasLiveViewBeforeCapture = 0;
-            usleep(150000);
-            EdsUInt32 evfOn = kEdsEvfOutputDevice_PC;
-            EdsError errEvf = pEdsSetPropertyData ? pEdsSetPropertyData(g_camera, kEdsPropID_Evf_OutputDevice, 0, sizeof(evfOn), &evfOn) : EDS_ERR_OK;
-            if (errEvf == EDS_ERR_OK) {
-                g_liveViewActive = 1;
-                fprintf(stderr, "[CanonBridge] Restored LiveView EVF output after capture download\n");
-                sendJsonEvent(@{ @"event": @"liveViewResumed", @"status": @"ok" });
-            } else {
-                fprintf(stderr, "[CanonBridge] Failed to restore LiveView EVF output: 0x%08X\n", errEvf);
-            }
-        }
     }
     return EDS_ERR_OK;
 }

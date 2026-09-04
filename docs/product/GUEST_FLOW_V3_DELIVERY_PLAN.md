@@ -1,16 +1,22 @@
 # MomentAI Guest Flow V3 — Delivery Plan
 
 Status: Active delivery plan after Guest Flow V3 reset, updated for Production Brief v3.1 PM decisions.
-Source architecture: `docs/architecture/MomentAI_Guest_Internal_System_Design.md` and `docs/MomentAI_CameraOS_Production_Brief_v3.1.md`.
+Source architecture: `docs/architecture/MomentAI_Guest_Internal_System_Design.md`. Production decisions are recorded in the PM decisions applied section below.
 Target runtime: Windows 10 x64 booth PC / Mini PC form factor + Electron + Vite React renderer. Admin/operator is inside Electron and hidden from guests. macOS is allowed only as a development platform using Device/Fake adapters; React Native, iPad and macOS production runtimes are out of V1 scope.
 
 ## PM decisions applied
 
-- Production OS target: Windows 10 x64 booth PC.
-- V1 share mode: `LOCAL_NETWORK_URL` preferred, with explicit unavailable/disabled fallback when the phone cannot reach the booth endpoint. Cloud URL delivery is deferred unless PM approves a cloud provider.
-- V1 print policy: `GUEST_CONFIRM`.
+- Production OS target: Windows 10 x64 booth PC packaged as a local Windows `.exe` Electron app.
+- Production app data root: `%LOCALAPPDATA%` under an app-owned MomentAI Photobooth directory.
+- V1 kiosk runtime: app starts in fullscreen Electron kiosk mode, hides guest access to toolbar/taskbar/chrome, uses hidden/passcode-gated Admin access and supports Windows startup/auto-launch.
+- V1 share mode: `CLOUD_LANDING_PAGE` using the approved Vercel landing page + Neon metadata/token records + R2 object storage stack. `LOCAL_NETWORK_URL` remains fallback/dev/offline mode when configured and reachable.
+- QR token TTL: 10 minutes after share/landing creation; app restart must not invalidate an unexpired durable token.
+- Cleanup: local/cloud session cleanup eligibility defaults to 30 minutes, with guards for active sessions, active share uploads and pending/active/failed/review print jobs.
+- V1 print policy: `GUEST_CONFIRM`; confirmed print jobs run through a durable FIFO queue. Printer slowness queues later jobs; print failure stops the queue, performs no automatic retry and requires Admin manual reprint/resume.
+- V1 certified hardware targets: Canon EOS 6D camera and Canon SELPHY CP1000 printer only; adapters remain extensible for later PM-approved hardware.
 - Retake: deferred to a later phase; V1 Guest UI must not show retake. Admin-configurable retake policy is reserved for later work and V1 effective behavior is `allowGuestRetake=false`, `maxRetakesPerShot=0`.
 - Canon Command Shadow Mode: implement after the fake/device capture loop and before the physical Canon integration spike. Shadow evidence never satisfies Canon hardware PASS.
+- Touch/kiosk UX: scrollable guest/operator surfaces must scroll by natural touch drag, not scrollbar-only interaction.
 
 ## Delivery goal
 
@@ -23,7 +29,7 @@ START / SHOWCASE
 → SELECT TEMPLATE
 → CUSTOMIZE, if template allows
 → FINAL COMPOSITION
-→ RESULT + LOCAL QR when reachable / fallback when unavailable + optional GUEST-CONFIRMED PRINT
+→ RESULT + CLOUD QR when available / local or unavailable fallback + GUEST-CONFIRMED QUEUED PRINT
 → DONE or 120-second timeout
 → RESET GUEST SESSION
 → START
@@ -41,11 +47,14 @@ START / SHOWCASE
 - Templates do not contain guest photos.
 - Guest does not choose layout, paper, printer, camera provider, photo order or print profile.
 - Guest may confirm printing in V1, but the system derives printer, paper/profile and copies from event/template configuration.
+- Confirmed print jobs run through a durable FIFO queue; printer slowness queues jobs, while print failure stops the queue and requires Admin manual reprint/resume with no automatic retry.
 - Printer failure never invalidates media or QR.
-- Reset does not disconnect a healthy Canon/device camera service or printer service.
-- Local QR is allowed only when it resolves to a reachable local network endpoint from the guest phone.
+- Reset does not disconnect a healthy Canon/device camera service or printer service and does not cancel queued/active print jobs.
+- Cloud QR is allowed only through the approved tokenized Vercel/Neon/R2 landing-page flow; local QR fallback is allowed only when it resolves to a reachable local network endpoint from the guest phone.
 - QR must never point to `localhost`, local absolute filesystem paths or inaccessible private paths.
-- Cloud QR URLs and local QR URLs must not expose local absolute paths or QR secrets in logs.
+- Cloud QR URLs and local QR URLs must not expose local absolute paths, raw R2 keys or QR secrets in logs.
+- QR/share tokens expire after 10 minutes from share/landing creation.
+- Cleanup defaults to 30-minute eligibility but must preserve active sessions, active share uploads and pending/active/failed/review print jobs.
 - Hardware PASS requires real named hardware evidence.
 - Renderer screens, including admin/operator, never import filesystem, SQLite, Canon SDK, Windows print APIs or shell commands directly.
 - Electron preload/IPC is the only renderer-to-platform boundary.
@@ -86,7 +95,10 @@ Foundation checklist:
 - [x] Add Electron main image storage skeleton through storage contract/fake adapter.
 - [x] Add media retention/cleanup skeleton with active-session and print-active safeguards.
 - [x] Expose cleanup summary/run-now through admin contract and IPC skeleton.
-- [ ] Align any remaining source-of-truth target-runtime wording to Windows 10 x64 booth PC where applicable.
+- [ ] Align any remaining source-of-truth target-runtime wording to Windows 10 x64 booth PC / Windows `.exe` Electron kiosk where applicable.
+- [ ] Add Windows `.exe` packaging target, app icon identity and production release artifact naming.
+- [ ] Add fullscreen kiosk/startup production runtime configuration.
+- [ ] Resolve production `%LOCALAPPDATA%` data root in Electron main.
 - [ ] Bind real Electron `ipcMain`/`ipcRenderer` after runtime dependencies are installed.
 - [ ] Replace Next API calls in Guest/Admin UI with Electron preload clients.
 - [ ] Implement LocalFilesystemSQLiteStorageAdapter.
@@ -108,7 +120,7 @@ Scope:
 - Replace old sprint/phase planning docs with Guest Flow V3 docs.
 - Keep `MomentAI_Guest_Internal_System_Design.md` as architecture source.
 - Apply Production Brief v3.1 PM decisions to delivery plan, backlog, role matrix and evidence matrix.
-- Record PM decisions for Windows 10 x64, local QR, guest-confirmed print, retake deferral and Canon Shadow sequencing.
+- Record PM decisions for Windows `.exe` kiosk/startup, `%LOCALAPPDATA%`, cloud QR via Vercel/Neon/R2 with local fallback, 10-minute QR TTL, 30-minute cleanup eligibility, guest-confirmed FIFO print queue, retake deferral and Canon Shadow sequencing.
 - Remove obsolete Sprint/Phase/production planning files after approval.
 
 Evidence:
@@ -156,8 +168,8 @@ Stories: Foundation gate for V3-003/V3-004
 
 Scope:
 
-- Minimal `EventConfig` with active event ID, enabled 1/2/4/6 shot formats, timeout policy, capture policy, `PrintPolicy=GUEST_CONFIRM`, `ShareMode=LOCAL_NETWORK_URL`, template set, and V1 retake disabled.
-- Health aggregation for camera, storage, database/persistence, composition, printer and share/network.
+- Minimal `EventConfig` with active event ID, enabled 1/2/4/6 shot formats, timeout policy, capture policy, `PrintPolicy=GUEST_CONFIRM`, `ShareMode=CLOUD_LANDING_PAGE | LOCAL_NETWORK_URL | DISABLED`, QR token TTL of 10 minutes, cleanup eligibility of 30 minutes, template set, and V1 retake disabled.
+- Health aggregation for camera, storage, database/persistence, composition, printer, print queue, cloud share and local share/network.
 - `READY` / `DEGRADED` / `BLOCKED` gate before Guest Start.
 - Guest Start disabled or blocked when event/system readiness fails.
 - Operator/admin-readable readiness reason.
@@ -392,7 +404,7 @@ Exit criteria:
 - Master/share/print derivatives are separate.
 - Final print output is not produced from low-resolution UI screenshots.
 
-### Milestone 7 — Local Share/QR capability and result screen
+### Milestone 7 — Cloud/local Share/QR capability and result screen
 
 Owner: Backend + Frontend
 Supporting: QA, Reviewer, Verifier
@@ -401,16 +413,28 @@ Stories: V3-012, V3-014
 Scope:
 
 - ShareService boundary.
-- V1 ShareMode supports `DISABLED` and `LOCAL_NETWORK_URL`.
-- Cloud URL provider is deferred unless PM approves a provider integration.
-- Local ShareService serves final-share output through a tokenized session route.
-- QR generation only after a retrieval URL exists.
+- V1 ShareMode supports `DISABLED`, `CLOUD_LANDING_PAGE` and `LOCAL_NETWORK_URL` fallback/dev/offline mode.
+- Cloud provider stack is the approved Vercel landing page + Neon metadata/token records + R2 object storage path.
+- 2-Phase Upload Architecture:
+  * **Phase 1 (Lần 1 - Background Upload sau khi chụp xong các shot)**:
+    - Upload tất cả các ảnh đơn gốc (`RAW_PHOTO`: `shot_01.jpg`, `shot_02.jpg`...).
+    - Ghép tất cả các clip thô của từng shot thành 1 video tổng hợp timelapse/sequence duy nhất và upload lên Cloud (`RAW_CLIP` / `TIMELAPSE_VIDEO`); tuyệt đối không upload các file clip lẻ vụn vặt.
+  * **Phase 2 (Lần 2 - Upload sau khi chọn khung & render tại màn hình QR)**:
+    - Upload ảnh lồng khung hoàn thiện (`FINAL_IMAGE`: `outputs/final-image.jpg`).
+    - Upload video hoạt họa lồng khung hoàn thiện (`FINAL_VIDEO`: `outputs/final-video.mp4`).
+- Landing Page Viewer Guest Experience:
+  * Khách quét mã QR được xem trực tiếp Final Image và Final Video trước tiên.
+  * Nút tải riêng cho Final Image và nút tải riêng cho Final Video về điện thoại.
+  * Nút "Tải toàn bộ ảnh gốc & video timelapse" để lưu trọn bộ tư liệu chất lượng cao.
+- Cloud QR token expires 10 minutes after share/landing creation; expired access is denied with guest-safe copy.
+- Cloud/local QR URLs must not expose local paths, raw R2 keys, bucket internals or full secrets in logs.
 - Local QR URL must be reachable from a guest phone on the same event network; it must not be `localhost`-only.
-- QR unavailable/fallback state when the local endpoint/network is not reachable.
+- QR unavailable/fallback state when cloud upload/retrieval or local endpoint/network is not reachable.
 - Result screen.
 - 120-second timeout.
 - Done/reset flow.
 - QR failure fallback.
+- 30-minute cleanup eligibility for share artifacts, guarded by active session/share/print dependencies.
 
 Required tests/evidence:
 
@@ -437,14 +461,15 @@ Stories: V3-013
 Scope:
 
 - `PrintPolicy=GUEST_CONFIRM` for V1.
-- Result screen exposes a guest print confirmation action when printing is enabled.
-- Guest does not choose printer, paper, layout or print profile.
-- PrintProfile comes from selected template/event config.
+- Result screen exposes a guest print confirmation action when printing is enabled; no job is created before guest confirmation.
+- Guest does not choose printer, paper, layout, photo order, copies or print profile.
+- PrintProfile and copy count come from selected template/event config; draft policy is Premium=2, Sheet=2 and Strip=1 pending final design approval.
 - PrintService.
-- Durable PrintQueue/PrintJob.
-- Print job identity and duplicate prevention.
+- Durable FIFO PrintQueue/PrintJob persisted under the production storage root.
+- Print job identity and duplicate prevention across duplicate taps, rerenders, Done, timeout and reset.
 - PrintStatus on Result screen.
-- Printer failure/retry.
+- Printer busy/slowness leaves later jobs queued and does not block guest reset.
+- Printer failure stops the queue, leaves later jobs queued, performs no automatic retry and requires Admin manual reprint/resume.
 - Fake printer first; WindowsPrintAdapter only after CP1000 arrives.
 
 Required tests/evidence:
@@ -493,6 +518,41 @@ Exit criteria:
 
 - Operator can see why the booth is READY/DEGRADED/BLOCKED.
 - Operator diagnostics cannot corrupt active guest capture/print operations.
+
+### Milestone 8B — Windows `.exe`, kiosk startup and runtime evidence
+
+Owner: Delivery lead + Backend + Frontend
+Supporting: Architect, QA, Hardware QA, Reviewer, Verifier
+Stories: Production packaging/runtime gate before final release evidence.
+
+Scope:
+
+- Package the Electron desktop app as a Windows `.exe` release artifact with app icon/identity.
+- Decide and document installer `.exe`, portable `.exe` or both before production release.
+- Packaged app must run without Vite/Next dev server.
+- Production app data, SQLite, media, queues and logs resolve under `%LOCALAPPDATA%` in an app-owned MomentAI Photobooth directory.
+- Guest app launches directly into fullscreen kiosk mode with no visible toolbar/taskbar/chrome in guest operation.
+- Admin/operator access remains hidden and passcode-gated with a documented safe escape path.
+- Windows startup/auto-launch after login is supported for booth operation.
+- Single-instance behavior prevents duplicate app instances from contending for camera/printer resources.
+- App version/build metadata is visible in Admin diagnostics.
+- Auto-update is deferred unless PM approves a separate signed release/update channel; production updates are not `git pull main`.
+
+Required tests/evidence:
+
+- Windows `.exe` package command evidence.
+- Packaged app launches by double-click on Windows production-like environment.
+- Renderer loads without dev server.
+- Preload/IPC responds in packaged runtime.
+- `%LOCALAPPDATA%` storage path evidence.
+- Fullscreen kiosk/startup/manual Admin access evidence.
+- Touch scroll evidence for scrollable guest/operator areas when hardware is available.
+
+Exit criteria:
+
+- Release candidate can run as a local Windows app without developer tooling.
+- Kiosk/runtime PASS requires named Windows booth PC/touchscreen evidence; otherwise remains PARTIAL/Not tested.
+- No auto-update claim is made unless separately approved and evidenced.
 
 ### Milestone 8H — Windows CP1000 physical printer spike
 

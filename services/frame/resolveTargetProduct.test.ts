@@ -156,3 +156,14 @@ describe('canonicalRenderMode', () => {
   it('STRIP_4 -> double-strip', () => expect(canonicalRenderMode('STRIP_4')).toBe('double-strip'));
   it('SHEET_4 -> standard', () => expect(canonicalRenderMode('SHEET_4')).toBe('standard'));
 });
+
+describe('resolveTargetProduct - photostrip edge cases', () => {
+  it('resolves 1x4 layout as STRIP_4 regardless of dimensions', () => {
+    expect(resolveTargetProduct({ shotCount: 4, layout: { type: '1x4' } })).toBe('STRIP_4');
+  });
+
+  it('resolves 4-shot with height/width ratio >= 1.8 as STRIP_4', () => {
+    expect(resolveTargetProduct({ shotCount: 4, outputWidth: 142, outputHeight: 419 })).toBe('STRIP_4');
+    expect(resolveTargetProduct({ shotCount: 4, outputWidth: 1000, outputHeight: 2000 })).toBe('STRIP_4');
+  });
+});

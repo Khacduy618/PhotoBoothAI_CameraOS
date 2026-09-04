@@ -9,6 +9,8 @@ export interface AdminEventRecord {
     eventId: string;
     name: string;
     status: "active" | "archived";
+    isActive?: boolean;
+    frameCount?: number;
     createdAt: string;
     updatedAt: string;
 }
@@ -43,7 +45,7 @@ const DEFAULT_EVENT_NAME = "Phố Cổ Hội An";
 let cachedDb: Database | null = null;
 
 function getDataRoot(): string {
-    return path.resolve(process.cwd(), process.env[DATA_DIR_ENV] || DEFAULT_DATA_DIR);
+    return path.resolve(/*turbopackIgnore: true*/ process.cwd(), process.env[DATA_DIR_ENV] || DEFAULT_DATA_DIR);
 }
 
 function getSqlitePath(): string {
@@ -91,6 +93,12 @@ function runDatabaseMigrations(db: Database): void {
             name TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'archived')),
             created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS admin_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
     `);
@@ -205,11 +213,75 @@ export function resetAdminRegistryStoreForTests(): void {
     cachedDb = null;
 }
 
+const SETTING_ACTIVE_EVENT_KEY = "active_event_id";
+
+export function getActiveAdminEventId(): string {
+    const db = getDb();
+    const row = db.prepare("SELECT value FROM admin_settings WHERE key = ?").get(SETTING_ACTIVE_EVENT_KEY) as { value?: string } | undefined;
+    if (row?.value) {
+        return row.value;
+    }
+    return DEFAULT_EVENT_ID;
+}
+
+export function setActiveAdminEvent(eventId: string): void {
+    const safeEventId = assertSafeId(eventId, "eventId");
+    const db = getDb();
+    const eventExists = db.prepare("SELECT event_id FROM events WHERE event_id = ?").get(safeEventId);
+    if (!eventExists) {
+        throw new Error(`Event ${safeEventId} not found.`);
+    }
+    const now = new Date().toISOString();
+    db.prepare(`
+        INSERT INTO admin_settings (key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `).run(SETTING_ACTIVE_EVENT_KEY, safeEventId, now);
+}
+
+export function archiveAdminEvent(eventId: string): void {
+    const safeEventId = assertSafeId(eventId, "eventId");
+    const now = new Date().toISOString();
+    getDb().prepare("UPDATE events SET status = 'archived', updated_at = ? WHERE event_id = ?").run(now, safeEventId);
+}
+
+export function renameAdminEvent(eventId: string, name: string): AdminEventRecord {
+    const safeEventId = assertSafeId(eventId, "eventId");
+    const trimmed = name.trim();
+    if (trimmed.length < 2 || trimmed.length > 80) {
+        throw new Error("Event name must be between 2 and 80 characters.");
+    }
+    const now = new Date().toISOString();
+    const db = getDb();
+    db.prepare("UPDATE events SET name = ?, updated_at = ? WHERE event_id = ?").run(trimmed, now, safeEventId);
+    const row = db.prepare("SELECT * FROM events WHERE event_id = ?").get(safeEventId) as EventRow | undefined;
+    if (!row) {
+        throw new Error(`Event ${safeEventId} not found.`);
+    }
+    return mapEventRow(row);
+}
+
 export function listAdminEvents(): AdminEventRecord[] {
-    const rows = getDb()
+    const db = getDb();
+    const activeId = getActiveAdminEventId();
+    const rows = db
         .prepare("SELECT * FROM events ORDER BY updated_at DESC, created_at DESC")
         .all() as EventRow[];
-    return rows.map(mapEventRow);
+
+    // Compute frame counts per event
+    const countRows = db
+        .prepare("SELECT event_id, COUNT(*) as count FROM admin_frames GROUP BY event_id")
+        .all() as { event_id: string; count: number }[];
+    const countMap = new Map<string, number>();
+    for (const r of countRows) {
+        countMap.set(r.event_id, r.count);
+    }
+
+    return rows.map((row) => ({
+        ...mapEventRow(row),
+        isActive: row.event_id === activeId,
+        frameCount: countMap.get(row.event_id) ?? 0,
+    }));
 }
 
 export function createAdminEvent(name: string): AdminEventRecord {
@@ -233,7 +305,7 @@ export function createAdminEvent(name: string): AdminEventRecord {
         VALUES (?, ?, 'active', ?, ?)
     `).run(eventId, trimmed, now, now);
 
-    return { eventId, name: trimmed, status: "active", createdAt: now, updatedAt: now };
+    return { eventId, name: trimmed, status: "active", isActive: false, frameCount: 0, createdAt: now, updatedAt: now };
 }
 
 function validateFrameDefinition(definition: FrameDefinition): void {

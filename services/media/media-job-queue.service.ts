@@ -30,7 +30,7 @@ export class MediaJobQueueService {
     storageRootDir?: string;
     composer?: FrameVideoComposer;
   }) {
-    this.storageRootDir = options?.storageRootDir || path.resolve(process.env.MOMENTAI_STORAGE_DIR || path.join(process.cwd(), 'artifacts', 'windowmini-storage'));
+    this.storageRootDir = options?.storageRootDir || path.resolve(process.env.MOMENTAI_STORAGE_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), 'artifacts', 'windowmini-storage'));
     this.composer = options?.composer || frameVideoComposer;
   }
 

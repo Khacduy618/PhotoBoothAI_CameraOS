@@ -24,6 +24,10 @@ export class WindowMiniAdminMainService implements AdminApiContract {
   public readonly events: AdminApiContract['events'] = {
     list: () => this.eventsService.list(),
     create: (name) => this.eventsService.create(name),
+    getActive: () => this.eventsService.getActive(),
+    setActive: (eventId) => this.eventsService.setActive(eventId),
+    archive: (eventId) => this.eventsService.archive(eventId),
+    rename: (eventId, name) => this.eventsService.rename(eventId, name),
   };
 
   public readonly templates: AdminApiContract['templates'] = {

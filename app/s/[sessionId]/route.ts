@@ -11,7 +11,7 @@ export async function GET(
     const rawIdentifier = (await params).sessionId;
     const queryToken = request.nextUrl.searchParams.get("token");
 
-    const storageRootDir = path.resolve(process.env.MOMENTAI_STORAGE_DIR || path.join(process.cwd(), "artifacts", "windowmini-storage"));
+    const storageRootDir = path.resolve(process.env.MOMENTAI_STORAGE_DIR || path.join(/*turbopackIgnore: true*/ process.cwd(), "artifacts", "windowmini-storage"));
     const dbFile = path.join(storageRootDir, "cameraos-storage.sqlite");
 
     let resolvedSessionId: string | null = null;

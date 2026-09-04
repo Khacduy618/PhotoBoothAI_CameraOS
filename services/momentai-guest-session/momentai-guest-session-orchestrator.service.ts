@@ -13,7 +13,7 @@ import type {
 } from "@/types/momentai-guest-session";
 import { createMomentAIGuestSession, MOMENTAI_CAPTURE_FORMATS } from "@/types/momentai-guest-session";
 
-import { listPublishedFrames } from "@/services/admin/server/admin-registry-store";
+import { getActiveAdminEventId, listPublishedFrames } from "@/services/admin/server/admin-registry-store";
 import type { FrameDefinition } from "@/services/frame-import/frame-import.types";
 
 const EVENT_ID = "event_hoi_an_heritage";
@@ -188,7 +188,19 @@ function touch(session: MomentAIGuestSession, status?: MomentAIGuestSession["sta
 }
 
 export function getMomentAIEventConfig(): MomentAIEventConfig | null {
-    return activeEventConfig ? { ...activeEventConfig, enabledShotFormats: [...activeEventConfig.enabledShotFormats] } : null;
+    if (activeEventConfig !== DEFAULT_EVENT_CONFIG) {
+        return activeEventConfig ? { ...activeEventConfig, enabledShotFormats: [...activeEventConfig.enabledShotFormats] } : null;
+    }
+    try {
+        const activeId = getActiveAdminEventId();
+        return {
+            ...DEFAULT_EVENT_CONFIG,
+            eventId: activeId,
+            name: activeId,
+        };
+    } catch {
+        return { ...DEFAULT_EVENT_CONFIG };
+    }
 }
 
 export function setMomentAIEventConfigForTesting(config: MomentAIEventConfig | null): void {

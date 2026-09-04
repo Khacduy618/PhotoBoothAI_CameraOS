@@ -3,6 +3,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
 
 contextBridge.exposeInMainWorld('momentai', {
+  // Platform metadata — safe to read in renderer
+  platform: {
+    getInfo: () => invoke('cameraos:platform:info'),
+  },
   guest: {
     session: {
       getReadiness: () => invoke('cameraos:guest:readiness:get'),
@@ -69,6 +73,10 @@ contextBridge.exposeInMainWorld('momentai', {
     events: {
       list: () => invoke('cameraos:admin:events:list'),
       create: (name) => invoke('cameraos:admin:events:create', name),
+      getActive: () => invoke('cameraos:admin:events:get-active'),
+      setActive: (eventId) => invoke('cameraos:admin:events:set-active', eventId),
+      archive: (eventId) => invoke('cameraos:admin:events:archive', eventId),
+      rename: (eventId, name) => invoke('cameraos:admin:events:rename', eventId, name),
     },
     templates: {
       list: (eventId) => invoke('cameraos:admin:templates:list', eventId),
@@ -84,6 +92,14 @@ contextBridge.exposeInMainWorld('momentai', {
     cleanup: {
       summary: () => invoke('cameraos:admin:cleanup:summary'),
       runNow: () => invoke('cameraos:admin:cleanup:run-now'),
+    },
+    printer: {
+      getStatus: () => invoke('cameraos:admin:printer:get-status'),
+      resetPaper: (capacity) => invoke('cameraos:admin:printer:reset-paper', capacity),
+      pauseQueue: () => invoke('cameraos:admin:printer:pause-queue'),
+      resumeQueue: () => invoke('cameraos:admin:printer:resume-queue'),
+      retryJob: (jobId) => invoke('cameraos:admin:printer:retry-job', jobId),
+      cancelJob: (jobId) => invoke('cameraos:admin:printer:cancel-job', jobId),
     },
     logs: {
       tail: (limit) => invoke('cameraos:admin:logs:tail', limit),

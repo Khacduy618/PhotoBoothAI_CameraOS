@@ -166,7 +166,7 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
     return visibleTemplates.find((t) => t.id === selectedFrameId) || visibleTemplates[0] || allTemplates[0];
   }, [visibleTemplates, selectedFrameId, allTemplates]);
 
-  const isStripFormat = selectedTemplate ? isStripTemplate(selectedTemplate) : isStripProduct;
+  const isStripFormat = isStripProduct || (selectedTemplate ? isStripTemplate(selectedTemplate) : false);
   const layoutPolicy = useMemo(() => {
     return getSelectFrameLayoutPolicy(session.product?.id, isStripFormat, isPremiumProduct);
   }, [session.product?.id, isStripFormat, isPremiumProduct]);

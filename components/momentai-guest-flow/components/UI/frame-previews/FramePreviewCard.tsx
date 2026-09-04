@@ -21,15 +21,21 @@ function buildCompositionKey(
   photos: readonly (PhotoItem | null)[],
   overlayUrl: string,
 ): string {
-  const photoKeys = photos.map((p, idx) => (p ? `${p.id || idx}:${p.dataUrl?.substring(0, 32)}` : `empty:${idx}`)).join('|');
+  const photoKeys = photos
+    .map((p, idx) =>
+      p
+        ? `${p.id || idx}_${p.width || 0}x${p.height || 0}_len${p.dataUrl?.length || 0}_${p.dataUrl?.slice(-24) || ''}`
+        : `empty:${idx}`,
+    )
+    .join('|');
   const slotKeys = (template.slots || []).map((s) => `${s.id ?? ''}:${s.x}:${s.y}:${s.width}:${s.height}`).join(';');
   return `${template.id}_${template.updatedAt || '0'}_${template.outputWidth || 1800}x${template.outputHeight || 2700}_${overlayUrl}_${slotKeys}_[${photoKeys}]_${CROP_POLICY_VERSION}`;
 }
 
 export const isStripTemplate = (template: FrameTemplate): boolean => {
+  if (template.layout?.type === '1x2' || template.layout?.type === '1x4') return true;
   const tp = (template as { targetProduct?: string }).targetProduct;
   if (tp) return isStripProduct(tp as CanonicalProduct);
-  if (template.layout?.type === '1x2' || template.layout?.type === '1x4') return true;
   if (template.layout?.type === '2x2' || template.layout?.type === '2x3' || template.layout?.type === '1x1') return false;
   if (template.renderMode === 'double-strip' || template.preferredPaper === '2x6-double') return true;
   return false;
@@ -53,12 +59,37 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
   className = '',
   mode = 'default',
 }) => {
-  const isStrip = isStripTemplate(template);
-  const height = template.outputHeight || 2700;
-  const width = isStrip && (template.outputWidth || 1800) >= height * 0.5
-    ? Math.round(height / 3)
-    : template.outputWidth || (isStrip ? 900 : 1800);
-  const isLandscape = template.orientation === 'landscape' || (!isStrip && width > height);
+  const isStripSession =
+    session?.product?.outputType === 'STRIP_5X15' ||
+    session?.product?.group === 'Photo Strip' ||
+    session?.product?.id?.startsWith('STRIP') ||
+    session?.product?.id === 'STRIP_4' ||
+    session?.product?.id === 'STRIP_2';
+  const isStrip = isStripSession || isStripTemplate(template);
+  const rawW = template.outputWidth || (isStrip ? 900 : 1800);
+  const rawH = template.outputHeight || 2700;
+  const isLandscape = !isStrip && (template.orientation === 'landscape' || rawW > rawH);
+
+  const defaultW = isStrip ? 900 : isLandscape ? 2700 : 1800;
+  const defaultH = isStrip ? 2700 : isLandscape ? 1800 : 2700;
+
+  let width: number;
+  let height: number;
+
+  if (rawH < 1800 || rawW < 600) {
+    width = defaultW;
+    height = defaultH;
+  } else if (rawW > 2700 || rawH > 2700) {
+    const scale = 2700 / Math.max(rawW, rawH);
+    width = Math.round(rawW * scale);
+    height = Math.round(rawH * scale);
+    if (isStrip && width >= height * 0.45) {
+      width = Math.round(height / 3);
+    }
+  } else {
+    height = rawH;
+    width = isStrip && rawW >= rawH * 0.45 ? Math.round(rawH / 3) : rawW;
+  }
   const overlayUrl = template.assets?.overlay || ((template as unknown) as { assetUrl?: string }).assetUrl || '';
 
   const isThumbnailMode = mode === 'thumbnail' || className.includes('max-h-full');
@@ -99,7 +130,7 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
     const allowSampleFallback = !isProduction;
 
     renderFrameComposition({
-      frame: template,
+      frame: { ...template, outputWidth: width, outputHeight: height },
       photos: photosList,
       overlayUrl,
       allowSampleFallback,
@@ -107,7 +138,7 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
     })
       .then((result) => {
         if (requestIdRef.current !== currentRequestId || abortController.signal.aborted) return;
-        const dataUrl = result.toDataURL('image/jpeg', 0.90);
+        const dataUrl = result.toDataURL('image/jpeg', 0.95);
         compositionCache.set(cacheKey, dataUrl);
         setComposedDataUrl(dataUrl);
         setIsComposing(false);
@@ -171,6 +202,7 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
           src={composedDataUrl}
           alt={template.name}
           className="w-full h-full object-contain pointer-events-none select-none"
+          style={{ imageRendering: '-webkit-optimize-contrast' }}
         />
       ) : isComposing ? (
         <div className="w-full h-full flex items-center justify-center bg-[#F4F2EE] text-sm text-[#1A1A1A]/50 animate-pulse">

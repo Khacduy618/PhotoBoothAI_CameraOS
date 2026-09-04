@@ -45,8 +45,12 @@ export function FrameImportResultCard({
         if (result.slots.length === 2) return "STRIP_2";
         if (result.slots.length === 6) return "SHEET_6";
         if (result.slots.length === 4) {
-            const hasMultipleColumns = result.slots.some((s) => s.normalizedBounds.x >= 0.35);
-            if (lowerName.includes("sheet") || hasMultipleColumns) {
+            const xPositions = result.slots.map((s) => s.normalizedBounds.x);
+            const minX = Math.min(...xPositions);
+            const maxX = Math.max(...xPositions);
+            const hasMultipleColumns = (maxX - minX) > 0.15;
+            const isTallStripCanvas = image.height / image.width >= 1.8;
+            if (lowerName.includes("sheet") || (hasMultipleColumns && !isTallStripCanvas)) {
                 return "SHEET_4";
             }
             return "STRIP_4";
@@ -54,7 +58,7 @@ export function FrameImportResultCard({
         return "STRIP_4";
     };
 
-    const inferOrientationFromSlots = (): "portrait" | "landscape" => {
+    const inferSlotOrientation = (): "portrait" | "landscape" => {
         if (result.slots.length > 0) {
             const firstSlot = result.slots[0];
             const slotWidth = firstSlot.normalizedBounds.width * image.width;
@@ -65,10 +69,14 @@ export function FrameImportResultCard({
     };
 
     const initialProduct: FrameTargetProduct = inferProductFromSlotsAndName();
+    const isInitialStrip = initialProduct === "STRIP_2" || initialProduct === "STRIP_4";
 
     const [targetProduct, setTargetProduct] = useState<FrameTargetProduct>(initialProduct);
     const [frameOrientation, setFrameOrientation] = useState<"portrait" | "landscape">(
-        inferOrientationFromSlots()
+        isInitialStrip ? "portrait" : (image.width > image.height ? "landscape" : "portrait")
+    );
+    const [slotOrientation, setSlotOrientation] = useState<"portrait" | "landscape">(
+        inferSlotOrientation()
     );
 
     const handleSyncSlotsToRef = (refSlotId: string) => {
@@ -369,7 +377,7 @@ export function FrameImportResultCard({
             y: s.normalizedBounds.y,
             width: s.normalizedBounds.width,
             height: s.normalizedBounds.height,
-            photoViewportOrientation: frameOrientation,
+            photoViewportOrientation: slotOrientation,
             shape: s.shape ?? "rect",
             points: s.points,
         }));
@@ -384,6 +392,7 @@ export function FrameImportResultCard({
             finalOverlayUrl = await punchOutFrameSlots(imageUrl, definitionSlots);
         }
 
+        const isStrip = targetProduct === "STRIP_2" || targetProduct === "STRIP_4";
         const safeImportId = importId.replace(/[^a-zA-Z0-9_-]/g, "_");
         const definition: FrameDefinition = {
             id: `imported_${safeImportId}`,
@@ -399,12 +408,14 @@ export function FrameImportResultCard({
             shotCount: detectedShotCount,
             targetProduct,
             outputPaper,
-            orientation: frameOrientation,
-            photoViewportOrientation: frameOrientation,
-            photoAspectRatio: frameOrientation === "landscape" ? "3:2" : "2:3",
+            orientation: isStrip ? "portrait" : frameOrientation,
+            photoViewportOrientation: slotOrientation,
+            photoAspectRatio: slotOrientation === "landscape" ? "3:2" : "2:3",
             photoFit: "contain",
             allowDraw,
-            outputWidth: image.width,
+            outputWidth: isStrip && image.width >= image.height * 0.45
+                ? Math.round(image.height / 3)
+                : image.width,
             outputHeight: image.height,
             slots: definitionSlots,
             status: "published",

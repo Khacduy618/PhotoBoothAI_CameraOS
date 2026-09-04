@@ -149,16 +149,11 @@ function createWindow(mode = 'guest') {
     const isControlOrMeta = input.control || input.meta;
     const isShift = input.shift;
 
-    if (isControlOrMeta && isShift && input.key.toLowerCase() === 'a') {
+    if (isControlOrMeta && isShift && input.key.toLowerCase() === 'a' && input.type === 'keyDown') {
       event.preventDefault();
-      const currentUrl = win.webContents.getURL();
-      if (currentUrl.includes('#/admin')) {
-        const targetGuest = isDev ? `${rendererUrl}/#/guest` : `${url.pathToFileURL(path.join(__dirname, '../../renderer/dist/index.html')).toString()}#/guest`;
-        void win.loadURL(targetGuest);
-      } else {
-        const targetAdmin = isDev ? `${rendererUrl}/#/admin` : `${url.pathToFileURL(path.join(__dirname, '../../renderer/dist/index.html')).toString()}#/admin`;
-        void win.loadURL(targetAdmin);
-      }
+      void win.webContents.executeJavaScript(`
+        window.location.hash = window.location.hash.includes('admin') ? '#/guest' : '#/admin';
+      `);
     } else if (isControlOrMeta && isShift && input.key.toLowerCase() === 'q') {
       event.preventDefault();
       console.log('[OPERATOR_ESCAPE] Emergency app quit triggered by operator hotkey.');

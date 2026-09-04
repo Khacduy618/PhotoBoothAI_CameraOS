@@ -11,6 +11,12 @@ export default defineConfig({
   root: __dirname,
   publicDir: path.resolve(repoRoot, 'public'),
   plugins: [react()],
+  define: {
+    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'development'),
+    'process.env': JSON.stringify({
+      NODE_ENV: process.env.NODE_ENV || 'development',
+    }),
+  },
   resolve: {
     alias: {
       '@': repoRoot,

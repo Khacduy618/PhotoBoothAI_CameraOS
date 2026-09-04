@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   createCP1000ColorTest,
   CP1000_COLOR_PRESETS,
@@ -29,6 +29,24 @@ export function CP1000ColorTestModal({
   const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const generateTestSheet = useCallback(async (imgSource: string | Blob) => {
+    setIsGenerating(true);
+    setPrintFeedback(null);
+    try {
+      const res = await createCP1000ColorTest({
+        sourceImage: imgSource,
+        targetWidth: 1800,
+        targetHeight: 2700,
+      });
+      setTestResult(res);
+      setPreviewDataUrl(res.toDataURL('image/jpeg', 1.0));
+    } catch (err) {
+      console.error('[CP1000CalibrationV2] Failed to generate test sheet:', err);
+    } finally {
+      setIsGenerating(false);
+    }
+  }, []);
+
   // Auto-load initial photo or default sample photo on open
   useEffect(() => {
     if (!isOpen) {
@@ -47,25 +65,7 @@ export function CP1000ColorTestModal({
       setSourceImageUrl(sample);
       void generateTestSheet(sample);
     }
-  }, [isOpen, initialPhotoUrl]);
-
-  const generateTestSheet = async (imgSource: string | Blob) => {
-    setIsGenerating(true);
-    setPrintFeedback(null);
-    try {
-      const res = await createCP1000ColorTest({
-        sourceImage: imgSource,
-        targetWidth: 1800,
-        targetHeight: 2700,
-      });
-      setTestResult(res);
-      setPreviewDataUrl(res.toDataURL('image/jpeg', 1.0));
-    } catch (err) {
-      console.error('[CP1000CalibrationV2] Failed to generate test sheet:', err);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
+  }, [isOpen, initialPhotoUrl, generateTestSheet]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

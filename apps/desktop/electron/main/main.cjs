@@ -218,6 +218,7 @@ const healthSnapshot = {
 
 const sessions = new Map();
 const adminEvents = new Map([['event_hoi_an_heritage', { eventId: 'event_hoi_an_heritage', name: 'Phố Cổ Hội An', status: 'active' }]]);
+let activeEventId = 'event_hoi_an_heritage';
 const adminTemplates = new Map();
 
 function ok(value) {
@@ -981,6 +982,28 @@ function registerSkeletonIpc() {
     const event = { eventId, name: eventName, status: 'active' };
     adminEvents.set(eventId, event);
     return ok(event);
+  });
+  ipcMain.handle('cameraos:admin:events:get-active', () => ok(activeEventId ? (adminEvents.get(activeEventId) ?? null) : null));
+  ipcMain.handle('cameraos:admin:events:set-active', (_event, eventId) => {
+    const id = String(eventId || '');
+    if (!adminEvents.has(id)) return unavailable('EVENT_NOT_FOUND');
+    activeEventId = id;
+    return ok(adminEvents.get(id));
+  });
+  ipcMain.handle('cameraos:admin:events:archive', (_event, eventId) => {
+    const id = String(eventId || '');
+    const ev = adminEvents.get(id);
+    if (!ev) return unavailable('EVENT_NOT_FOUND');
+    ev.status = 'archived';
+    if (activeEventId === id) activeEventId = null;
+    return ok(ev);
+  });
+  ipcMain.handle('cameraos:admin:events:rename', (_event, eventId, name) => {
+    const id = String(eventId || '');
+    const ev = adminEvents.get(id);
+    if (!ev) return unavailable('EVENT_NOT_FOUND');
+    ev.name = String(name || ev.name);
+    return ok(ev);
   });
   ipcMain.handle('cameraos:admin:templates:list', (_event, eventId) => safeGuest(() => listAdminTemplates(typeof eventId === 'string' ? eventId : undefined)));
   ipcMain.handle('cameraos:admin:templates:publish', (_event, templateId, eventId) => safeGuest(() => { setAdminTemplateStatus(templateId, eventId, 'published'); return undefined; }));

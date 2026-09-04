@@ -11,6 +11,12 @@ export default defineConfig({
         passWithNoTests: true,
         testTimeout: 15000,
         hookTimeout: 15000,
+        pool: "forks",
+        poolOptions: {
+            forks: {
+                singleFork: process.platform === "win32",
+            },
+        },
         exclude: [
             "**/node_modules/**",
             "**/dist/**",

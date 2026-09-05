@@ -990,7 +990,7 @@ function registerSkeletonIpc() {
     adminEvents.set(eventId, event);
     return ok(event);
   });
-  ipcMain.handle('cameraos:admin:events:get-active', () => ok(activeEventId ? (adminEvents.get(activeEventId) ?? null) : null));
+  ipcMain.handle('cameraos:admin:events:get-active', () => ok(activeEventId || 'event_hoi_an_heritage'));
   ipcMain.handle('cameraos:admin:events:set-active', (_event, eventId) => {
     const id = String(eventId || '');
     if (!adminEvents.has(id)) return unavailable('EVENT_NOT_FOUND');

@@ -649,7 +649,9 @@ function listAdminTemplates(eventId) {
     for (const row of rows) {
       try {
         const def = JSON.parse(row.definition_json);
-        result.push(def);
+        if (!scopedEventId || !def.eventId || def.eventId === scopedEventId) {
+          result.push(def);
+        }
       } catch {
         // Skip invalid JSON
       }
@@ -657,7 +659,7 @@ function listAdminTemplates(eventId) {
   } catch {
     // Ignore DB errors
   }
-  const memoryFrames = Array.from(adminTemplates.values()).filter((frame) => !scopedEventId || frame.eventId === scopedEventId);
+  const memoryFrames = Array.from(adminTemplates.values()).filter((frame) => !scopedEventId || !frame.eventId || frame.eventId === scopedEventId);
   const combined = [...result, ...memoryFrames];
   return Array.from(new Map(combined.map((f) => [f.id || f.templateId, f])).values());
 }

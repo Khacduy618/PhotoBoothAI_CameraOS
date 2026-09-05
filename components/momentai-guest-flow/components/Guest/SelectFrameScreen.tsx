@@ -50,6 +50,11 @@ interface SelectFrameScreenProps {
   onBackToShots?: () => void;
 }
 
+interface AdminEventItem {
+  eventId: string;
+  name: string;
+}
+
 export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
   session,
   customTemplates,
@@ -57,28 +62,61 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
   onBackToShots,
 }) => {
   const currentEventId = session.eventId || 'event_hoi_an_heritage';
+  const [selectedEventFilter, setSelectedEventFilter] = useState<string>('all');
+  const [eventsList, setEventsList] = useState<AdminEventItem[]>([]);
 
   const [registryTemplates, setRegistryTemplates] = useState<FrameTemplate[]>(() => {
     const initialDefs = LocalFrameRegistry.getPublishedDefinitions();
-    const eventDefs = initialDefs.filter((d) => !d.eventId || d.eventId === currentEventId);
-    return eventDefs.map(mapImportedFrameDefinitionToFrameTemplate);
+    return initialDefs.map(mapImportedFrameDefinitionToFrameTemplate);
   });
 
   useEffect(() => {
     const updateFromRegistry = async () => {
-      await LocalFrameRegistry.refreshFromAdminDb(currentEventId).catch(() => undefined);
+      await LocalFrameRegistry.refreshFromAdminDb().catch(() => undefined);
       const defs = LocalFrameRegistry.getPublishedDefinitions();
-      const eventDefs = defs.filter((d) => !d.eventId || d.eventId === currentEventId);
-      setRegistryTemplates(eventDefs.map(mapImportedFrameDefinitionToFrameTemplate));
+      setRegistryTemplates(defs.map(mapImportedFrameDefinitionToFrameTemplate));
+    };
+
+    const loadEvents = async () => {
+      const bridge = (window as unknown as { momentai?: { admin?: { events?: { list: () => Promise<{ ok?: boolean; value?: AdminEventItem[] }> } } } }).momentai?.admin;
+      if (bridge?.events?.list) {
+        try {
+          const res = await bridge.events.list();
+          if (res?.ok && Array.isArray(res.value)) {
+            setEventsList(res.value);
+          }
+        } catch {
+          // Ignore
+        }
+      }
     };
 
     void updateFromRegistry();
+    void loadEvents();
+
     return LocalFrameRegistry.subscribe(() => {
       const defs = LocalFrameRegistry.getPublishedDefinitions();
-      const eventDefs = defs.filter((d) => !d.eventId || d.eventId === currentEventId);
-      setRegistryTemplates(eventDefs.map(mapImportedFrameDefinitionToFrameTemplate));
+      setRegistryTemplates(defs.map(mapImportedFrameDefinitionToFrameTemplate));
     });
   }, [currentEventId]);
+
+  const availableEvents = useMemo(() => {
+    const eventMap = new Map<string, string>();
+    eventMap.set('event_hoi_an_heritage', 'Phố Cổ Hội An');
+
+    eventsList.forEach((e) => {
+      if (e.eventId && e.name) eventMap.set(e.eventId, e.name);
+    });
+
+    registryTemplates.forEach((t) => {
+      const eid = (t as { eventId?: string }).eventId;
+      if (eid && !eventMap.has(eid)) {
+        eventMap.set(eid, eid.replace(/^event_/, '').replace(/_/g, ' ').toUpperCase());
+      }
+    });
+
+    return Array.from(eventMap.entries()).map(([eventId, name]) => ({ eventId, name }));
+  }, [eventsList, registryTemplates]);
 
   const isPremiumProduct = session.product?.premium === true || session.product?.id === 'PREMIUM_POSTCARD';
 
@@ -111,24 +149,20 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
 
   const requiredShots = session.product?.requiredShots || session.captureCount || 4;
 
-  // Filter templates matching current product — targetProduct is the primary source of truth.
+  // Filter templates matching current product & selected event filter
   const validTemplates = useMemo(() => {
-    const filtered = allTemplates.filter((t) => {
+    const productFiltered = allTemplates.filter((t) => {
       const templateSlotCount = t.slots?.length || t.shotCount || t.layout?.slotCount || 4;
       const targetProduct = (t as { targetProduct?: string }).targetProduct;
 
       if (isPremiumProduct) {
-        // Primary: targetProduct match. Fallback: slotCount===1 (only unambiguous case)
         if (targetProduct) return targetProduct === 'PREMIUM_POSTCARD';
         return templateSlotCount === 1;
       }
 
       if (isStripProduct || isSheetProduct) {
-        // Slot count must match regardless
         if (templateSlotCount !== requiredShots) return false;
-        // Primary: targetProduct match
         if (targetProduct) return targetProduct === session.product?.id;
-        // Legacy fallback: use isStripTemplate metadata signals (no geometry)
         const isTemplateStrip = isStripTemplate(t);
         return isStripProduct ? isTemplateStrip : !isTemplateStrip;
       }
@@ -136,18 +170,22 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
       return templateSlotCount === requiredShots;
     });
 
-    // If no templates found, show all slot-count matches with a console warning
-    if (filtered.length === 0) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.warn('[SelectFrameScreen] No templates matched product filter. Product:', session.product?.id, 'Required shots:', requiredShots);
+    // Apply Event filter if a specific event is selected
+    if (selectedEventFilter !== 'all') {
+      const eventFiltered = productFiltered.filter((t) => (t as { eventId?: string }).eventId === selectedEventFilter);
+      if (eventFiltered.length > 0) {
+        return eventFiltered;
       }
+    }
+
+    if (productFiltered.length === 0) {
       return allTemplates.filter(
         (t) => (t.slots?.length || t.shotCount || t.layout?.slotCount) === requiredShots,
       );
     }
 
-    return filtered;
-  }, [allTemplates, isPremiumProduct, isStripProduct, isSheetProduct, requiredShots, session.product?.id]);
+    return productFiltered;
+  }, [allTemplates, isPremiumProduct, isStripProduct, isSheetProduct, requiredShots, session.product?.id, selectedEventFilter]);
 
   const [selectedFrameId, setSelectedFrameId] = useState<string>(() => {
     return session.selectedFrame?.id || validTemplates[0]?.id || '';
@@ -218,6 +256,44 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
         <div
           className={`${layoutPolicy.rightPanelClass} h-full flex flex-col justify-start overflow-hidden`}
         >
+          {/* Event Filter Bar */}
+          {availableEvents.length > 1 && (
+            <div className="mb-2.5 flex-none flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[#1A1A1A]/60 flex items-center gap-1 flex-none">
+                <span>Sự Kiện:</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedEventFilter('all')}
+                className={`px-3 py-1 rounded-full text-xs font-bold transition whitespace-nowrap cursor-pointer flex-none ${
+                  selectedEventFilter === 'all'
+                    ? 'bg-[#1A1A1A] text-[#FDFCFB] shadow-sm'
+                    : 'bg-[#F4F2EE] text-[#1A1A1A]/70 hover:bg-[#eae7e1]'
+                }`}
+              >
+                ✨ Tất Cả
+              </button>
+              {availableEvents.map((ev) => {
+                const isEvSelected = selectedEventFilter === ev.eventId;
+                return (
+                  <button
+                    key={ev.eventId}
+                    type="button"
+                    onClick={() => setSelectedEventFilter(ev.eventId)}
+                    className={`px-3 py-1 rounded-full text-xs font-bold transition whitespace-nowrap flex items-center gap-1.5 cursor-pointer flex-none ${
+                      isEvSelected
+                        ? 'bg-[#1A1A1A] text-[#F6C453] shadow-sm ring-1 ring-[#F6C453]/40'
+                        : 'bg-[#F4F2EE] text-[#1A1A1A]/70 hover:bg-[#eae7e1]'
+                    }`}
+                  >
+                    <span>🎪</span>
+                    <span>{ev.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {isPremiumProduct && session.photos.length > 0 && (
             <div className="mb-3 flex-none bg-[#F4F2EE] p-2.5 rounded-xs border border-[#1A1A1A]/10">
               <div className="text-[11px] font-bold uppercase tracking-wider text-[#D97706] mb-2 flex items-center gap-1.5">

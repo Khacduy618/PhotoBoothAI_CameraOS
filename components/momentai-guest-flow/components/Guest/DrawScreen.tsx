@@ -1135,10 +1135,22 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
                     backgroundColor: template.assets?.background || '#FDFCFB',
                   }}
                 >
-                  {/* Shared Base Composed Frame (Layer 10 & 20) */}
-                  <div className="absolute inset-0 w-full h-full pointer-events-none z-0">
-                    <FramePreviewCard template={template} session={session} mode="default" className="w-full h-full border-none shadow-none" />
-                  </div>
+                  {/* Shared Base Composed Frame (Layer 10 & 20)
+                      style overrides FramePreviewCard's own h-[64vh] / aspectRatio so it fills
+                      the cardContainerRef which already has the correct shape. */}
+                  <FramePreviewCard
+                    template={template}
+                    session={session}
+                    mode="default"
+                    className="absolute inset-0 border-none shadow-none pointer-events-none z-0 rounded-none"
+                    style={{
+                      height: '100%',
+                      width: '100%',
+                      maxHeight: 'none',
+                      maxWidth: 'none',
+                      aspectRatio: 'unset',
+                    }}
+                  />
 
                   {/* Default Branding Text if no Overlay */}
                   {!frameOverlay && (

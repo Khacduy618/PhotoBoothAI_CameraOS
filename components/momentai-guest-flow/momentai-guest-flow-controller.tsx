@@ -285,7 +285,8 @@ export function MomentAIGuestFlowController() {
       ...currentSession,
       selectedFrame: frame,
       selectedPhotoIndex: photoIdx,
-      photos: isPremium && currentSession.photos.length > 0 ? [currentSession.photos[photoIdx] || currentSession.photos[0]] : currentSession.photos,
+      // Keep all original captured photos intact — slotAssignments controls which photo(s)
+      // are placed in frame slots. Overriding photos here would destroy the picker row.
       slotAssignments: assignments,
     };
     setCurrentSession(updatedSession);

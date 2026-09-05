@@ -232,7 +232,7 @@ class LocalFrameRegistryService {
         if (windowAdmin?.templates?.list) {
             try {
                 const res = await windowAdmin.templates.list(eventId);
-                if (res?.ok && Array.isArray(res.value) && res.value.length > 0) {
+                if (res?.ok && Array.isArray(res.value)) {
                     const definitions = res.value
                         .map((t: unknown) => {
                             const item = t as Partial<FrameDefinition> & { templateId?: string };
@@ -258,14 +258,12 @@ class LocalFrameRegistryService {
                         nextDefs = incomingSorted;
                     }
 
-                    if (!this.hasDefinitionsChanged(nextDefs)) {
-                        return; // Smart cache match!
+                    if (this.hasDefinitionsChanged(nextDefs)) {
+                        this.inMemoryDefinitions = nextDefs;
+                        this.saveToStorage();
+                        this.notify();
                     }
-
-                    this.inMemoryDefinitions = nextDefs;
-                    this.saveToStorage();
-                    this.notify();
-                    return;
+                    return; // Standalone IPC handled completely!
                 }
             } catch {
                 // Ignore IPC error and fall back to web fetch

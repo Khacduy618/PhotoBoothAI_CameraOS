@@ -32,7 +32,7 @@ class DesktopErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   render() {
     if (this.state.hasError) {
       return (
-        <main className="flex min-h-dvh flex-col items-center justify-center bg-[#111111] p-8 text-[#FDFCFB]">
+        <main className="flex min-h-screen flex-col items-center justify-center bg-[#111111] p-8 text-[#FDFCFB]">
           <div className="max-w-2xl rounded-2xl border border-red-500/30 bg-red-950/20 p-8 shadow-2xl backdrop-blur">
             <div className="flex items-center gap-3 text-red-400">
               <span className="text-3xl">⚠️</span>

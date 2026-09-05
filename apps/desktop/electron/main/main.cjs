@@ -9,15 +9,6 @@ const { desktopMediaManager } = require('./media/desktop-media-manager.cjs');
 const { SessionMediaPaths } = require('./storage/session-media-paths.cjs');
 const { cloudSyncCoordinator } = require('./cloud/cloud-sync-coordinator.cjs');
 
-// ── Windows DPI Fix ────────────────────────────────────────────────────────────
-// Must be called BEFORE app.ready. Prevents Windows DPI virtualization from
-// causing Chromium to render at a scaled-down resolution and then stretching it,
-// which makes frames look squished and circles look like ellipses at 125%/150% DPI.
-// On Mac/Linux these flags are no-ops.
-app.commandLine.appendSwitch('force-device-scale-factor', '1');
-// ──────────────────────────────────────────────────────────────────────────────
-
-
 // 1. Single Instance Lock (Prevents duplicate instances colliding on USB devices)
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -128,11 +119,8 @@ function createWindow(mode = 'guest') {
 
   console.log(`[DISPLAY_AUDIT] DISPLAY_COUNT = ${displays.length}`);
   console.log(`[DISPLAY_AUDIT] PRIMARY_DISPLAY = ${JSON.stringify(primaryDisplay.bounds)}`);
-  console.log(`[DISPLAY_AUDIT] PRIMARY_SCALE_FACTOR = ${primaryDisplay.scaleFactor}`);
   console.log(`[DISPLAY_AUDIT] SECONDARY_DISPLAY = ${JSON.stringify(secondaryDisplay?.bounds || null)}`);
-  console.log(`[DISPLAY_AUDIT] SECONDARY_SCALE_FACTOR = ${secondaryDisplay?.scaleFactor || 'N/A'}`);
   console.log(`[DISPLAY_AUDIT] ELECTRON_DISPLAY = ${targetDisplay.id === primaryDisplay.id ? 'PRIMARY' : 'SECONDARY'}`);
-  console.log(`[DISPLAY_AUDIT] TARGET_SCALE_FACTOR = ${targetDisplay.scaleFactor}`);
   console.log(`[DISPLAY_AUDIT] ELECTRON_WINDOW_BOUNDS = ${JSON.stringify({ x, y, width, height })}`);
   console.log(`[DISPLAY_AUDIT] KIOSK_MODE_ENABLED = ${isKiosk ? 'YES' : 'NO'}`);
 
@@ -141,10 +129,6 @@ function createWindow(mode = 'guest') {
     y,
     width,
     height,
-    // useContentSize: true ensures width/height refer to the content area (viewport),
-    // not the outer window frame. Without this, Windows border (8px each side)
-    // and title bar shrink the actual content area below the intended 1920x1080.
-    useContentSize: !isKiosk,
     frame: !isKiosk,
     kiosk: isKiosk,
     fullscreen: isKiosk,
@@ -157,9 +141,6 @@ function createWindow(mode = 'guest') {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      // Prevent Chromium from applying an additional zoom factor that could
-      // distort aspect ratios and make circles appear as ellipses on Windows.
-      zoomFactor: 1.0,
     },
   });
 
@@ -205,27 +186,14 @@ function createWindow(mode = 'guest') {
   void win.loadURL(target);
 
   win.once('ready-to-show', () => {
-    if (isKiosk) {
-      // Kiosk: explicit bounds, fullscreen OS handles it
-      win.setBounds({ x, y, width, height });
-    } else {
-      // Dev mode: maximize to fill the available screen area.
-      // DO NOT use setBounds with outer dimensions — on Windows this causes
-      // the content area to be smaller than intended (titlebar + borders eat into it).
-      // win.maximize() fills the work area properly and CSS vh/vw will equal the
-      // full available content size.
-      win.maximize();
-    }
+    win.setBounds({ x, y, width, height });
     win.show();
     win.focus();
-    const finalBounds = win.getBounds();
-    const finalContentSize = win.getContentSize();
-    console.log(`[DISPLAY_AUDIT] ELECTRON_GUEST_VISIBLE = YES (OuterBounds: ${JSON.stringify(finalBounds)}, ContentSize: ${JSON.stringify({ width: finalContentSize[0], height: finalContentSize[1] })})`);
+    console.log(`[DISPLAY_AUDIT] ELECTRON_GUEST_VISIBLE = YES (Bounds: ${JSON.stringify(win.getBounds())})`);
   });
 
   return win;
 }
-
 
 const captureFormats = [
   { id: 'format_1shot', label: '1 Shot', shotCount: 1, slotCount: 1, layoutType: 'single' },

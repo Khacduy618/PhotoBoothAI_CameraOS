@@ -700,15 +700,15 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
               <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#1A1A1A]">
                 BẢNG MÀU TÔNG PASTEL:
               </span>
-              <div className="flex gap-2.5 flex-wrap items-center">
+              <div className="flex gap-2.5 flex-wrap">
                 {PASTEL_COLORS.map((col) => (
                   <button
                     key={col.hex}
                     type="button"
                     onClick={() => setBrushColor(col.hex)}
-                    style={{ backgroundColor: col.hex, width: '2.25rem', height: '2.25rem', minWidth: '2.25rem', minHeight: '2.25rem', flexShrink: 0 }}
+                    style={{ backgroundColor: col.hex }}
                     title={col.name}
-                    className={`rounded-full border border-[#1A1A1A]/20 cursor-pointer transition-transform shadow-xs ${
+                    className={`w-9 h-9 shrink-0 aspect-square rounded-full border border-[#1A1A1A]/20 cursor-pointer transition-transform shadow-xs ${
                       brushColor === col.hex ? 'scale-115 ring-4 ring-[#1A1A1A]/30 border-[#1A1A1A]' : 'hover:scale-105'
                     }`}
                   />
@@ -888,7 +888,7 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
               {/* Color Picker */}
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-[#1A1A1A]/70">MÀU:</span>
-                <div className="flex gap-1.5 flex-wrap items-center">
+                <div className="flex gap-1.5 flex-wrap">
                   {PASTEL_COLORS.map((col) => (
                     <button
                       key={col.hex}
@@ -897,9 +897,9 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
                         setPendingColor(col.hex);
                         if (selectedTextId) handleUpdateText(selectedTextId, undefined, undefined, col.hex);
                       }}
-                      style={{ backgroundColor: col.hex, width: '1.25rem', height: '1.25rem', minWidth: '1.25rem', minHeight: '1.25rem', flexShrink: 0 }}
+                      style={{ backgroundColor: col.hex }}
                       title={col.name}
-                      className={`rounded-full border border-[#1A1A1A]/20 cursor-pointer transition-transform ${
+                      className={`w-5 h-5 shrink-0 aspect-square rounded-full border border-[#1A1A1A]/20 cursor-pointer transition-transform ${
                         (selectedTextObj ? selectedTextObj.color === col.hex : pendingColor === col.hex)
                           ? 'scale-125 ring-2 ring-[#1A1A1A]'
                           : 'hover:scale-110'

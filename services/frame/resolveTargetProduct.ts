@@ -171,9 +171,9 @@ export function getCanonicalSlots(
   switch (product) {
     case 'PREMIUM_POSTCARD':
       if (isLandscape) {
-        return [{ id: 1, x: 0.0156, y: 0.0267, width: 0.9678, height: 0.8000 }];
+        return [{ id: 1, x: 0.0450, y: 0.0450, width: 0.9100, height: 0.7500 }];
       }
-      return [{ id: 1, x: 0.0317, y: 0.0222, width: 0.9317, height: 0.7567 }];
+      return [{ id: 1, x: 0.0500, y: 0.0450, width: 0.9000, height: 0.7100 }];
 
     case 'STRIP_2':
       return [

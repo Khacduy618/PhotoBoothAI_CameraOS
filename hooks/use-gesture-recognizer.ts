@@ -196,6 +196,11 @@ export function useGestureRecognizer(
             };
         }
 
+        if (recognizerRef.current) {
+            setIsLoading(false);
+            return;
+        }
+
         let cancelled = false;
 
         const initializeTimeoutId =
@@ -218,11 +223,16 @@ export function useGestureRecognizer(
                 );
             }
 
-            recognizerRef.current?.close();
-            recognizerRef.current = null;
             isDetectingRef.current = false;
         };
     }, [enabled, initialize]);
+
+    useEffect(() => {
+        return () => {
+            recognizerRef.current?.close();
+            recognizerRef.current = null;
+        };
+    }, []);
 
     useEffect(() => {
         if (!enabled) {

@@ -173,8 +173,33 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
             loading="lazy"
           />
         ) : (
-          <div className="w-full h-full bg-[#f4f2ee] flex items-center justify-center text-xs text-[#1a1a1a]/40">
-            {template.name}
+          <div className="w-full h-full bg-[#f4f2ee] p-2 flex flex-col items-center justify-between text-center relative">
+            <div className="w-full flex-1 relative my-1">
+              {(template.slots || []).map((slot, sIdx) => {
+                const isUnit = slot.width <= 1;
+                const sx = isUnit ? slot.x * 100 : slot.x;
+                const sy = isUnit ? slot.y * 100 : slot.y;
+                const sw = isUnit ? slot.width * 100 : slot.width;
+                const sh = isUnit ? slot.height * 100 : slot.height;
+                return (
+                  <div
+                    key={sIdx}
+                    className="absolute bg-white border border-[#1A1A1A]/20 rounded-2xs flex items-center justify-center text-[8px] font-mono text-gray-400"
+                    style={{
+                      left: `${sx}%`,
+                      top: `${sy}%`,
+                      width: `${sw}%`,
+                      height: `${sh}%`,
+                    }}
+                  >
+                    #{sIdx + 1}
+                  </div>
+                );
+              })}
+            </div>
+            <span className="text-[10px] font-mono font-bold text-[#1a1a1a]/70 truncate max-w-full px-1">
+              {template.name}
+            </span>
           </div>
         )}
       </div>
@@ -186,10 +211,10 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
   return (
     <div
       key={template.id}
-      className={`mx-auto relative overflow-hidden rounded-xs flex items-center justify-center border border-[#1A1A1A]/15 ${
+      className={`mx-auto relative overflow-hidden rounded-xs flex items-center justify-center border border-[#1A1A1A]/15 shrink-0 ${
         isLandscape
-          ? 'w-full max-w-full h-auto max-h-[72vh] shadow-[0_8px_30px_rgba(0,0,0,0.22)]'
-          : 'h-[72vh] xl:h-[78vh] max-h-[80vh] max-w-full w-auto shadow-[0_8px_30px_rgba(0,0,0,0.22)]'
+          ? 'w-full max-w-full h-auto max-h-[64vh] xl:max-h-[70vh] shadow-[0_8px_30px_rgba(0,0,0,0.22)]'
+          : 'h-[64vh] xl:h-[72vh] max-h-[76vh] max-w-full w-auto shadow-[0_8px_30px_rgba(0,0,0,0.22)]'
       } ${className}`}
       style={{
         aspectRatio: `${width} / ${height}`,

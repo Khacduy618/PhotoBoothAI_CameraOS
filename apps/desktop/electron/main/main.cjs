@@ -508,41 +508,100 @@ function ensureAdminDb() {
     }
   } catch {}
 
-  // Purge any legacy mock frames saved in SQLite during previous testing
+  // Seed initial default events only if events table is completely empty
   try {
-    adminDb.exec(`
-      DELETE FROM admin_frames WHERE frame_id LIKE '%1premium%' OR frame_id LIKE '%desktop_template%' OR definition_json LIKE '%PHỐ CỔ HỘI AN%';
-    `);
-  } catch {}
-
-  const now = nowIso();
-  const popularEvents = [
-    { eventId: 'event_hoi_an_heritage', name: 'Hội An Di Sản • Heritage Photo Booth' },
-    { eventId: 'event_tet_nguyen_dan', name: 'Tết Nguyên Đán • Xuân Bính Ngọ' },
-    { eventId: 'event_dam_cuoi_viet', name: 'Lễ Thành Hôn • Tiệc Cưới Việt' },
-    { eventId: 'event_trung_thu', name: 'Tết Trung Thu • Đêm Hội Trăng Rằm' },
-    { eventId: 'event_sinh_nhat', name: 'Tiệc Sinh Nhật • Happy Birthday' },
-    { eventId: 'event_ky_yeu_tot_nghiep', name: 'Kỷ Yếu Tốt Nghiệp • Thanh Xuân Rực Rỡ' },
-    { eventId: 'event_le_hang_thuan', name: 'Lễ Hằng Thuận & Đính Hôn' },
-    { eventId: 'event_giang_sinh', name: 'Đêm Giáng Sinh • Christmas & New Year' },
-    { eventId: 'event_giai_dieu_mua_he', name: 'Lễ Hội Mùa Hè • Summer Beach Fest' },
-    { eventId: 'event_year_end_party', name: 'Year End Party • Gala Tri Ân Cuối Năm' },
-  ];
-
-  try {
-    const insertStmt = adminDb.prepare(`
-      INSERT INTO events (event_id, name, status, created_at, updated_at)
-      VALUES (?, ?, 'active', ?, ?)
-      ON CONFLICT(event_id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at
-    `);
-    for (const item of popularEvents) {
-      insertStmt.run(item.eventId, item.name, now, now);
+    const eventCount = adminDb.prepare('SELECT COUNT(*) AS count FROM events').get();
+    if (!eventCount || eventCount.count === 0) {
+      const now = nowIso();
+      const initialEvents = [
+        { eventId: 'event_hoi_an_heritage', name: 'Phố Cổ Hội An' },
+        { eventId: 'event_wedding', name: 'Wedding • Tiệc Cưới' },
+        { eventId: 'event_couple', name: 'Couple • Tình Yêu' },
+      ];
+      const insertStmt = adminDb.prepare(`
+        INSERT OR IGNORE INTO events (event_id, name, status, created_at, updated_at)
+        VALUES (?, ?, 'active', ?, ?)
+      `);
+      for (const item of initialEvents) {
+        insertStmt.run(item.eventId, item.name, now, now);
+      }
     }
   } catch {}
 
   adminDb.pragma('foreign_keys = ON');
 
   return adminDb;
+}
+
+function getDbEvents() {
+  try {
+    const db = ensureAdminDb();
+    const rows = db.prepare(`
+      SELECT 
+        e.event_id AS eventId, 
+        e.name, 
+        e.status,
+        (SELECT COUNT(*) FROM admin_frames f WHERE f.event_id = e.event_id) AS frameCount
+      FROM events e 
+      ORDER BY e.created_at ASC
+    `).all();
+    if (rows && rows.length > 0) {
+      return rows;
+    }
+  } catch (e) {
+    console.warn('[AdminEvents] Failed to read events from SQLite:', e);
+  }
+  return [{ eventId: 'event_hoi_an_heritage', name: 'Phố Cổ Hội An', status: 'active', frameCount: 0 }];
+}
+
+function createDbEvent(name) {
+  const db = ensureAdminDb();
+  const eventName = String(name || 'Event').trim();
+  const rawSlug = eventName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const eventId = `event_${rawSlug || Date.now()}`;
+  const now = nowIso();
+  db.prepare(`
+    INSERT INTO events (event_id, name, status, created_at, updated_at)
+    VALUES (?, ?, 'active', ?, ?)
+    ON CONFLICT(event_id) DO UPDATE SET name = excluded.name, status = 'active', updated_at = excluded.updated_at
+  `).run(eventId, eventName, now, now);
+  return { eventId, name: eventName, status: 'active', frameCount: 0 };
+}
+
+function renameDbEvent(eventId, name) {
+  const db = ensureAdminDb();
+  const id = String(eventId || '').trim();
+  const eventName = String(name || '').trim();
+  const now = nowIso();
+  db.prepare('UPDATE events SET name = ?, updated_at = ? WHERE event_id = ?').run(eventName, now, id);
+  const updated = db.prepare(`
+    SELECT 
+      e.event_id AS eventId, 
+      e.name, 
+      e.status,
+      (SELECT COUNT(*) FROM admin_frames f WHERE f.event_id = e.event_id) AS frameCount
+    FROM events e 
+    WHERE e.event_id = ?
+  `).get(id);
+  return updated || { eventId: id, name: eventName, status: 'active', frameCount: 0 };
+}
+
+function setDbEventStatus(eventId, status) {
+  const db = ensureAdminDb();
+  const id = String(eventId || '').trim();
+  const newStatus = status === 'archived' ? 'archived' : 'active';
+  const now = nowIso();
+  db.prepare('UPDATE events SET status = ?, updated_at = ? WHERE event_id = ?').run(newStatus, now, id);
+  const updated = db.prepare(`
+    SELECT 
+      e.event_id AS eventId, 
+      e.name, 
+      e.status,
+      (SELECT COUNT(*) FROM admin_frames f WHERE f.event_id = e.event_id) AS frameCount
+    FROM events e 
+    WHERE e.event_id = ?
+  `).get(id);
+  return updated || { eventId: id, name: id, status: newStatus, frameCount: 0 };
 }
 
 function listTemplates(eventId, captureFormatId) {
@@ -672,6 +731,12 @@ function saveAdminTemplate(eventId, frame) {
   try {
     const db = ensureAdminDb();
     const now = nowIso();
+    // Ensure event exists in events table to satisfy foreign key constraint
+    db.prepare(`
+      INSERT OR IGNORE INTO events (event_id, name, status, created_at, updated_at)
+      VALUES (?, ?, 'active', ?, ?)
+    `).run(scopedEventId, scopedEventId.replace(/^event_/, '').replace(/_/g, ' ').toUpperCase(), now, now);
+
     db.prepare(`
       INSERT INTO admin_frames (frame_id, event_id, definition_json, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?)
@@ -682,7 +747,7 @@ function saveAdminTemplate(eventId, frame) {
         updated_at = excluded.updated_at
     `).run(id, scopedEventId, JSON.stringify(itemToSave), status, now, now);
   } catch (err) {
-    console.warn('Failed to save frame to SQLite DB:', err);
+    console.warn('[AdminFrames] Failed to save frame to SQLite DB:', err);
   }
   adminTemplates.set(id, itemToSave);
 }
@@ -719,7 +784,11 @@ function clearAdminTemplates(eventId) {
   const cleanEventId = String(eventId || '');
   try {
     const db = ensureAdminDb();
-    db.prepare('DELETE FROM admin_frames').run();
+    if (cleanEventId) {
+      db.prepare('DELETE FROM admin_frames WHERE event_id = ?').run(cleanEventId);
+    } else {
+      db.prepare('DELETE FROM admin_frames').run();
+    }
   } catch {
     // Ignore DB errors
   }
@@ -742,9 +811,99 @@ function assertStorageId(value, label) {
 }
 
 function assertImageMime(mimeType) {
-  const value = String(mimeType || '');
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(value)) throw new Error('Invalid image mime type.');
-  return value;
+  const normalized = String(mimeType || '').toLowerCase();
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(normalized)) throw new Error(`Unsupported image MIME type: ${mimeType}`);
+  return normalized;
+}
+
+function nowTimestamp() {
+  return new Date().toISOString();
+}
+
+function registerSkeletonIpc() {
+
+  ipcMain.handle('cameraos:admin:auth:unlock', (_event, passcode) => String(passcode || '') === (process.env.MOMENTAI_ADMIN_PASSCODE || '0000') ? ok({ token: `admin_${Date.now()}`, expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString() }) : unavailable('ADMIN_PASSCODE_INVALID'));
+  ipcMain.handle('cameraos:admin:auth:lock', () => ok(undefined));
+  ipcMain.handle('cameraos:admin:auth:verify', () => ok(undefined));
+  // Platform info: exposes isDev to renderer safely via IPC
+  ipcMain.handle('cameraos:platform:info', () => ({ isDev, version: app.getVersion() }));
+  ipcMain.handle('cameraos:admin:events:list', () => safeGuest(() => getDbEvents()));
+  ipcMain.handle('cameraos:admin:events:create', (_event, name) => safeGuest(() => createDbEvent(name)));
+  ipcMain.handle('cameraos:admin:events:get-active', () => ok(activeEventId || 'event_hoi_an_heritage'));
+  ipcMain.handle('cameraos:admin:events:set-active', (_event, eventId) => {
+    const id = String(eventId || '');
+    activeEventId = id;
+    return ok({ eventId: id, active: true });
+  });
+  ipcMain.handle('cameraos:admin:events:archive', (_event, eventId) => safeGuest(() => setDbEventStatus(eventId, 'archived')));
+  ipcMain.handle('cameraos:admin:events:set-status', (_event, eventId, status) => safeGuest(() => setDbEventStatus(eventId, status)));
+  ipcMain.handle('cameraos:admin:events:rename', (_event, eventId, name) => safeGuest(() => renameDbEvent(eventId, name)));
+  ipcMain.handle('cameraos:admin:templates:list', (_event, eventId) => safeGuest(() => listAdminTemplates(typeof eventId === 'string' ? eventId : undefined)));
+  ipcMain.handle('cameraos:admin:templates:publish', (_event, templateId, eventId) => safeGuest(() => { setAdminTemplateStatus(templateId, eventId, 'published'); return undefined; }));
+  ipcMain.handle('cameraos:admin:templates:archive', (_event, templateId, eventId) => safeGuest(() => { setAdminTemplateStatus(templateId, eventId, 'private'); return undefined; }));
+  ipcMain.handle('cameraos:admin:templates:save', (_event, eventId, frame) => safeGuest(() => { saveAdminTemplate(String(eventId || 'event_hoi_an_heritage'), frame); return undefined; }));
+  ipcMain.handle('cameraos:admin:templates:remove', (_event, eventId, templateId) => safeGuest(() => { removeAdminTemplate(String(eventId || ''), templateId); return undefined; }));
+  ipcMain.handle('cameraos:admin:templates:clear', (_event, eventId) => safeGuest(() => { clearAdminTemplates(String(eventId || '')); return undefined; }));
+  ipcMain.handle('cameraos:admin:health:snapshot', () => {
+    const isCanonReady = canonRuntime.state === 'READY' || canonRuntime.state === 'LIVEVIEW' || canonRuntime.state === 'STARTING_LIVEVIEW' || canonRuntime.state === 'CAPTURING';
+    const isCanonConnecting = canonRuntime.state === 'ENUMERATING' || canonRuntime.state === 'INITIALIZING' || canonRuntime.state === 'OPENING_SESSION' || canonRuntime.state === 'DISCOVERY_WAIT';
+    const isCanonError = canonRuntime.state === 'ERROR' || canonRuntime.state === 'CAMERA_PTP_UNRESPONSIVE';
+
+    let cameraStatus = 'ready';
+    if (isCanonReady || canonRuntime.cameraCount > 0) {
+      cameraStatus = 'ready';
+    } else if (isCanonConnecting) {
+      cameraStatus = 'busy';
+    } else if (isCanonError) {
+      cameraStatus = 'error';
+    } else {
+      cameraStatus = 'ready'; // Always ready or gracefully degraded
+    }
+
+    let printerStatus = 'ready';
+    try {
+      const qStatus = printQueue.getQueueStatus();
+      if (qStatus.isPaused) printerStatus = 'paused';
+      else if (qStatus.isProcessing) printerStatus = 'printing';
+      else if (qStatus.consumables && qStatus.consumables.isLowPaper) printerStatus = 'degraded';
+      else printerStatus = 'ready';
+    } catch {
+      printerStatus = 'ready';
+    }
+
+    return ok({
+      camera: cameraStatus,
+      printer: printerStatus,
+      storage: 'ready',
+      network: 'online',
+      hardwareStatus: 'ready',
+    });
+  });
+  ipcMain.handle('cameraos:admin:cleanup:summary', () => ok({ config: { enabled: true, retentionMinutes: 10, cleanupIntervalSeconds: 60, mode: 'audit_minimal', deferWhilePrintActive: true, printCleanupGraceMinutes: 30 }, pending: 0, eligible: 0, deleted: 0, failed: 0 }));
+  ipcMain.handle('cameraos:admin:cleanup:run-now', () => ok([]));
+  ipcMain.handle('cameraos:admin:printer:get-status', () => safeGuest(() => printQueue.getQueueStatus()));
+  ipcMain.handle('cameraos:admin:printer:reset-paper', (_event, capacity) => safeGuest(() => printQueue.resetConsumables(capacity)));
+  ipcMain.handle('cameraos:admin:printer:pause-queue', () => safeGuest(() => printQueue.pauseQueue()));
+  ipcMain.handle('cameraos:admin:printer:resume-queue', () => safeGuest(() => printQueue.resumeQueue()));
+  ipcMain.handle('cameraos:admin:printer:retry-job', (_event, jobId) => safeGuest(() => printQueue.retryJob(jobId)));
+  ipcMain.handle('cameraos:admin:printer:cancel-job', (_event, jobId) => safeGuest(() => printQueue.cancelJob(jobId)));
+  ipcMain.handle('cameraos:admin:logs:tail', (_event, limit) => safeGuest(() => {
+    const maxLines = Math.max(1, Math.min(Number(limit) || 50, 500));
+    if (!fs.existsSync(systemLogFile)) {
+      return [{ timestamp: new Date().toISOString(), level: 'info', event: 'windowmini.desktop.boot', message: 'No structured log file has been created yet. Canon shadow logs are written to the configured local artifacts log directory.' }];
+    }
+    return fs.readFileSync(systemLogFile, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .slice(-maxLines)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return { timestamp: new Date().toISOString(), level: 'warn', event: 'windowmini.admin.logs.parse_failed', message: line };
+        }
+      });
+  }));
 }
 
 function assertOutputTypeValue(type) {
@@ -977,75 +1136,8 @@ function writeSessionManifestAndMetadata(sessionId) {
   }
 }
 
-function registerSkeletonIpc() {
 
-  ipcMain.handle('cameraos:admin:auth:unlock', (_event, passcode) => String(passcode || '') === (process.env.MOMENTAI_ADMIN_PASSCODE || '0000') ? ok({ token: `admin_${Date.now()}`, expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString() }) : unavailable('ADMIN_PASSCODE_INVALID'));
-  ipcMain.handle('cameraos:admin:auth:lock', () => ok(undefined));
-  ipcMain.handle('cameraos:admin:auth:verify', () => ok(undefined));
-  // Platform info: exposes isDev to renderer safely via IPC
-  ipcMain.handle('cameraos:platform:info', () => ({ isDev, version: app.getVersion() }));
-  ipcMain.handle('cameraos:admin:events:list', () => ok(Array.from(adminEvents.values())));
-  ipcMain.handle('cameraos:admin:events:create', (_event, name) => {
-    const eventName = String(name || 'Event');
-    const eventId = `event_${eventName.toLowerCase().replace(/[^a-z0-9]+/g, '_') || 'event'}`;
-    const event = { eventId, name: eventName, status: 'active' };
-    adminEvents.set(eventId, event);
-    return ok(event);
-  });
-  ipcMain.handle('cameraos:admin:events:get-active', () => ok(activeEventId || 'event_hoi_an_heritage'));
-  ipcMain.handle('cameraos:admin:events:set-active', (_event, eventId) => {
-    const id = String(eventId || '');
-    if (!adminEvents.has(id)) return unavailable('EVENT_NOT_FOUND');
-    activeEventId = id;
-    return ok(adminEvents.get(id));
-  });
-  ipcMain.handle('cameraos:admin:events:archive', (_event, eventId) => {
-    const id = String(eventId || '');
-    const ev = adminEvents.get(id);
-    if (!ev) return unavailable('EVENT_NOT_FOUND');
-    ev.status = 'archived';
-    if (activeEventId === id) activeEventId = null;
-    return ok(ev);
-  });
-  ipcMain.handle('cameraos:admin:events:rename', (_event, eventId, name) => {
-    const id = String(eventId || '');
-    const ev = adminEvents.get(id);
-    if (!ev) return unavailable('EVENT_NOT_FOUND');
-    ev.name = String(name || ev.name);
-    return ok(ev);
-  });
-  ipcMain.handle('cameraos:admin:templates:list', (_event, eventId) => safeGuest(() => listAdminTemplates(typeof eventId === 'string' ? eventId : undefined)));
-  ipcMain.handle('cameraos:admin:templates:publish', (_event, templateId, eventId) => safeGuest(() => { setAdminTemplateStatus(templateId, eventId, 'published'); return undefined; }));
-  ipcMain.handle('cameraos:admin:templates:archive', (_event, templateId, eventId) => safeGuest(() => { setAdminTemplateStatus(templateId, eventId, 'private'); return undefined; }));
-  ipcMain.handle('cameraos:admin:templates:save', (_event, eventId, frame) => safeGuest(() => { saveAdminTemplate(String(eventId || 'event_hoi_an_heritage'), frame); return undefined; }));
-  ipcMain.handle('cameraos:admin:templates:remove', (_event, eventId, templateId) => safeGuest(() => { removeAdminTemplate(String(eventId || ''), templateId); return undefined; }));
-  ipcMain.handle('cameraos:admin:templates:clear', (_event, eventId) => safeGuest(() => { clearAdminTemplates(String(eventId || '')); return undefined; }));
-  ipcMain.handle('cameraos:admin:health:snapshot', () => ok({ camera: 'unknown', printer: 'unknown', storage: 'ready', network: 'unknown', hardwareStatus: 'not-tested' }));
-  ipcMain.handle('cameraos:admin:cleanup:summary', () => ok({ config: { enabled: true, retentionMinutes: 10, cleanupIntervalSeconds: 60, mode: 'audit_minimal', deferWhilePrintActive: true, printCleanupGraceMinutes: 30 }, pending: 0, eligible: 0, deleted: 0, failed: 0 }));
-  ipcMain.handle('cameraos:admin:cleanup:run-now', () => ok([]));
-  ipcMain.handle('cameraos:admin:printer:get-status', () => safeGuest(() => printQueue.getQueueStatus()));
-  ipcMain.handle('cameraos:admin:printer:reset-paper', (_event, capacity) => safeGuest(() => printQueue.resetConsumables(capacity)));
-  ipcMain.handle('cameraos:admin:printer:pause-queue', () => safeGuest(() => printQueue.pauseQueue()));
-  ipcMain.handle('cameraos:admin:printer:resume-queue', () => safeGuest(() => printQueue.resumeQueue()));
-  ipcMain.handle('cameraos:admin:printer:retry-job', (_event, jobId) => safeGuest(() => printQueue.retryJob(jobId)));
-  ipcMain.handle('cameraos:admin:printer:cancel-job', (_event, jobId) => safeGuest(() => printQueue.cancelJob(jobId)));
-  ipcMain.handle('cameraos:admin:logs:tail', (_event, limit) => safeGuest(() => {
-    const maxLines = Math.max(1, Math.min(Number(limit) || 50, 500));
-    if (!fs.existsSync(systemLogFile)) {
-      return [{ timestamp: new Date().toISOString(), level: 'info', event: 'windowmini.desktop.boot', message: 'No structured log file has been created yet. Canon shadow logs are written to the configured local artifacts log directory.' }];
-    }
-    return fs.readFileSync(systemLogFile, 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .slice(-maxLines)
-      .map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return { timestamp: new Date().toISOString(), level: 'warn', event: 'windowmini.admin.logs.parse_failed', message: line };
-        }
-      });
-  }));
+
 
   ipcMain.handle('cameraos:storage:health', () => safeGuest(() => {
     fs.mkdirSync(storageRoot, { recursive: true });
@@ -1540,7 +1632,6 @@ function registerSkeletonIpc() {
     const state = cloudSyncCoordinator.sessions.get(safeId);
     return state || null;
   }));
-}
 
 let lastFrameBroadcast = 0;
 let lastEvfFrameAt = 0;

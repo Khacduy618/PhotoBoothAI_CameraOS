@@ -76,6 +76,7 @@ contextBridge.exposeInMainWorld('momentai', {
       getActive: () => invoke('cameraos:admin:events:get-active'),
       setActive: (eventId) => invoke('cameraos:admin:events:set-active', eventId),
       archive: (eventId) => invoke('cameraos:admin:events:archive', eventId),
+      setStatus: (eventId, status) => invoke('cameraos:admin:events:set-status', eventId, status),
       rename: (eventId, name) => invoke('cameraos:admin:events:rename', eventId, name),
     },
     templates: {

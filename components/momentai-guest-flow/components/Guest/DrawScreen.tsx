@@ -177,10 +177,10 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
   const isStrip = isStripTemplate(template);
 
   const aspectClass = isLandscape
-    ? 'aspect-[3/2] h-[48vh] xl:h-[52vh] w-auto'
+    ? 'aspect-[3/2] max-h-[50vh] xl:max-h-[55vh] max-w-full w-auto'
     : isStrip
-    ? 'aspect-[1/3] h-[64vh] xl:h-[70vh] w-auto'
-    : 'aspect-[2/3] h-[64vh] xl:h-[70vh] w-auto';
+    ? 'aspect-[1/3] max-h-[66vh] xl:max-h-[72vh] max-w-full w-auto'
+    : 'aspect-[2/3] max-h-[66vh] xl:max-h-[72vh] max-w-full w-auto';
 
   const canvasWidth = isLandscape ? 2700 : isStrip ? 900 : 1800;
   const canvasHeight = isLandscape ? 1800 : 2700;
@@ -706,7 +706,7 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
                     onClick={() => setBrushColor(col.hex)}
                     style={{ backgroundColor: col.hex }}
                     title={col.name}
-                    className={`w-9 h-9 rounded-full border border-[#1A1A1A]/20 cursor-pointer transition-transform shadow-xs ${
+                    className={`w-9 h-9 shrink-0 aspect-square rounded-full border border-[#1A1A1A]/20 cursor-pointer transition-transform shadow-xs ${
                       brushColor === col.hex ? 'scale-115 ring-4 ring-[#1A1A1A]/30 border-[#1A1A1A]' : 'hover:scale-105'
                     }`}
                   />
@@ -897,7 +897,7 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
                       }}
                       style={{ backgroundColor: col.hex }}
                       title={col.name}
-                      className={`w-5 h-5 rounded-full border border-[#1A1A1A]/20 cursor-pointer transition-transform ${
+                      className={`w-5 h-5 shrink-0 aspect-square rounded-full border border-[#1A1A1A]/20 cursor-pointer transition-transform ${
                         (selectedTextObj ? selectedTextObj.color === col.hex : pendingColor === col.hex)
                           ? 'scale-125 ring-2 ring-[#1A1A1A]'
                           : 'hover:scale-110'

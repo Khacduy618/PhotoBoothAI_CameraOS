@@ -16,6 +16,7 @@ interface WindowMiniAdminBridge {
     create(name: string): Promise<WindowMiniResult<AdminEventSummary>>;
     getActive?(): Promise<WindowMiniResult<string>>;
     setActive?(eventId: string): Promise<WindowMiniResult<void>>;
+    setStatus?(eventId: string, status: "active" | "archived"): Promise<WindowMiniResult<AdminEventSummary>>;
     archive?(eventId: string): Promise<WindowMiniResult<void>>;
     rename?(eventId: string, name: string): Promise<WindowMiniResult<AdminEventSummary>>;
   };
@@ -38,7 +39,6 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "archived">("all");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newEventName, setNewEventName] = useState("");
-  const [setAsActiveOnCreate, setSetAsActiveOnCreate] = useState(true);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [notification, setNotification] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -62,11 +62,11 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
           setEvents(listRes.value);
           if (activeRes?.ok && activeRes.value) {
             const raw = activeRes.value as unknown;
-            const activeId = typeof raw === 'string'
+            const activeId = typeof raw === "string"
               ? raw
-              : (raw && typeof raw === 'object' && 'eventId' in raw
+              : (raw && typeof raw === "object" && "eventId" in raw
                 ? String((raw as { eventId: unknown }).eventId)
-                : 'event_hoi_an_heritage');
+                : "event_hoi_an_heritage");
             setActiveEventId(activeId);
           } else {
             const activeFromList = listRes.value.find((e) => e.isActive);
@@ -75,7 +75,7 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
         }
       }
     } catch {
-      showNotification("error", "Không thể tải danh sách sự kiện qua IPC.");
+      showNotification("error", "Không thể tải danh sách sự kiện qua SQLite IPC.");
     } finally {
       setLoading(false);
     }
@@ -85,7 +85,37 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
     void loadEvents();
   }, []);
 
-  const handleSetActive = async (eventId: string, eventName: string) => {
+  const handleToggleStatus = async (eventId: string, currentStatus: string, eventName: string) => {
+    const nextStatus = currentStatus === "active" ? "archived" : "active";
+    try {
+      const bridge = getAdminBridge();
+      if (bridge?.events?.setStatus) {
+        const res = await bridge.events.setStatus(eventId, nextStatus);
+        if (res.ok) {
+          showNotification(
+            "success",
+            nextStatus === "active"
+              ? `Đã bật hoạt động cho sự kiện "${eventName}"!`
+              : `Đã tạm ngưng sự kiện "${eventName}".`
+          );
+          await loadEvents();
+          return;
+        }
+      } else if (bridge?.events?.archive && nextStatus === "archived") {
+        const res = await bridge.events.archive(eventId);
+        if (res.ok) {
+          showNotification("success", `Đã tạm ngưng sự kiện "${eventName}".`);
+          await loadEvents();
+          return;
+        }
+      }
+      showNotification("error", "Không thể cập nhật trạng thái sự kiện.");
+    } catch {
+      showNotification("error", "Lỗi khi cập nhật trạng thái sự kiện.");
+    }
+  };
+
+  const handleSetDefault = async (eventId: string, eventName: string) => {
     try {
       const bridge = getAdminBridge();
       if (bridge?.events?.setActive) {
@@ -93,14 +123,14 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
         if (res.ok) {
           setActiveEventId(eventId);
           await LocalFrameRegistry.refreshFromAdminDb(eventId).catch(() => undefined);
-          showNotification("success", `Đã kích hoạt sự kiện "${eventName}" cho Photo Booth!`);
+          showNotification("success", `Đã đặt "${eventName}" làm sự kiện mặc định!`);
           await loadEvents();
           return;
         }
       }
-      showNotification("error", "Không thể kích hoạt sự kiện.");
+      showNotification("error", "Không thể đặt sự kiện mặc định.");
     } catch {
-      showNotification("error", "Lỗi khi kích hoạt sự kiện.");
+      showNotification("error", "Lỗi khi đặt sự kiện mặc định.");
     }
   };
 
@@ -115,44 +145,20 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
         const res = await bridge.events.create(trimmed);
         if (res.ok && res.value) {
           const created = res.value;
-          if (setAsActiveOnCreate && bridge.events.setActive) {
-            await bridge.events.setActive(created.eventId);
-            setActiveEventId(created.eventId);
-            await LocalFrameRegistry.refreshFromAdminDb(created.eventId).catch(() => undefined);
-          }
           setNewEventName("");
           setIsCreateModalOpen(false);
-          showNotification("success", `Đã tạo sự kiện "${trimmed}" thành công!`);
+          showNotification("success", `Đã tạo sự kiện "${trimmed}" (Lưu vĩnh viễn trong SQLite)!`);
           await loadEvents();
+          // Optional: immediately jump to manage frames for the new event
+          if (onSelectEventForFrames) {
+            onSelectEventForFrames(created.eventId);
+          }
           return;
         }
       }
       showNotification("error", "Không thể tạo sự kiện.");
     } catch {
       showNotification("error", "Lỗi khi tạo sự kiện.");
-    }
-  };
-
-  const handleArchive = async (eventId: string, eventName: string) => {
-    if (eventId === activeEventId) {
-      alert("Không thể lưu trữ sự kiện đang kích hoạt cho Booth. Hãy chọn sự kiện khác làm Active trước.");
-      return;
-    }
-    if (!window.confirm(`Bạn có chắc muốn lưu trữ sự kiện "${eventName}"?`)) return;
-
-    try {
-      const bridge = getAdminBridge();
-      if (bridge?.events?.archive) {
-        const res = await bridge.events.archive(eventId);
-        if (res.ok) {
-          showNotification("success", `Đã lưu trữ sự kiện "${eventName}".`);
-          await loadEvents();
-          return;
-        }
-      }
-      showNotification("error", "Không thể lưu trữ sự kiện.");
-    } catch {
-      showNotification("error", "Lỗi khi lưu trữ sự kiện.");
     }
   };
 
@@ -192,7 +198,7 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
     return matchesQuery && matchesStatus;
   });
 
-  const currentActiveEvent = events.find((e) => e.eventId === activeEventId);
+  const activeCount = events.filter((e) => e.status === "active").length;
 
   return (
     <div className="mx-auto max-w-7xl p-6">
@@ -210,7 +216,7 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
         </div>
       )}
 
-      {/* Active Event Banner */}
+      {/* Multi-Event Status Banner */}
       <div className="mb-8 overflow-hidden rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent p-6 backdrop-blur">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">
@@ -221,32 +227,23 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-[11px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
                   <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500"></span>
-                  Đang Kích Hoạt Ngoài Booth
-                </span>
-                <span className="font-mono text-xs text-neutral-400">
-                  ID: {activeEventId}
+                  {activeCount} Sự Kiện Đang Hoạt Động Ngoài Booth
                 </span>
               </div>
               <h2 className="mt-1 text-2xl font-black text-neutral-900 dark:text-white">
-                {currentActiveEvent?.name || "Chưa chọn sự kiện"}
+                Quản Lý Sự Kiện & Khung Ảnh
               </h2>
+              <p className="mt-1 text-xs text-neutral-500">
+                Tất cả sự kiện bật &quot;Hoạt Động&quot; sẽ hiển thị thành các tab bộ lọc trên màn hình khách. Bạn có thể nhấn <strong>&quot;🖼️ Quản Lý Khung&quot;</strong> ở bất kỳ sự kiện nào để thêm khung.
+              </p>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            {currentActiveEvent && onSelectEventForFrames && (
-              <button
-                type="button"
-                onClick={() => onSelectEventForFrames(activeEventId)}
-                className="flex items-center gap-2 rounded-xl bg-neutral-900 px-4 py-2.5 text-xs font-bold text-white shadow transition hover:bg-neutral-800 dark:bg-white dark:text-neutral-900"
-              >
-                🖼️ Quản Lý Khung Cho Sự Kiện Này
-              </button>
-            )}
             <button
               type="button"
               onClick={() => setIsCreateModalOpen(true)}
-              className="flex items-center gap-2 rounded-xl bg-[#F6C453] px-4 py-2.5 text-xs font-black uppercase tracking-wider text-neutral-950 shadow-lg shadow-amber-500/20 transition hover:bg-amber-400 active:scale-95"
+              className="flex items-center gap-2 rounded-xl bg-[#F6C453] px-5 py-3 text-xs font-black uppercase tracking-wider text-neutral-950 shadow-lg shadow-amber-500/20 transition hover:bg-amber-400 active:scale-95"
             >
               + Tạo Sự Kiện Mới
             </button>
@@ -280,7 +277,7 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
                   : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-400"
               }`}
             >
-              {filter === "all" ? "Tất Cả" : filter === "active" ? "Hoạt Động" : "Lưu Trữ"}
+              {filter === "all" ? "Tất Cả" : filter === "active" ? "Đang Bật" : "Tạm Ngưng"}
             </button>
           ))}
           <button
@@ -296,71 +293,93 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
       </div>
 
       {/* Events Grid */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
         {filteredEvents.map((event) => {
-          const isActive = event.eventId === activeEventId;
+          const isDefault = event.eventId === activeEventId;
+          const isActive = event.status === "active";
           const isEditing = editingEventId === event.eventId;
 
           return (
             <div
               key={event.eventId}
-              className={`flex flex-col justify-between rounded-2xl border p-5 transition-all ${
+              className={`flex flex-col justify-between rounded-2xl border p-5 transition-all shadow-sm ${
                 isActive
-                  ? "border-amber-500 bg-amber-500/5 shadow-md shadow-amber-500/10 dark:border-amber-500/60"
-                  : "border-neutral-200 bg-white hover:border-neutral-300 dark:border-neutral-800 dark:bg-neutral-900"
+                  ? "border-emerald-500/40 bg-white dark:border-emerald-500/30 dark:bg-neutral-900"
+                  : "border-neutral-200 bg-neutral-50/70 opacity-75 dark:border-neutral-800 dark:bg-neutral-900/60"
               }`}
             >
               <div>
-                {/* Header Badge */}
+                {/* Header Badges */}
                 <div className="flex items-center justify-between gap-2">
-                  <span
-                    className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-[10px] font-bold ${
-                      isActive
-                        ? "bg-amber-500 text-black font-black"
-                        : event.status === "active"
-                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                        : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400"
-                    }`}
-                  >
-                    {isActive ? "★ ACTIVE BOOTH" : event.status === "active" ? "Hoạt Động" : "Đã Lưu Trữ"}
-                  </span>
-                  <span className="font-mono text-[11px] text-neutral-400">
-                    {event.frameCount ?? 0} mẫu khung
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleStatus(event.eventId, event.status, event.name)}
+                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-black uppercase tracking-wider transition ${
+                        isActive
+                          ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-950 dark:text-emerald-300"
+                          : "bg-neutral-200 text-neutral-600 hover:bg-neutral-300 dark:bg-neutral-800 dark:text-neutral-400"
+                      }`}
+                      title="Nhấn để Bật/Tắt hiển thị ngoài Booth"
+                    >
+                      <span className={`h-2 w-2 rounded-full ${isActive ? "bg-emerald-500 animate-pulse" : "bg-neutral-400"}`}></span>
+                      {isActive ? "ĐANG BẬT" : "TẠM NGƯNG"}
+                    </button>
+
+                    {isDefault && (
+                      <span className="rounded-md bg-amber-500/10 px-2 py-0.5 font-mono text-[10px] font-black text-amber-700 dark:text-amber-300">
+                        ★ Mặc Định
+                      </span>
+                    )}
+                  </div>
+
+                  <span className="font-mono text-xs font-bold text-neutral-500">
+                    {event.frameCount ?? 0} khung ảnh
                   </span>
                 </div>
 
                 {/* Event Name */}
-                <div className="mt-3">
+                <div className="mt-4">
                   {isEditing ? (
                     <div className="flex items-center gap-2">
                       <input
                         type="text"
                         value={editName}
                         onChange={(e) => setEditName(e.target.value)}
-                        className="w-full rounded-lg border border-neutral-300 px-2 py-1 text-sm font-bold dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+                        className="w-full rounded-lg border border-neutral-300 px-2.5 py-1.5 text-sm font-bold dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
                         autoFocus
                       />
                       <button
                         type="button"
                         onClick={() => handleSaveRename(event.eventId)}
-                        className="rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-bold text-white"
+                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white"
                       >
                         Lưu
                       </button>
                       <button
                         type="button"
                         onClick={() => setEditingEventId(null)}
-                        className="rounded-lg bg-neutral-200 px-2 py-1 text-xs font-bold text-neutral-700 dark:bg-neutral-700 dark:text-neutral-300"
+                        className="rounded-lg bg-neutral-200 px-3 py-1.5 text-xs font-bold text-neutral-700 dark:bg-neutral-700 dark:text-neutral-300"
                       >
                         Hủy
                       </button>
                     </div>
                   ) : (
-                    <h3 className="text-lg font-bold text-neutral-900 dark:text-white">
-                      {event.name}
-                    </h3>
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="text-xl font-black text-neutral-900 dark:text-white">
+                        {event.name}
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => handleStartRename(event.eventId, event.name)}
+                        className="rounded-lg p-1 text-xs text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                        title="Đổi tên sự kiện"
+                      >
+                        ✏️
+                      </button>
+                    </div>
                   )}
-                  <p className="mt-1 font-mono text-xs text-neutral-500">
+                  <p className="mt-1 font-mono text-xs text-neutral-400">
                     ID: {event.eventId}
                   </p>
                 </div>
@@ -368,51 +387,26 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
 
               {/* Action Buttons */}
               <div className="mt-6 border-t border-neutral-100 pt-4 dark:border-neutral-800">
-                <div className="flex items-center justify-between gap-2">
-                  {isActive ? (
-                    <span className="flex items-center gap-1.5 text-xs font-black text-amber-600 dark:text-amber-400">
-                      ✓ Đang kích hoạt
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleSetActive(event.eventId, event.name)}
-                      className="flex-1 rounded-xl bg-neutral-900 py-2 text-xs font-black uppercase tracking-wider text-[#F6C453] transition hover:bg-neutral-800 active:scale-95 dark:bg-neutral-800 dark:hover:bg-neutral-700"
-                    >
-                      Kích Hoạt
-                    </button>
-                  )}
-
+                <div className="flex items-center gap-2">
                   {onSelectEventForFrames && (
                     <button
                       type="button"
                       onClick={() => onSelectEventForFrames(event.eventId)}
-                      className="rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs font-bold text-neutral-700 transition hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
-                      title="Xem & thêm khung ảnh"
+                      className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-neutral-900 py-2.5 text-xs font-black uppercase tracking-wider text-[#F6C453] shadow transition hover:bg-neutral-800 active:scale-95 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
                     >
-                      🖼️ Khung
+                      <span>🖼️</span>
+                      <span>Quản Lý Khung ({event.frameCount ?? 0})</span>
                     </button>
                   )}
 
-                  {!isEditing && (
+                  {!isDefault && isActive && (
                     <button
                       type="button"
-                      onClick={() => handleStartRename(event.eventId, event.name)}
-                      className="rounded-xl border border-neutral-200 px-2.5 py-2 text-xs text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400"
-                      title="Đổi tên sự kiện"
+                      onClick={() => handleSetDefault(event.eventId, event.name)}
+                      className="rounded-xl border border-neutral-200 px-3 py-2.5 text-xs font-bold text-neutral-600 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                      title="Đặt làm sự kiện chính ban đầu khi khởi động Booth"
                     >
-                      ✏️
-                    </button>
-                  )}
-
-                  {event.status === "active" && !isActive && (
-                    <button
-                      type="button"
-                      onClick={() => handleArchive(event.eventId, event.name)}
-                      className="rounded-xl border border-neutral-200 px-2.5 py-2 text-xs text-rose-500 hover:bg-rose-50 dark:border-neutral-700 dark:hover:bg-rose-950/20"
-                      title="Lưu trữ sự kiện"
-                    >
-                      📦
+                      ★ Mặc Định
                     </button>
                   )}
                 </div>
@@ -439,7 +433,7 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
               Tạo Sự Kiện Mới
             </h3>
             <p className="mt-1 text-xs text-neutral-500">
-              Nhập tên sự kiện để gán vào các mẫu khung và thiết lập phiên chụp.
+              Nhập tên sự kiện. Sự kiện sẽ được lưu vĩnh viễn vào SQLite và kích hoạt sẵn cho Booth.
             </p>
 
             <form onSubmit={handleCreateEvent} className="mt-5 space-y-4">
@@ -458,22 +452,6 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
                 />
               </div>
 
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="setActiveCheckbox"
-                  checked={setAsActiveOnCreate}
-                  onChange={(e) => setSetAsActiveOnCreate(e.target.checked)}
-                  className="h-4 w-4 rounded accent-amber-500"
-                />
-                <label
-                  htmlFor="setActiveCheckbox"
-                  className="text-xs font-medium text-neutral-700 dark:text-neutral-300"
-                >
-                  Kích hoạt cho Booth ngay sau khi tạo
-                </label>
-              </div>
-
               <div className="mt-6 flex gap-3">
                 <button
                   type="button"
@@ -486,7 +464,7 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
                   type="submit"
                   className="flex-1 rounded-xl bg-[#F6C453] py-3 text-xs font-black uppercase tracking-wider text-neutral-950 shadow-lg shadow-amber-500/20 transition hover:bg-amber-400 active:scale-95"
                 >
-                  Tạo Sự Kiện
+                  Tạo & Quản Lý Khung
                 </button>
               </div>
             </form>

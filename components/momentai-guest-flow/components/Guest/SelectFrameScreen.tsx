@@ -158,16 +158,21 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
 
   const isPremiumProduct = session.product?.premium === true || session.product?.id === 'PREMIUM_POSTCARD';
 
-  // Build combined available frame templates list from imported Admin DB definitions + fallback default seeds if DB is empty
+  // Build combined available frame templates list from imported Admin DB definitions
+  // Only fall back to DEFAULT_FRAME_TEMPLATES if registry and custom templates are completely empty
   const allTemplates = useMemo(() => {
     const custom = customTemplates || [];
     const map = new Map<string, FrameTemplate>();
-    DEFAULT_FRAME_TEMPLATES.forEach((t) => {
-      map.set(t.id, { ...t, eventId: t.eventId || 'event_hoi_an_heritage' });
-    });
-    [...registryTemplates, ...custom].forEach((t) => {
-      map.set(t.id, t);
-    });
+    
+    if (registryTemplates.length === 0 && custom.length === 0) {
+      DEFAULT_FRAME_TEMPLATES.forEach((t) => {
+        map.set(t.id, { ...t, eventId: t.eventId || 'event_hoi_an_heritage' });
+      });
+    } else {
+      [...registryTemplates, ...custom].forEach((t) => {
+        map.set(t.id, t);
+      });
+    }
     return Array.from(map.values());
   }, [customTemplates, registryTemplates]);
 

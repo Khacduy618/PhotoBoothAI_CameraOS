@@ -272,7 +272,10 @@ export function MomentAIGuestFlowController() {
     }
     const nextBackendSession = await api('select-template', { sessionId: backendSession.sessionId, templateId: backendTemplateId });
     
-    const isPremium = currentSession.product?.premium === true;
+    const isPremium =
+      currentSession.product?.premium === true ||
+      currentSession.product?.id === 'PREMIUM_POSTCARD' ||
+      currentSession.product?.group === 'Premium';
     const photoIdx = selectedPhotoIndex ?? 0;
     const assignments = isPremium && currentSession.photos.length > 0
       ? [currentSession.photos[photoIdx] || currentSession.photos[0]]
@@ -282,6 +285,7 @@ export function MomentAIGuestFlowController() {
       ...currentSession,
       selectedFrame: frame,
       selectedPhotoIndex: photoIdx,
+      photos: isPremium && currentSession.photos.length > 0 ? [currentSession.photos[photoIdx] || currentSession.photos[0]] : currentSession.photos,
       slotAssignments: assignments,
     };
     setCurrentSession(updatedSession);

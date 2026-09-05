@@ -173,14 +173,16 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragType, setDragType] = useState<'text' | 'stamp' | null>(null);
 
-  const isLandscape = template.orientation === 'landscape';
+  const isLandscape =
+    template.orientation === 'landscape' ||
+    (template.outputWidth && template.outputHeight ? template.outputWidth > template.outputHeight : false);
   const isStrip = isStripTemplate(template);
 
   const aspectClass = isLandscape
-    ? 'aspect-[3/2] max-h-[50vh] xl:max-h-[55vh] max-w-full w-auto'
+    ? 'h-[48vh] xl:h-[54vh] max-h-[58vh] max-w-full w-auto'
     : isStrip
-    ? 'aspect-[1/3] max-h-[66vh] xl:max-h-[72vh] max-w-full w-auto'
-    : 'aspect-[2/3] max-h-[66vh] xl:max-h-[72vh] max-w-full w-auto';
+    ? 'h-[64vh] xl:h-[70vh] max-h-[74vh] max-w-full w-auto'
+    : 'h-[64vh] xl:h-[70vh] max-h-[74vh] max-w-full w-auto';
 
   const canvasWidth = isLandscape ? 2700 : isStrip ? 900 : 1800;
   const canvasHeight = isLandscape ? 1800 : 2700;
@@ -1127,8 +1129,11 @@ export const DrawScreen: React.FC<DrawScreenProps> = ({ session, template, onCon
                     setSelectedTextId(null);
                     setSelectedStampId(null);
                   }}
-                  className={`${aspectClass} mx-auto relative border border-[#1A1A1A]/15 shadow-2xl overflow-hidden rounded-sm transition-all duration-300`}
-                  style={{ backgroundColor: template.assets?.background || '#FDFCFB' }}
+                  className={`${aspectClass} mx-auto relative border border-[#1A1A1A]/15 shadow-2xl overflow-hidden rounded-sm transition-all duration-300 shrink-0 flex items-center justify-center`}
+                  style={{
+                    aspectRatio: `${canvasWidth} / ${canvasHeight}`,
+                    backgroundColor: template.assets?.background || '#FDFCFB',
+                  }}
                 >
                   {/* Shared Base Composed Frame (Layer 10 & 20) */}
                   <div className="absolute inset-0 w-full h-full pointer-events-none z-0">

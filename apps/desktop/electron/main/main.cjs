@@ -141,6 +141,10 @@ function createWindow(mode = 'guest') {
     y,
     width,
     height,
+    // useContentSize: true ensures width/height refer to the content area (viewport),
+    // not the outer window frame. Without this, Windows border (8px each side)
+    // and title bar shrink the actual content area below the intended 1920x1080.
+    useContentSize: !isKiosk,
     frame: !isKiosk,
     kiosk: isKiosk,
     fullscreen: isKiosk,
@@ -201,14 +205,27 @@ function createWindow(mode = 'guest') {
   void win.loadURL(target);
 
   win.once('ready-to-show', () => {
-    win.setBounds({ x, y, width, height });
+    if (isKiosk) {
+      // Kiosk: explicit bounds, fullscreen OS handles it
+      win.setBounds({ x, y, width, height });
+    } else {
+      // Dev mode: maximize to fill the available screen area.
+      // DO NOT use setBounds with outer dimensions — on Windows this causes
+      // the content area to be smaller than intended (titlebar + borders eat into it).
+      // win.maximize() fills the work area properly and CSS vh/vw will equal the
+      // full available content size.
+      win.maximize();
+    }
     win.show();
     win.focus();
-    console.log(`[DISPLAY_AUDIT] ELECTRON_GUEST_VISIBLE = YES (Bounds: ${JSON.stringify(win.getBounds())})`);
+    const finalBounds = win.getBounds();
+    const finalContentSize = win.getContentSize();
+    console.log(`[DISPLAY_AUDIT] ELECTRON_GUEST_VISIBLE = YES (OuterBounds: ${JSON.stringify(finalBounds)}, ContentSize: ${JSON.stringify({ width: finalContentSize[0], height: finalContentSize[1] })})`);
   });
 
   return win;
 }
+
 
 const captureFormats = [
   { id: 'format_1shot', label: '1 Shot', shotCount: 1, slotCount: 1, layoutType: 'single' },

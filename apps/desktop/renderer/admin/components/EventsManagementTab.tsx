@@ -61,7 +61,13 @@ export function EventsManagementTab({ onSelectEventForFrames }: EventsManagement
         if (listRes.ok && Array.isArray(listRes.value)) {
           setEvents(listRes.value);
           if (activeRes?.ok && activeRes.value) {
-            setActiveEventId(activeRes.value);
+            const raw = activeRes.value as unknown;
+            const activeId = typeof raw === 'string'
+              ? raw
+              : (raw && typeof raw === 'object' && 'eventId' in raw
+                ? String((raw as { eventId: unknown }).eventId)
+                : 'event_hoi_an_heritage');
+            setActiveEventId(activeId);
           } else {
             const activeFromList = listRes.value.find((e) => e.isActive);
             if (activeFromList) setActiveEventId(activeFromList.eventId);

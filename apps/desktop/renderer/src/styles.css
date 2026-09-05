@@ -15,4 +15,15 @@ body,
   margin: 0;
   padding: 0;
   overflow: hidden;
+  /* Suppress native Windows scrollbar so 100vw == 100% always.
+     Without this, Windows adds a 17px scrollbar that squishes w-full elements,
+     making frames appear narrower and circles appear as ellipses. */
+  scrollbar-width: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#root::-webkit-scrollbar {
+  display: none;
+  width: 0;
 }

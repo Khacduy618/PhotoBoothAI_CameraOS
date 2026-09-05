@@ -55,6 +55,44 @@ interface AdminEventItem {
   name: string;
 }
 
+export function matchesProductType(
+  t: FrameTemplate,
+  product?: { id?: string; premium?: boolean; group?: string; name?: string },
+  requiredShots = 4,
+): boolean {
+  const targetProduct = (t as { targetProduct?: string }).targetProduct;
+  const slotCount = t.slots?.length || t.shotCount || t.layout?.slotCount || 4;
+  const isStrip = isStripTemplate(t);
+
+  const isPremium = product?.premium === true || product?.id === 'PREMIUM_POSTCARD' || product?.group === 'Premium';
+  if (isPremium || product?.id === 'PREMIUM_POSTCARD') {
+    if (targetProduct) return targetProduct === 'PREMIUM_POSTCARD';
+    return slotCount === 1 && !isStrip;
+  }
+
+  if (product?.id === 'STRIP_2') {
+    if (targetProduct) return targetProduct === 'STRIP_2';
+    return isStrip && slotCount === 2;
+  }
+
+  if (product?.id === 'STRIP_4') {
+    if (targetProduct) return targetProduct === 'STRIP_4';
+    return isStrip && slotCount === 4;
+  }
+
+  if (product?.id === 'SHEET_4') {
+    if (targetProduct) return targetProduct === 'SHEET_4';
+    return !isStrip && slotCount === 4;
+  }
+
+  if (product?.id === 'SHEET_6') {
+    if (targetProduct) return targetProduct === 'SHEET_6';
+    return slotCount === 6;
+  }
+
+  return slotCount === requiredShots;
+}
+
 export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
   session,
   customTemplates,
@@ -123,14 +161,14 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
   // Build combined available frame templates list from imported Admin DB definitions + fallback default seeds if DB is empty
   const allTemplates = useMemo(() => {
     const custom = customTemplates || [];
-    if (registryTemplates.length > 0 || custom.length > 0) {
-      const map = new Map<string, FrameTemplate>();
-      [...registryTemplates, ...custom].forEach((t) => {
-        map.set(t.id, t);
-      });
-      return Array.from(map.values());
-    }
-    return DEFAULT_FRAME_TEMPLATES;
+    const map = new Map<string, FrameTemplate>();
+    DEFAULT_FRAME_TEMPLATES.forEach((t) => {
+      map.set(t.id, { ...t, eventId: t.eventId || 'event_hoi_an_heritage' });
+    });
+    [...registryTemplates, ...custom].forEach((t) => {
+      map.set(t.id, t);
+    });
+    return Array.from(map.values());
   }, [customTemplates, registryTemplates]);
 
   const isStripProduct =
@@ -149,43 +187,24 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
 
   const requiredShots = session.product?.requiredShots || session.captureCount || 4;
 
-  // Filter templates matching current product & selected event filter
+  // Filter templates matching current product & selected event filter strictly
   const validTemplates = useMemo(() => {
-    const productFiltered = allTemplates.filter((t) => {
-      const templateSlotCount = t.slots?.length || t.shotCount || t.layout?.slotCount || 4;
-      const targetProduct = (t as { targetProduct?: string }).targetProduct;
+    const productFiltered = allTemplates.filter((t) =>
+      matchesProductType(t, session.product, requiredShots),
+    );
 
-      if (isPremiumProduct) {
-        if (targetProduct) return targetProduct === 'PREMIUM_POSTCARD';
-        return templateSlotCount === 1;
+    if (selectedEventFilter === 'all') {
+      return productFiltered;
+    }
+
+    return productFiltered.filter((t) => {
+      const eid = (t as { eventId?: string }).eventId;
+      if (selectedEventFilter === 'event_hoi_an_heritage') {
+        return !eid || eid === 'event_hoi_an_heritage';
       }
-
-      if (isStripProduct || isSheetProduct) {
-        if (templateSlotCount !== requiredShots) return false;
-        if (targetProduct) return targetProduct === session.product?.id;
-        const isTemplateStrip = isStripTemplate(t);
-        return isStripProduct ? isTemplateStrip : !isTemplateStrip;
-      }
-
-      return templateSlotCount === requiredShots;
+      return eid === selectedEventFilter;
     });
-
-    // Apply Event filter if a specific event is selected
-    if (selectedEventFilter !== 'all') {
-      const eventFiltered = productFiltered.filter((t) => (t as { eventId?: string }).eventId === selectedEventFilter);
-      if (eventFiltered.length > 0) {
-        return eventFiltered;
-      }
-    }
-
-    if (productFiltered.length === 0) {
-      return allTemplates.filter(
-        (t) => (t.slots?.length || t.shotCount || t.layout?.slotCount) === requiredShots,
-      );
-    }
-
-    return productFiltered;
-  }, [allTemplates, isPremiumProduct, isStripProduct, isSheetProduct, requiredShots, session.product?.id, selectedEventFilter]);
+  }, [allTemplates, session.product, requiredShots, selectedEventFilter]);
 
   const [selectedFrameId, setSelectedFrameId] = useState<string>(() => {
     return session.selectedFrame?.id || validTemplates[0]?.id || '';
@@ -197,12 +216,15 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
   useEffect(() => {
     if (visibleTemplates.length > 0 && (!selectedFrameId || !visibleTemplates.some((t) => t.id === selectedFrameId))) {
       setSelectedFrameId(visibleTemplates[0].id);
+    } else if (visibleTemplates.length === 0) {
+      setSelectedFrameId('');
     }
   }, [visibleTemplates, selectedFrameId]);
 
   const selectedTemplate = useMemo(() => {
-    return visibleTemplates.find((t) => t.id === selectedFrameId) || visibleTemplates[0] || allTemplates[0];
-  }, [visibleTemplates, selectedFrameId, allTemplates]);
+    if (visibleTemplates.length === 0) return null;
+    return visibleTemplates.find((t) => t.id === selectedFrameId) || visibleTemplates[0] || null;
+  }, [visibleTemplates, selectedFrameId]);
 
   const isStripFormat = isStripProduct || (selectedTemplate ? isStripTemplate(selectedTemplate) : false);
   const layoutPolicy = useMemo(() => {
@@ -248,7 +270,11 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
           {selectedTemplate ? (
             <FramePreviewCard key={selectedTemplate.id} template={selectedTemplate} session={sessionForPreview} mode="default" className={`shadow-lg drop-shadow-sm ${isPremiumProduct ? 'scale-[1]' : 'scale-[1.04]'}`} />
           ) : (
-            <div className="text-center opacity-50 font-sans text-sm">Chưa chọn mẫu khung</div>
+            <div className="w-full max-w-sm h-72 flex flex-col items-center justify-center p-6 bg-[#F4F2EE] rounded-xl border border-dashed border-[#1A1A1A]/20 text-center">
+              <span className="text-3xl mb-2 opacity-40">🖼️</span>
+              <div className="text-center opacity-70 font-serif font-bold text-sm">Chưa có mẫu khung được chọn</div>
+              <p className="text-[11px] text-[#1A1A1A]/50 mt-1">Chọn sự kiện có mẫu khung phù hợp bên phải để xem trước</p>
+            </div>
           )}
         </div>
 
@@ -323,37 +349,47 @@ export const SelectFrameScreen: React.FC<SelectFrameScreenProps> = ({
             </div>
           )}
 
-          <div
-            className={`flex flex-wrap items-start justify-start gap-3.5 overflow-y-auto pt-3.5 pb-3 pl-[10px] pr-2 flex-1 ${
-              isPremiumProduct ? 'max-h-[50vh] xl:max-h-[60vh]' : 'max-h-[76vh] xl:max-h-[82vh]'
-            }`}
-          >
-            {visibleTemplates.map((frame) => {
-              const isSelected = selectedFrameId === frame.id;
-              const isLandscape = (frame.outputWidth || 1800) > (frame.outputHeight || 2700);
+          {visibleTemplates.length === 0 ? (
+            <div className="w-full py-14 px-6 flex flex-col items-center justify-center text-center bg-[#F4F2EE] rounded-xl border border-dashed border-[#1A1A1A]/20 my-auto flex-1">
+              <span className="text-4xl mb-3">🎪</span>
+              <h4 className="font-serif text-lg font-bold text-[#1A1A1A]">Chưa Có Mẫu Khung Phù Hợp</h4>
+              <p className="text-xs text-[#1A1A1A]/70 max-w-sm mt-1.5 leading-relaxed">
+                Sự kiện này chưa có mẫu khung thiết kế cho gói <strong>{session.product?.name || 'đang chọn'}</strong>. Vui lòng chọn sự kiện khác (ví dụ: Hội An Di Sản) hoặc chuyển sang <strong>✨ Tất Cả</strong>.
+              </p>
+            </div>
+          ) : (
+            <div
+              className={`flex flex-wrap items-start justify-start gap-3.5 overflow-y-auto pt-3.5 pb-3 pl-[10px] pr-2 flex-1 ${
+                isPremiumProduct ? 'max-h-[50vh] xl:max-h-[60vh]' : 'max-h-[76vh] xl:max-h-[82vh]'
+              }`}
+            >
+              {visibleTemplates.map((frame) => {
+                const isSelected = selectedFrameId === frame.id;
+                const isLandscape = (frame.outputWidth || 1800) > (frame.outputHeight || 2700);
 
-              return (
-                <motion.button
-                  type="button"
-                  key={frame.id}
-                  onClick={() => setSelectedFrameId(frame.id)}
-                  className="cursor-pointer flex items-center justify-start bg-transparent p-0.5 focus:outline-none flex-none"
-                >
-                  <div
-                    className={`relative flex items-center justify-center overflow-hidden rounded-xs transition-all border border-[#1A1A1A]/15 ${
-                      isStripFormat
-                        ? 'h-64 sm:h-72 xl:h-[68vh]'
-                        : isLandscape
-                        ? 'h-40 sm:h-48 xl:h-52'
-                        : 'h-52 sm:h-60 xl:h-64'
-                    } ${isSelected ? 'ring-3 ring-[#10b981] shadow-[0_10px_28px_rgba(16,185,129,0.35)] z-10 scale-[1.02]' : 'shadow-[0_6px_20px_rgba(0,0,0,0.16)] opacity-85 hover:opacity-100 hover:scale-[1.01] hover:shadow-[0_10px_25px_rgba(0,0,0,0.22)]'}`}
+                return (
+                  <motion.button
+                    type="button"
+                    key={frame.id}
+                    onClick={() => setSelectedFrameId(frame.id)}
+                    className="cursor-pointer flex items-center justify-start bg-transparent p-0.5 focus:outline-none flex-none"
                   >
-                    <FramePreviewCard template={frame} session={sessionForPreview} mode="thumbnail" className="h-full w-auto max-w-full max-h-full pointer-events-none object-contain" />
-                  </div>
-                </motion.button>
-              );
-            })}
-          </div>
+                    <div
+                      className={`relative flex items-center justify-center overflow-hidden rounded-xs transition-all border border-[#1A1A1A]/15 ${
+                        isStripFormat
+                          ? 'h-64 sm:h-72 xl:h-[68vh]'
+                          : isLandscape
+                          ? 'h-40 sm:h-48 xl:h-52'
+                          : 'h-52 sm:h-60 xl:h-64'
+                      } ${isSelected ? 'ring-3 ring-[#10b981] shadow-[0_10px_28px_rgba(16,185,129,0.35)] z-10 scale-[1.02]' : 'shadow-[0_6px_20px_rgba(0,0,0,0.16)] opacity-85 hover:opacity-100 hover:scale-[1.01] hover:shadow-[0_10px_25px_rgba(0,0,0,0.22)]'}`}
+                    >
+                      <FramePreviewCard template={frame} session={sessionForPreview} mode="thumbnail" className="h-full w-auto max-w-full max-h-full pointer-events-none object-contain" />
+                    </div>
+                  </motion.button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 

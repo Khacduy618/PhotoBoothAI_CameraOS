@@ -9,6 +9,15 @@ const { desktopMediaManager } = require('./media/desktop-media-manager.cjs');
 const { SessionMediaPaths } = require('./storage/session-media-paths.cjs');
 const { cloudSyncCoordinator } = require('./cloud/cloud-sync-coordinator.cjs');
 
+// ── Windows DPI Fix ────────────────────────────────────────────────────────────
+// Must be called BEFORE app.ready. Prevents Windows DPI virtualization from
+// causing Chromium to render at a scaled-down resolution and then stretching it,
+// which makes frames look squished and circles look like ellipses at 125%/150% DPI.
+// On Mac/Linux these flags are no-ops.
+app.commandLine.appendSwitch('force-device-scale-factor', '1');
+// ──────────────────────────────────────────────────────────────────────────────
+
+
 // 1. Single Instance Lock (Prevents duplicate instances colliding on USB devices)
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -119,8 +128,11 @@ function createWindow(mode = 'guest') {
 
   console.log(`[DISPLAY_AUDIT] DISPLAY_COUNT = ${displays.length}`);
   console.log(`[DISPLAY_AUDIT] PRIMARY_DISPLAY = ${JSON.stringify(primaryDisplay.bounds)}`);
+  console.log(`[DISPLAY_AUDIT] PRIMARY_SCALE_FACTOR = ${primaryDisplay.scaleFactor}`);
   console.log(`[DISPLAY_AUDIT] SECONDARY_DISPLAY = ${JSON.stringify(secondaryDisplay?.bounds || null)}`);
+  console.log(`[DISPLAY_AUDIT] SECONDARY_SCALE_FACTOR = ${secondaryDisplay?.scaleFactor || 'N/A'}`);
   console.log(`[DISPLAY_AUDIT] ELECTRON_DISPLAY = ${targetDisplay.id === primaryDisplay.id ? 'PRIMARY' : 'SECONDARY'}`);
+  console.log(`[DISPLAY_AUDIT] TARGET_SCALE_FACTOR = ${targetDisplay.scaleFactor}`);
   console.log(`[DISPLAY_AUDIT] ELECTRON_WINDOW_BOUNDS = ${JSON.stringify({ x, y, width, height })}`);
   console.log(`[DISPLAY_AUDIT] KIOSK_MODE_ENABLED = ${isKiosk ? 'YES' : 'NO'}`);
 
@@ -141,6 +153,9 @@ function createWindow(mode = 'guest') {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Prevent Chromium from applying an additional zoom factor that could
+      // distort aspect ratios and make circles appear as ellipses on Windows.
+      zoomFactor: 1.0,
     },
   });
 

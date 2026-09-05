@@ -144,7 +144,16 @@ function createWindow(mode = 'guest') {
     },
   });
 
-  // Hotkey Escape Hatch for Operators (Ctrl+Shift+A for Admin, Ctrl+Shift+Q for Quit, F11 for Fullscreen)
+  // Forward renderer console messages to Electron terminal for instant debugging
+  win.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    const levelNames = ['VERBOSE', 'INFO', 'WARNING', 'ERROR'];
+    const levelName = levelNames[level] || 'LOG';
+    if (level >= 2 || isDev) {
+      console.log(`[RENDERER_${levelName}] ${message} (${sourceId}:${line})`);
+    }
+  });
+
+  // Hotkey Escape Hatch for Operators (Ctrl+Shift+A for Admin, Ctrl+Shift+Q for Quit, F11 for Fullscreen, F12 for DevTools)
   win.webContents.on('before-input-event', (event, input) => {
     const isControlOrMeta = input.control || input.meta;
     const isShift = input.shift;
@@ -158,6 +167,9 @@ function createWindow(mode = 'guest') {
       event.preventDefault();
       console.log('[OPERATOR_ESCAPE] Emergency app quit triggered by operator hotkey.');
       app.quit();
+    } else if ((input.key === 'F12' || (isControlOrMeta && isShift && input.key.toLowerCase() === 'i')) && input.type === 'keyDown') {
+      event.preventDefault();
+      win.webContents.toggleDevTools();
     } else if (input.key === 'F11' && input.type === 'keyDown') {
       event.preventDefault();
       win.setFullScreen(!win.isFullScreen());

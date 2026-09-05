@@ -8,14 +8,16 @@ import { WindowMiniDesktopApp } from './App';
 // ── DPI Diagnostic (visible in DevTools Console) ─────────────────────────────
 // If force-device-scale-factor=1 is working: devicePixelRatio should be 1.
 // If it shows 1.25 or 1.5, Windows DPI virtualization is still active.
+const scrollbarW = window.innerWidth - document.documentElement.clientWidth;
+const scrollbarH = window.innerHeight - document.documentElement.clientHeight;
 console.log(
   `[DPI_AUDIT] devicePixelRatio=${window.devicePixelRatio}` +
   ` | screen=${window.screen.width}x${window.screen.height}` +
   ` | innerWindow=${window.innerWidth}x${window.innerHeight}` +
   ` | outerWindow=${window.outerWidth}x${window.outerHeight}` +
-  (window.devicePixelRatio !== 1
-    ? ' ⚠️ DPI SCALING ACTIVE — frames/circles may appear distorted'
-    : ' ✅ DPI OK'),
+  ` | scrollbarW=${scrollbarW}px scrollbarH=${scrollbarH}px` +
+  (scrollbarW > 0 ? ' ⚠️ SCROLLBAR STEALING WIDTH' : ' ✅ NO SCROLLBAR WIDTH') +
+  (window.devicePixelRatio !== 1 ? ' | ⚠️ DPI SCALING ACTIVE' : ' | ✅ DPI=1'),
 );
 // ─────────────────────────────────────────────────────────────────────────────
 

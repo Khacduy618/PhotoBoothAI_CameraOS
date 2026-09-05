@@ -8,6 +8,7 @@ export interface FramePreviewCardProps {
   session: SessionData;
   drawDataUrl?: string;
   className?: string;
+  style?: React.CSSProperties;
   mode?: 'default' | 'thumbnail';
   debugScale?: number;
 }
@@ -57,6 +58,7 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
   session,
   drawDataUrl,
   className = '',
+  style,
   mode = 'default',
 }) => {
   const isStripSession =
@@ -163,6 +165,7 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
         style={{
           aspectRatio: `${width} / ${height}`,
           backgroundColor: template.assets?.background && template.assets.background !== '#FDFCFB' ? template.assets.background : 'transparent',
+          ...style,
         }}
       >
         {overlayUrl ? (
@@ -219,6 +222,7 @@ export const FramePreviewCard: React.FC<FramePreviewCardProps> = ({
       style={{
         aspectRatio: `${width} / ${height}`,
         backgroundColor: template.assets?.background && template.assets.background !== '#FDFCFB' ? template.assets.background : '#ffffff',
+        ...style,
       }}
     >
       {/* 1. Composed Photo + Frame Canvas Output */}
